@@ -3,3 +3,8 @@ dist/
 coverage/
 .codeclaw/
 .DS_Store
+.venv/
+.venv-lsp/
+__pycache__/
+*.pyc
+tmp-phase1.txt
