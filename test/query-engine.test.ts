@@ -1,0 +1,779 @@
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { createQueryEngine } from "../src/agent/queryEngine";
+import type { EngineEvent } from "../src/agent/types";
+import type { ProviderStatus } from "../src/provider/types";
+
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  delete process.env.CODECLAW_ENABLE_REAL_LSP;
+  await Promise.all(tempDirs.map(async (dir) => rm(dir, { recursive: true, force: true })));
+  tempDirs.length = 0;
+});
+
+async function collect(stream: AsyncGenerator<EngineEvent>): Promise<EngineEvent[]> {
+  const events: EngineEvent[] = [];
+
+  for await (const event of stream) {
+    events.push(event);
+  }
+
+  return events;
+}
+
+describe("query engine", () => {
+  const provider: ProviderStatus = {
+    type: "openai",
+    displayName: "OpenAI",
+    kind: "cloud",
+    enabled: true,
+    requiresApiKey: true,
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4.1-mini",
+    timeoutMs: 30_000,
+    apiKey: "test-key",
+    apiKeyEnvVar: "OPENAI_API_KEY",
+    envVars: ["OPENAI_API_KEY"],
+    fileConfig: {},
+    configured: true,
+    available: true,
+    reason: "configured"
+  };
+  const fallbackProvider: ProviderStatus = {
+    ...provider,
+    type: "ollama",
+    displayName: "Ollama",
+    kind: "local",
+    requiresApiKey: false,
+    baseUrl: "http://127.0.0.1:11434",
+    model: "llama3.1",
+    apiKey: undefined,
+    apiKeyEnvVar: undefined
+  };
+
+  it("streams a help response and persists transcript state", async () => {
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd()
+    });
+
+    const events = await collect(engine.submitMessage("help"));
+    const phases = events.filter((event) => event.type === "phase").map((event) => event.phase);
+    const messages = engine.getMessages();
+
+    expect(phases).toEqual(["planning", "executing", "completed"]);
+    expect(messages).toHaveLength(3);
+    expect(messages.at(-1)?.role).toBe("assistant");
+    expect(messages.at(-1)?.text).toContain("Available commands");
+  });
+
+  it("halts cleanly when interrupted mid-stream", async () => {
+    const fetchImpl = async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Hello"}}]}\n'));
+            setTimeout(() => {
+              controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":" world"}}]}\n'));
+              controller.close();
+            }, 5);
+          }
+        })
+      );
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      fetchImpl: fetchImpl as typeof fetch
+    });
+
+    const stream = engine.submitMessage("describe the current agent loop status in detail");
+
+    await stream.next();
+    await stream.next();
+    await stream.next();
+    const firstDelta = await stream.next();
+
+    expect(firstDelta.value?.type).toBe("message-delta");
+
+    engine.interrupt();
+
+    const tail: EngineEvent[] = [];
+    for await (const event of stream) {
+      tail.push(event);
+    }
+
+    expect(tail.some((event) => event.type === "phase" && event.phase === "halted")).toBe(true);
+    expect(engine.getMessages().at(-1)?.text).toContain("[interrupted]");
+  });
+
+  it("handles local read tool commands before provider calls", async () => {
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd()
+    });
+
+    const events = await collect(engine.submitMessage("/read package.json"));
+    const lastMessage = engine.getMessages().at(-1);
+    const toolEvents = events.filter((event) => event.type === "tool-start" || event.type === "tool-end");
+
+    expect(events.some((event) => event.type === "phase" && event.phase === "completed")).toBe(true);
+    expect(toolEvents).toEqual([
+      {
+        type: "tool-start",
+        toolName: "read",
+        detail: "/read package.json"
+      },
+      {
+        type: "tool-end",
+        toolName: "read",
+        status: "completed"
+      }
+    ]);
+    expect(lastMessage?.text).toContain("\"name\": \"codeclaw\"");
+  });
+
+  it("handles local glob tool commands before provider calls", async () => {
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd()
+    });
+
+    const events = await collect(engine.submitMessage("/glob src/**/*.ts"));
+    const lastMessage = engine.getMessages().at(-1);
+    const toolEvents = events.filter((event) => event.type === "tool-start" || event.type === "tool-end");
+
+    expect(toolEvents).toEqual([
+      {
+        type: "tool-start",
+        toolName: "glob",
+        detail: "/glob src/**/*.ts"
+      },
+      {
+        type: "tool-end",
+        toolName: "glob",
+        status: "completed"
+      }
+    ]);
+    expect(lastMessage?.text).toContain("src/agent/queryEngine.ts");
+  });
+
+  it("handles local symbol tool commands before provider calls", async () => {
+    process.env.CODECLAW_ENABLE_REAL_LSP = "0";
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-query-"));
+    tempDirs.push(workspace);
+    await writeFile(
+      path.join(workspace, "sample.ts"),
+      "export function greetUser(name: string) {\n  return name;\n}\n",
+      "utf8"
+    );
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace
+    });
+
+    const events = await collect(engine.submitMessage("/definition greetUser"));
+    const lastMessage = engine.getMessages().at(-1);
+    const toolEvents = events.filter((event) => event.type === "tool-start" || event.type === "tool-end");
+
+    expect(toolEvents).toEqual([
+      {
+        type: "tool-start",
+        toolName: "definition",
+        detail: "/definition greetUser"
+      },
+      {
+        type: "tool-end",
+        toolName: "definition",
+        status: "completed"
+      }
+    ]);
+    expect(lastMessage?.text).toContain("LSPTool backend: fallback-regex-index");
+    expect(lastMessage?.text).toContain("greetUser");
+  });
+
+  it("keeps slash-command transcript out of provider messages", async () => {
+    const requests: Array<{ messages?: Array<{ role: string; content: string }> }> = [];
+    const fetchImpl = async (_input: string | URL | Request, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as { messages?: Array<{ role: string; content: string }> });
+
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"hello back"}}]}\n'));
+            controller.close();
+          }
+        })
+      );
+    };
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      fetchImpl: fetchImpl as typeof fetch
+    });
+
+    await collect(engine.submitMessage("/mode"));
+    await collect(engine.submitMessage("hi"));
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.messages).toEqual([
+      {
+        role: "user",
+        content: "hi"
+      }
+    ]);
+    expect(engine.getMessages().at(-1)?.text).toContain("hello back");
+  });
+
+  it("reports session status and allows model changes through slash commands", async () => {
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider,
+      permissionMode: "plan",
+      workspace: process.cwd()
+    });
+
+    await collect(engine.submitMessage("/status"));
+    expect(engine.getMessages().at(-1)?.text).toContain("provider: OpenAI");
+    expect(engine.getMessages().at(-1)?.text).toContain("mode: plan");
+
+    await collect(engine.submitMessage("/model gpt-4.1"));
+    expect(engine.getMessages().at(-1)?.text).toContain("model set to gpt-4.1");
+    expect(engine.getRuntimeState().modelLabel).toBe("gpt-4.1");
+  });
+
+  it("lists approval queue entries through /approvals", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-query-"));
+    tempDirs.push(workspace);
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace
+    });
+
+    await collect(engine.submitMessage("/write first.txt :: one"));
+    await collect(engine.submitMessage("/write second.txt :: two"));
+    await collect(engine.submitMessage("/approvals"));
+
+    expect(engine.getMessages().at(-1)?.text).toContain("pending approvals: 2");
+    expect(engine.getMessages().at(-1)?.text).toContain("first.txt");
+    expect(engine.getMessages().at(-1)?.text).toContain("second.txt");
+  });
+
+  it("tracks session file activity for /memory and /diff", async () => {
+    const engine = createQueryEngine({
+      currentProvider: null,
+      fallbackProvider: null,
+      permissionMode: "acceptEdits",
+      workspace: process.cwd()
+    });
+
+    await collect(engine.submitMessage("/glob src/**/*.ts"));
+    await collect(engine.submitMessage("/write tmp-phase1.txt :: hello phase1"));
+    await collect(engine.submitMessage("/memory"));
+    expect(engine.getMessages().at(-1)?.text).toContain("recent-reads:");
+    expect(engine.getMessages().at(-1)?.text).toContain("changed-files: tmp-phase1.txt");
+
+    await collect(engine.submitMessage("/diff"));
+    expect(engine.getMessages().at(-1)?.text).toContain("tracked edits: 1");
+    expect(engine.getMessages().at(-1)?.text).toContain("tmp-phase1.txt");
+  });
+
+  it("reports scaffold status through /skills, /hooks, and /init", async () => {
+    const engine = createQueryEngine({
+      currentProvider: null,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd()
+    });
+
+    await collect(engine.submitMessage("/skills"));
+    expect(engine.getMessages().at(-1)?.text).toContain("skills: none configured");
+
+    await collect(engine.submitMessage("/hooks"));
+    expect(engine.getMessages().at(-1)?.text).toContain("hooks: none configured");
+
+    await collect(engine.submitMessage("/init"));
+    expect(engine.getMessages().at(-1)?.text).toContain("Bootstrap checklist:");
+  });
+
+  it("does not confuse /approvals with /approve", async () => {
+    const engine = createQueryEngine({
+      currentProvider: null,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd()
+    });
+
+    await collect(engine.submitMessage("/approvals"));
+    expect(engine.getMessages().at(-1)?.text).toBe("No pending approvals.");
+  });
+
+  it("updates permission mode through /mode and applies the new policy", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-query-"));
+    tempDirs.push(workspace);
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace
+    });
+
+    await collect(engine.submitMessage("/mode auto"));
+    expect(engine.getMessages().at(-1)?.text).toContain("mode set to auto");
+    expect(engine.getRuntimeState().permissionMode).toBe("auto");
+
+    await collect(engine.submitMessage("/write tmp.txt :: hello"));
+    expect(engine.getMessages().at(-1)?.text).toContain("Wrote");
+    expect(engine.getPendingApproval()).toBeNull();
+  });
+
+  it("compacts older transcript entries into a summary message", async () => {
+    const engine = createQueryEngine({
+      currentProvider: null,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd()
+    });
+
+    await collect(engine.submitMessage("implement compact flow in src/agent/queryEngine.ts"));
+    await collect(engine.submitMessage("check PROGRESS_LOG.md and package.json for follow-up work"));
+    await collect(engine.submitMessage("note unfinished approval recovery improvements"));
+    await collect(engine.submitMessage("capture remaining TODOs in src/app/App.tsx"));
+    const beforeCompact = engine.getMessages().length;
+
+    await collect(engine.submitMessage("/compact"));
+
+    const messages = engine.getMessages();
+    const summaryMessage = messages.find((message) => message.text.startsWith("[compact summary #1]"));
+
+    expect(summaryMessage?.text).toContain("Goals:");
+    expect(summaryMessage?.text).toContain("Key files:");
+    expect(summaryMessage?.text).toContain("Open items:");
+    expect(summaryMessage?.text).toContain("src/agent/queryEngine.ts");
+    expect(summaryMessage?.text).toContain("PROGRESS_LOG.md");
+    expect(messages.length).toBeLessThan(beforeCompact + 2);
+  });
+
+  it("reports compact state after a manual compact", async () => {
+    const engine = createQueryEngine({
+      currentProvider: null,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd()
+    });
+
+    await collect(engine.submitMessage("first task around src/agent/queryEngine.ts"));
+    await collect(engine.submitMessage("second task around PROGRESS_LOG.md"));
+    await collect(engine.submitMessage("third task around package.json"));
+    await collect(engine.submitMessage("fourth task around src/app/App.tsx"));
+    await collect(engine.submitMessage("/compact"));
+    await collect(engine.submitMessage("/context"));
+
+    expect(engine.getMessages().at(-1)?.text).toContain("compact: active (#1");
+    expect(engine.getMessages().at(-1)?.text).toContain("compact-summary:");
+  });
+
+  it("auto-compacts proactively when the transcript crosses the configured threshold", async () => {
+    const engine = createQueryEngine({
+      currentProvider: null,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      autoCompactThreshold: 10
+    });
+
+    await collect(engine.submitMessage("first long context message for proactive compact testing"));
+    await collect(engine.submitMessage("second long context message for proactive compact testing"));
+    await collect(engine.submitMessage("third long context message for proactive compact testing"));
+    await collect(engine.submitMessage("fourth long context message for proactive compact testing"));
+    const events = await collect(engine.submitMessage("fifth long context message for proactive compact testing"));
+
+    expect(events.some((event) => event.type === "phase" && event.phase === "compacting")).toBe(true);
+    expect(engine.getMessages().some((message) => message.text.startsWith("[compact summary #1]"))).toBe(true);
+
+    await collect(engine.submitMessage("/context"));
+    expect(engine.getMessages().at(-1)?.text).toContain("auto-compacts: 1");
+    expect(engine.getMessages().at(-1)?.text).toContain("auto-compact-threshold: 10");
+  });
+
+  it("creates a pending approval for write tools in plan mode", async () => {
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd()
+    });
+
+    const events = await collect(engine.submitMessage("/write tmp.txt :: hello"));
+    const lastMessage = engine.getMessages().at(-1);
+    const approvalEvents = events.filter((event) => event.type === "approval-request");
+
+    expect(approvalEvents).toHaveLength(1);
+    expect(approvalEvents[0]).toMatchObject({
+      type: "approval-request",
+      toolName: "write",
+      detail: "tmp.txt",
+      reason: "permission mode plan requires approval for medium-risk write",
+      queuePosition: 1,
+      totalPending: 1
+    });
+    expect(lastMessage?.text).toContain("Run /approve or /deny");
+  });
+
+  it("executes a pending write after /approve", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-query-"));
+    tempDirs.push(workspace);
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace
+    });
+
+    await collect(engine.submitMessage("/write draft.txt :: hello world"));
+    const approvalEvents = await collect(engine.submitMessage("/approve"));
+
+    expect(approvalEvents.some((event) => event.type === "approval-cleared")).toBe(true);
+    expect(approvalEvents.some((event) => event.type === "tool-start" && event.toolName === "write")).toBe(true);
+    expect(approvalEvents.some((event) => event.type === "tool-end" && event.toolName === "write")).toBe(true);
+    expect(await readFile(path.join(workspace, "draft.txt"), "utf8")).toBe("hello world");
+  });
+
+  it("clears a pending write after /deny", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-query-"));
+    tempDirs.push(workspace);
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace
+    });
+
+    await collect(engine.submitMessage("/write draft.txt :: hello world"));
+    const denyEvents = await collect(engine.submitMessage("/deny"));
+    const next = await collect(engine.submitMessage("/approve"));
+
+    expect(denyEvents.some((event) => event.type === "approval-cleared")).toBe(true);
+    expect(denyEvents.some((event) => event.type === "message-complete" && event.text.includes("Denied pending write"))).toBe(true);
+    expect(next.some((event) => event.type === "message-complete" && event.text === "No pending approval.")).toBe(true);
+  });
+
+  it("recovers a pending approval from approvalsDir", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-query-"));
+    const approvalsDir = path.join(workspace, "approvals");
+    tempDirs.push(workspace);
+
+    const firstEngine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace,
+      approvalsDir
+    });
+
+    await collect(firstEngine.submitMessage("/write draft.txt :: hello world"));
+
+    const secondEngine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace,
+      approvalsDir
+    });
+
+    expect(secondEngine.getPendingApproval()).toEqual({
+      id: secondEngine.getPendingApproval()?.id,
+      toolName: "write",
+      detail: "draft.txt",
+      reason: "permission mode plan requires approval for medium-risk write",
+      queuePosition: 1,
+      totalPending: 1
+    });
+    expect(secondEngine.getMessages().at(-1)?.text).toContain("Recovered pending approval");
+  });
+
+  it("queues multiple pending approvals and processes them in order", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-query-"));
+    tempDirs.push(workspace);
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace
+    });
+
+    await collect(engine.submitMessage("/write first.txt :: one"));
+    await collect(engine.submitMessage("/write second.txt :: two"));
+
+    expect(engine.getPendingApproval()?.detail).toBe("first.txt");
+    expect(engine.getPendingApproval()?.totalPending).toBe(2);
+
+    await collect(engine.submitMessage("/approve"));
+    expect(await readFile(path.join(workspace, "first.txt"), "utf8")).toBe("one");
+    expect(engine.getPendingApproval()?.detail).toBe("second.txt");
+    expect(engine.getPendingApproval()?.totalPending).toBe(1);
+
+    await collect(engine.submitMessage("/approve"));
+    expect(await readFile(path.join(workspace, "second.txt"), "utf8")).toBe("two");
+    expect(engine.getPendingApproval()).toBeNull();
+  });
+
+  it("recovers multiple pending approvals across sessions", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-query-"));
+    const approvalsDir = path.join(workspace, "approvals");
+    tempDirs.push(workspace);
+
+    const firstEngine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace,
+      approvalsDir
+    });
+
+    await collect(firstEngine.submitMessage("/write first.txt :: one"));
+    await collect(firstEngine.submitMessage("/write second.txt :: two"));
+
+    const secondEngine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace,
+      approvalsDir
+    });
+
+    expect(secondEngine.getPendingApproval()?.detail).toBe("first.txt");
+    expect(secondEngine.getPendingApproval()?.totalPending).toBe(2);
+    expect(secondEngine.getMessages().at(-1)?.text).toContain("Recovered 2 pending approvals");
+
+    await collect(secondEngine.submitMessage("/approve"));
+
+    const thirdEngine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace,
+      approvalsDir
+    });
+
+    expect(thirdEngine.getPendingApproval()?.detail).toBe("second.txt");
+    expect(thirdEngine.getPendingApproval()?.totalPending).toBe(1);
+  });
+
+  it("approves a specific queued approval by id", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-query-"));
+    const approvalsDir = path.join(workspace, "approvals");
+    tempDirs.push(workspace);
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace,
+      approvalsDir
+    });
+
+    await collect(engine.submitMessage("/write first.txt :: one"));
+    await collect(engine.submitMessage("/write second.txt :: two"));
+    await collect(engine.submitMessage("/write third.txt :: three"));
+    const storedApprovals = JSON.parse(
+      await readFile(path.join(approvalsDir, "pending-approval.json"), "utf8")
+    ) as Array<{ id: string; detail: string }>;
+    const thirdApprovalId = storedApprovals.find((approval) => approval.detail === "third.txt")?.id;
+
+    expect(engine.getPendingApproval()?.detail).toBe("first.txt");
+    expect(thirdApprovalId).toBeTruthy();
+    const approveEvents = await collect(engine.submitMessage(`/approve ${thirdApprovalId}`));
+
+    expect(approveEvents.some((event) => event.type === "approval-cleared" && event.approvalId === thirdApprovalId)).toBe(true);
+    expect(await readFile(path.join(workspace, "third.txt"), "utf8")).toBe("three");
+    expect(engine.getPendingApproval()?.detail).toBe("first.txt");
+    expect(engine.getPendingApproval()?.id).not.toBe(thirdApprovalId);
+  });
+
+  it("reports a helpful error when approving an unknown approval id", async () => {
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd()
+    });
+
+    await collect(engine.submitMessage("/write tmp.txt :: hello"));
+    await collect(engine.submitMessage("/approve missing-approval-id"));
+
+    expect(engine.getMessages().at(-1)?.text).toContain("No pending approval with id missing-approval-id.");
+    expect(engine.getPendingApproval()?.detail).toBe("tmp.txt");
+  });
+
+  it("reactively compacts and retries when the provider reports context too long", async () => {
+    let callCount = 0;
+    const fetchImpl = async () => {
+      callCount += 1;
+
+      if (callCount <= 4) {
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"ok"}}]}\n'));
+              controller.close();
+            }
+          })
+        );
+      }
+
+      if (callCount === 5) {
+        return new Response("context too long", {
+          status: 413,
+          statusText: "Payload Too Large"
+        });
+      }
+
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"recovered after compact"}}]}\n'));
+            controller.close();
+          }
+        })
+      );
+    };
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      autoCompactThreshold: 999_999,
+      fetchImpl: fetchImpl as typeof fetch
+    });
+
+    await collect(engine.submitMessage("first message to grow transcript"));
+    await collect(engine.submitMessage("second message to grow transcript"));
+    await collect(engine.submitMessage("third message to grow transcript"));
+    await collect(engine.submitMessage("fourth message to grow transcript"));
+    const events = await collect(engine.submitMessage("fifth message should trigger reactive compact"));
+
+    expect(events.some((event) => event.type === "phase" && event.phase === "compacting")).toBe(true);
+    expect(engine.getMessages().at(-1)?.text).toContain("recovered after compact");
+
+    await collect(engine.submitMessage("/context"));
+    expect(engine.getMessages().at(-1)?.text).toContain("reactive-compacts: 1");
+  });
+
+  it("reports a clear message when the provider returns no text", async () => {
+    const fetchImpl = async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{}}]}\n'));
+            controller.close();
+          }
+        })
+      );
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      fetchImpl: fetchImpl as typeof fetch
+    });
+
+    await collect(engine.submitMessage("hi"));
+
+    expect(engine.getMessages().at(-1)?.text).toBe("Provider returned an empty response.");
+  });
+
+  it("falls back to the secondary provider when the primary fails before streaming", async () => {
+    const fetchImpl = async (input: string | URL | Request) => {
+      const url = String(input);
+
+      if (url.includes("api.openai.com")) {
+        throw new Error("primary unavailable");
+      }
+
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"message":{"content":"fallback ok"},"done":false}\n'));
+            controller.enqueue(new TextEncoder().encode('{"done":true}\n'));
+            controller.close();
+          }
+        })
+      );
+    };
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      fetchImpl: fetchImpl as typeof fetch
+    });
+
+    await collect(engine.submitMessage("say hello"));
+
+    expect(engine.getMessages().at(-1)?.text).toContain("fallback ok");
+  });
+
+  it("keeps partial primary output when streaming fails mid-response", async () => {
+    const fetchImpl = async (input: string | URL | Request) => {
+      const url = String(input);
+
+      if (url.includes("api.openai.com")) {
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"partial"}}]}\n'));
+              setTimeout(() => {
+                controller.error(new Error("socket closed"));
+              }, 0);
+            }
+          })
+        );
+      }
+
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"message":{"content":"should-not-run"},"done":false}\n'));
+            controller.close();
+          }
+        })
+      );
+    };
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      fetchImpl: fetchImpl as typeof fetch
+    });
+
+    await collect(engine.submitMessage("say hello"));
+
+    expect(engine.getMessages().at(-1)?.text).toContain("partial");
+    expect(engine.getMessages().at(-1)?.text).toContain("[stream interrupted:");
+    expect(engine.getMessages().at(-1)?.text).not.toContain("should-not-run");
+  });
+});
