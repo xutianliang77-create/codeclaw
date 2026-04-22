@@ -92,3 +92,19 @@ Regression areas covered:
 2. permission decisions and approval queue recovery
 3. setup/config/doctor loading paths
 4. ingress gateway and HTTP API handler behavior
+
+## Real LSP Runtime
+
+Phase 1.5 adds a real `multilspy` runtime for:
+
+1. `/symbol`
+2. `/definition`
+3. `/references`
+
+Standard setup:
+
+```bash
+npm run setup:lsp
+```
+
+See [LSP_SETUP.md](/Users/xutianliang/Downloads/codeclaw/docs/LSP_SETUP.md) for the full install flow.

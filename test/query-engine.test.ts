@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -297,7 +297,7 @@ describe("query engine", () => {
     expect(engine.getMessages().at(-1)?.text).toContain("tmp-phase1.txt");
   });
 
-  it("reports scaffold status through /skills, /hooks, and /init", async () => {
+  it("lists and activates built-in skills through /skills", async () => {
     const engine = createQueryEngine({
       currentProvider: null,
       fallbackProvider: null,
@@ -306,13 +306,326 @@ describe("query engine", () => {
     });
 
     await collect(engine.submitMessage("/skills"));
-    expect(engine.getMessages().at(-1)?.text).toContain("skills: none configured");
+    expect(engine.getMessages().at(-1)?.text).toContain("discovered-skills: 3");
+    expect(engine.getMessages().at(-1)?.text).toContain("- review (builtin)");
+    expect(engine.getMessages().at(-1)?.text).toContain("- explain (builtin)");
+    expect(engine.getMessages().at(-1)?.text).toContain("- patch (builtin)");
+
+    await collect(engine.submitMessage("/skills use review"));
+    expect(engine.getMessages().at(-1)?.text).toContain("Activated skill: review");
+
+    await collect(engine.submitMessage("/skills"));
+    expect(engine.getMessages().at(-1)?.text).toContain("active-skill: review");
 
     await collect(engine.submitMessage("/hooks"));
     expect(engine.getMessages().at(-1)?.text).toContain("hooks: none configured");
 
     await collect(engine.submitMessage("/init"));
     expect(engine.getMessages().at(-1)?.text).toContain("Bootstrap checklist:");
+  });
+
+  it("injects the active skill prompt into provider requests", async () => {
+    const requests: Array<{ messages?: Array<{ role: string; content: string }> }> = [];
+    const fetchImpl = async (_input: string | URL | Request, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as { messages?: Array<{ role: string; content: string }> });
+
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"review-ready"}}]}\n'));
+            controller.close();
+          }
+        })
+      );
+    };
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      fetchImpl: fetchImpl as typeof fetch
+    });
+
+    await collect(engine.submitMessage("/skills use review"));
+    await collect(engine.submitMessage("check this change"));
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.messages?.[0]?.content).toContain("[Skill: review]");
+    expect(requests[0]?.messages?.[0]?.content).toContain("Act in review mode.");
+    expect(requests[0]?.messages?.[0]?.content).toContain("check this change");
+  });
+
+  it("blocks disallowed write tools when the active skill is read-only", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-query-"));
+    tempDirs.push(workspace);
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "acceptEdits",
+      workspace
+    });
+
+    await collect(engine.submitMessage("/skills use review"));
+    await collect(engine.submitMessage("/write blocked.txt :: hello"));
+
+    expect(engine.getMessages().at(-1)?.text).toContain("Skill review blocks write");
+  });
+
+  it("blocks orchestration runs that need tools outside the active skill lane", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-query-"));
+    tempDirs.push(workspace);
+    await writeFile(
+      path.join(workspace, "package.json"),
+      JSON.stringify({ scripts: { typecheck: "node -e \"process.stdout.write('ok')\"" } }),
+      "utf8"
+    );
+    await writeFile(path.join(workspace, "existing.ts"), "export const ready = true;\n", "utf8");
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace
+    });
+
+    await collect(engine.submitMessage("/skills use review"));
+    await collect(engine.submitMessage("/orchestrate fix existing.ts"));
+
+    expect(engine.getMessages().at(-1)?.text).toContain("blocked-tools:");
+    expect(engine.getMessages().at(-1)?.text).toContain("replace");
+    expect(engine.getMessages().at(-1)?.text).toContain("bash");
+    expect(engine.getMessages().at(-1)?.text).toContain("skill: review");
+  });
+
+  it("supports phase 2 productivity commands", async () => {
+    process.env.CODECLAW_ENABLE_REAL_LSP = "0";
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-query-"));
+    tempDirs.push(workspace);
+    await writeFile(
+      path.join(workspace, "package.json"),
+      JSON.stringify({ scripts: { typecheck: "node -e \"process.stdout.write('ok')\"" } }),
+      "utf8"
+    );
+    await writeFile(path.join(workspace, "sample.ts"), "export function greetUser(name: string) {\n  return name;\n}\n", "utf8");
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace
+    });
+
+    await collect(engine.submitMessage("/summary"));
+    expect(engine.getMessages().at(-1)?.text).toContain("Summary");
+    expect(engine.getMessages().at(-1)?.text).toContain("Goals:");
+
+    await collect(engine.submitMessage("/debug-tool-call /write sample.ts :: hello"));
+    expect(engine.getMessages().at(-1)?.text).toContain("Debug Tool Call");
+    expect(engine.getMessages().at(-1)?.text).toContain("tool: write");
+    expect(engine.getMessages().at(-1)?.text).toContain("permission-behavior:");
+
+    await collect(engine.submitMessage("/export notes/session.md"));
+    expect(engine.getMessages().at(-1)?.text).toContain("Export complete.");
+    const exported = await readFile(path.join(workspace, "notes/session.md"), "utf8");
+    expect(exported).toContain("## ASSISTANT");
+
+    await collect(engine.submitMessage("/reload-plugins"));
+    expect(engine.getMessages().at(-1)?.text).toContain("Plugin reload complete.");
+    expect(engine.getMessages().at(-1)?.text).toContain("builtin-skills: 3");
+
+    await collect(engine.submitMessage("/review sample.ts greetUser"));
+    expect(engine.getMessages().at(-1)?.text).toContain("Review");
+    expect(engine.getMessages().at(-1)?.text).toContain("skill: review");
+    expect(engine.getMessages().at(-1)?.text).toContain("reflector-decision:");
+
+    await collect(engine.submitMessage("/doctor"));
+    expect(engine.getMessages().at(-1)?.text).toContain("CodeClaw 0.5.0");
+  });
+
+  it("supports the minimal MCP command loop and constrains MCP tool calls by mode", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-query-"));
+    tempDirs.push(workspace);
+    await writeFile(path.join(workspace, "package.json"), JSON.stringify({ name: "codeclaw" }), "utf8");
+    await writeFile(path.join(workspace, "sample.ts"), "export const greetUser = true;\n", "utf8");
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace
+    });
+
+    await collect(engine.submitMessage("/mcp"));
+    expect(engine.getMessages().at(-1)?.text).toContain("workspace-mcp");
+
+    await collect(engine.submitMessage("/mcp resources workspace-mcp"));
+    expect(engine.getMessages().at(-1)?.text).toContain("workspace://package-json");
+
+    await collect(engine.submitMessage("/mcp read workspace-mcp workspace://summary"));
+    expect(engine.getMessages().at(-1)?.text).toContain("Workspace Summary");
+
+    await collect(engine.submitMessage("/mcp call workspace-mcp search-files sample"));
+    expect(engine.getMessages().at(-1)?.text).toContain("MCP tool call requires approval");
+
+    await collect(engine.submitMessage("/mode auto"));
+    await collect(engine.submitMessage("/mcp call workspace-mcp search-files sample"));
+    expect(engine.getMessages().at(-1)?.text).toContain("MCP Tool");
+    expect(engine.getMessages().at(-1)?.text).toContain("- sample.ts");
+  });
+
+  it("builds an explicit plan through /plan", async () => {
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd()
+    });
+
+    await collect(engine.submitMessage("/plan fix src/agent/queryEngine.ts and validate"));
+
+    expect(engine.getMessages().at(-1)?.text).toContain("Planner");
+    expect(engine.getMessages().at(-1)?.text).toContain("intent: fix");
+    expect(engine.getMessages().at(-1)?.text).toContain("checks:");
+    expect(engine.getMessages().at(-1)?.text).toContain("write-lane:");
+    expect(engine.getMessages().at(-1)?.text).toContain("path-exists(src/agent/queryEngine.ts)");
+  });
+
+  it("runs one orchestration round through /orchestrate", async () => {
+    process.env.CODECLAW_ENABLE_REAL_LSP = "0";
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd()
+    });
+
+    await collect(engine.submitMessage("/orchestrate analyze src/agent/queryEngine.ts"));
+
+    expect(engine.getMessages().at(-1)?.text).toContain("Orchestration");
+    expect(engine.getMessages().at(-1)?.text).toContain("checks-run:");
+    expect(engine.getMessages().at(-1)?.text).toContain("actions-run:");
+    expect(engine.getMessages().at(-1)?.text).toContain("action-logs:");
+    expect(engine.getMessages().at(-1)?.text).toContain("approval-requests:");
+    expect(engine.getMessages().at(-1)?.text).toContain("reflector-decision: complete");
+    expect(engine.getMessages().at(-1)?.text).toContain("gaps: none");
+  });
+
+  it("escalates repeated orchestration gaps instead of self-claiming success", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-query-"));
+    tempDirs.push(workspace);
+    const engine = createQueryEngine({
+      currentProvider: null,
+      fallbackProvider: null,
+      permissionMode: "default",
+      workspace
+    });
+
+    await collect(engine.submitMessage("/orchestrate create src/new-feature.ts"));
+    expect(engine.getMessages().at(-1)?.text).toContain("reflector-decision: replan");
+
+    await collect(engine.submitMessage("/orchestrate create src/new-feature.ts"));
+    expect(engine.getMessages().at(-1)?.text).toContain("reflector-decision: escalated");
+    expect(engine.getMessages().at(-1)?.text).toContain("is-complete: no");
+  });
+
+  it("surfaces orchestration write approvals through /approvals and /approve", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-query-"));
+    tempDirs.push(workspace);
+    await writeFile(
+      path.join(workspace, "package.json"),
+      JSON.stringify({ scripts: { typecheck: "node -e \"process.stdout.write('ok')\"" } }),
+      "utf8"
+    );
+    await mkdir(path.join(workspace, "src"), { recursive: true });
+    await writeFile(path.join(workspace, "main.ts"), "export const ready = true;\n", "utf8");
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace
+    });
+
+    await collect(engine.submitMessage("/orchestrate create src/new-feature.ts"));
+    expect(engine.getMessages().at(-1)?.text).toContain("reflector-decision: approval-required");
+
+    await collect(engine.submitMessage("/approvals"));
+    expect(engine.getMessages().at(-1)?.text).toContain("orchestration:write");
+    expect(engine.getMessages().at(-1)?.text).toContain("src/new-feature.ts");
+
+    await collect(engine.submitMessage("/approve"));
+    expect(engine.getMessages().at(-1)?.text).toContain("Approved orchestration write: src/new-feature.ts");
+    expect(engine.getMessages().at(-1)?.text).toContain("tool-output:");
+    expect(engine.getMessages().at(-1)?.text).toContain("reflector-decision: replan");
+    const createdContent = await readFile(path.join(workspace, "src/new-feature.ts"), "utf8");
+    expect(createdContent).toContain("Generated scaffold for approved orchestration goal: create src/new-feature.ts");
+    expect(createdContent).toContain("export interface NewFeatureInput");
+    expect(createdContent).toContain("export function newFeature");
+  });
+
+  it("surfaces denied orchestration approvals", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-query-"));
+    tempDirs.push(workspace);
+    await writeFile(
+      path.join(workspace, "package.json"),
+      JSON.stringify({ scripts: { typecheck: "node -e \"process.stdout.write('ok')\"" } }),
+      "utf8"
+    );
+    await writeFile(path.join(workspace, "main.ts"), "export const ready = true;\n", "utf8");
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace
+    });
+
+    await collect(engine.submitMessage("/orchestrate fix src/app/App.tsx"));
+    await collect(engine.submitMessage("/deny"));
+
+    expect(engine.getMessages().at(-1)?.text).toContain("Denied orchestration replace: src/app/App.tsx");
+    expect(engine.getMessages().at(-1)?.text).toContain("reflector-decision: escalated");
+  });
+
+  it("executes approved orchestration replace actions against the target file", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-query-"));
+    tempDirs.push(workspace);
+    await writeFile(
+      path.join(workspace, "package.json"),
+      JSON.stringify({ scripts: { typecheck: "node -e \"process.stdout.write('ok')\"" } }),
+      "utf8"
+    );
+    await writeFile(
+      path.join(workspace, "existing.ts"),
+      [
+        "export function existingFeature() {",
+        '  return "ready";',
+        "}",
+        "",
+        "export const ready = true;",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace
+    });
+
+    await collect(engine.submitMessage("/orchestrate fix existing.ts"));
+    await collect(engine.submitMessage("/approve"));
+
+    const content = await readFile(path.join(workspace, "existing.ts"), "utf8");
+    expect(content).toContain("export function existingFeature()");
+    expect(content).toContain('const existingFeatureApprovedPatchMarker = "existingFeature-approved";');
+    expect(content).toContain("void existingFeatureApprovedPatchMarker;");
+    expect(content).toContain('return "ready";');
+    expect(content).not.toContain("export function applyExistingApprovedPatch()");
+    expect(content).toContain("export const ready = true;");
   });
 
   it("does not confuse /approvals with /approve", async () => {

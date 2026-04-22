@@ -88,6 +88,7 @@ export interface QueryEngine {
     permissionMode: PermissionMode;
     providerLabel: string;
     fallbackProviderLabel: string;
+    activeSkillName: string | null;
   };
   getReadFileState(): Record<string, never>;
 }

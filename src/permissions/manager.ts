@@ -26,6 +26,16 @@ export type ToolPermissionInput =
   | {
       tool: "bash";
       command: string;
+    }
+  | {
+      tool: "mcp-read";
+      server: string;
+      resource: string;
+    }
+  | {
+      tool: "mcp-call";
+      server: string;
+      toolName: string;
     };
 
 export interface PermissionDecision {
@@ -101,7 +111,8 @@ export class PermissionManager {
       input.tool === "glob" ||
       input.tool === "symbol" ||
       input.tool === "definition" ||
-      input.tool === "references"
+      input.tool === "references" ||
+      input.tool === "mcp-read"
         ? "low"
         : input.tool === "bash"
           ? classifyBashCommand(input.command)

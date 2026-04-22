@@ -1,9 +1,34 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { clearPendingApprovals, loadPendingApprovals, savePendingApprovals } from "../approvals/store";
 import type { StoredPendingApproval } from "../approvals/store";
+import { runDoctor } from "../commands/doctor";
 import type { PermissionMode } from "../lib/config";
+import { callMcpTool, listMcpResources, listMcpServers, listMcpTools, readMcpResource } from "../mcp/service";
+import {
+  buildApprovedExecutionPlan,
+  buildGapSignature,
+  buildOrchestrationPlan,
+  executeOrchestrationPlan,
+  reflectOnApprovalOutcome,
+  reflectOnExecution
+} from "../orchestration";
+import type {
+  CheckObservation,
+  CompletionCheck,
+  ExecutionResult,
+  GoalDefinition,
+  OrchestrationApprovalRequest,
+  OrchestrationContext,
+  OrchestrationPlan,
+  ReflectorResult
+} from "../orchestration";
+import type { ExecutionAction } from "../orchestration/types";
 import { PermissionManager } from "../permissions/manager";
 import { ProviderRequestError, streamProviderResponse } from "../provider/client";
 import type { ProviderStatus } from "../provider/types";
+import { createSkillRegistry } from "../skills/registry";
+import type { SkillDefinition } from "../skills/registry";
 import { detectLocalTool, inspectLocalTool, isHandledLocalToolResult, runLocalTool } from "../tools/local";
 import type { LocalToolName } from "../tools/local";
 import type {
@@ -21,7 +46,7 @@ function createId(prefix: string): string {
 
 function buildBuiltinReply(prompt: string): string | null {
   if (prompt === "help" || prompt === "/help") {
-    return "Available commands: help, doctor, setup, config, /status, /resume, /session, /providers, /context, /memory, /compact, /approvals, /diff, /skills, /hooks, /init, /model <name>, /mode <permission-mode>, /approve [id], /deny [id], /read <path>, /glob <pattern>, /symbol <name>, /definition <name>, /references <name>, /bash <command>, /write <path> :: <content>, /append <path> :: <content>, /replace <path> :: <find> :: <replace>, /exit.";
+    return "Available commands: help, doctor, setup, config, /status, /resume, /session, /providers, /context, /memory, /compact, /approvals, /diff, /skills, /skills use <name>, /skills clear, /hooks, /init, /doctor, /review <goal>, /summary, /export [path], /reload-plugins, /debug-tool-call <command>, /plan <goal>, /orchestrate <goal>, /model <name>, /mode <permission-mode>, /approve [id], /deny [id], /read <path>, /glob <pattern>, /symbol <name>, /definition <name>, /references <name>, /bash <command>, /write <path> :: <content>, /append <path> :: <content>, /replace <path> :: <find> :: <replace>, /exit.";
   }
 
   if (prompt === "doctor") {
@@ -92,6 +117,99 @@ function parseApprovalCommand(prompt: string, command: "/approve" | "/deny"): st
   return suffix || null;
 }
 
+function summarizeCheck(check: CompletionCheck): string {
+  switch (check.type) {
+    case "path-exists":
+      return `${check.type}(${check.path})`;
+    case "tool-available":
+      return `${check.type}(${check.toolName})`;
+    case "package-script-present":
+      return `${check.type}(${check.scriptName})`;
+    case "permission-mode":
+      return `${check.type}(${check.allowedModes.join(",")})`;
+    default:
+      return check.type;
+  }
+}
+
+function formatGoal(goal: GoalDefinition, index: number): string {
+  return [
+    `${index + 1}. ${goal.description}`,
+    `priority: ${goal.priority}  risk: ${goal.riskLevel}  checks: ${goal.completionChecks.map(summarizeCheck).join(" | ")}`,
+    `actions: ${goal.actions.length > 0 ? goal.actions.map((action) => action.type).join(" | ") : "none"}`
+  ].join("\n");
+}
+
+function formatObservation(observation: CheckObservation): string {
+  return `${observation.passed ? "pass" : "fail"} ${observation.checkId}: ${observation.detail}`;
+}
+
+function buildWriteLaneAssessment(plan: OrchestrationPlan, permissionMode: PermissionMode): string {
+  if (plan.intent.type !== "create" && plan.intent.type !== "fix" && plan.intent.type !== "task") {
+    return "write-lane: not needed for this orchestration round";
+  }
+
+  if (permissionMode === "default") {
+    return "write-lane: blocked in executor for now; future write actions must route through approval-first orchestration because current mode is default";
+  }
+
+  if (permissionMode === "plan") {
+    return "write-lane: evaluation complete; future write actions should enter approval-first orchestration instead of direct execution in plan mode";
+  }
+
+  return `write-lane: executor still read-only by design; future write actions may be enabled behind explicit approval and mode-aware safeguards (current mode: ${permissionMode})`;
+}
+
+function formatSkill(skill: SkillDefinition): string {
+  return `${skill.name} (${skill.source}) - ${skill.description} [tools: ${skill.allowedTools.join(", ")}]`;
+}
+
+function injectSkillPrompt(skill: SkillDefinition, prompt: string): string {
+  return [
+    `[Skill: ${skill.name}]`,
+    skill.prompt,
+    `Allowed tools: ${skill.allowedTools.join(", ")}.`,
+    "",
+    prompt
+  ].join("\n");
+}
+
+function buildTranscriptMarkdown(messages: EngineMessage[]): string {
+  return messages
+    .map((message) => `## ${message.role.toUpperCase()}\n\n${message.text}`)
+    .join("\n\n");
+}
+
+function actionToRequiredTool(action: ExecutionAction): LocalToolName {
+  switch (action.type) {
+    case "inspect-file":
+      return "read";
+    case "inspect-symbol":
+      return "definition";
+    case "inspect-references":
+      return "references";
+    case "inspect-pattern":
+      return "glob";
+    case "run-package-script":
+      return "bash";
+    case "request-write-approval":
+      return action.operation;
+  }
+
+  throw new Error(`Unsupported orchestration action: ${(action as ExecutionAction).type}`);
+}
+
+function resolveWorkspaceTarget(workspace: string, target: string): string {
+  const absolutePath = path.isAbsolute(target) ? path.resolve(target) : path.resolve(workspace, target);
+  const normalizedWorkspace = path.resolve(workspace);
+
+  if (absolutePath !== normalizedWorkspace && !absolutePath.startsWith(`${normalizedWorkspace}${path.sep}`)) {
+    throw new Error(`path is outside workspace: ${absolutePath}`);
+  }
+
+  return absolutePath;
+}
+
 type PendingApproval = {
   id: string;
   prompt: string;
@@ -102,9 +220,14 @@ type PendingApproval = {
   sessionId?: string;
 };
 
+type PendingOrchestrationApproval = OrchestrationApprovalRequest & {
+  planGoal: string;
+};
+
 class LocalQueryEngine implements QueryEngine {
   private readonly sessionId = createId("session");
   private readonly messages: EngineMessage[];
+  private readonly skillRegistry = createSkillRegistry();
   private interrupted = false;
   private abortController: AbortController | null = null;
   private modelLabel: string;
@@ -121,6 +244,9 @@ class LocalQueryEngine implements QueryEngine {
   private lastEstimatedTokens = 0;
   private readonly recentReadFiles = new Set<string>();
   private readonly changedFiles = new Set<string>();
+  private readonly recentGapSignatures: string[] = [];
+  private pendingOrchestrationApprovals: PendingOrchestrationApproval[] = [];
+  private activeSkill: SkillDefinition | null = null;
 
   constructor(private readonly options: QueryEngineOptions) {
     this.currentProvider = options.currentProvider;
@@ -189,6 +315,7 @@ class LocalQueryEngine implements QueryEngine {
     const approveTargetId = parseApprovalCommand(trimmed, "/approve");
     const denyTargetId = parseApprovalCommand(trimmed, "/deny");
     const builtinReply = this.resolveBuiltinReply(trimmed);
+    const commandReply = builtinReply === null ? await this.resolveCommandReply(trimmed) : undefined;
     const localToolName = builtinReply === null ? detectLocalTool(trimmed) : null;
 
     yield {
@@ -199,6 +326,13 @@ class LocalQueryEngine implements QueryEngine {
 
     if (builtinReply !== null) {
       output = builtinReply;
+      yield {
+        type: "message-delta",
+        messageId,
+        delta: output
+      };
+    } else if (commandReply !== undefined) {
+      output = commandReply;
       yield {
         type: "message-delta",
         messageId,
@@ -234,6 +368,32 @@ class LocalQueryEngine implements QueryEngine {
         type: "approval-cleared",
         approvalId: approval.id
       };
+      if (!this.isToolAllowedByActiveSkill(approval.toolName)) {
+        output = this.buildSkillToolBlockReply(approval.toolName);
+        yield {
+          type: "message-delta",
+          messageId,
+          delta: output
+        };
+        yield {
+          type: "tool-end",
+          toolName: approval.toolName,
+          status: "blocked"
+        };
+        yield {
+          type: "message-complete",
+          messageId,
+          text: output
+        };
+        this.messages.push({
+          id: messageId,
+          role: "assistant",
+          text: output,
+          source: "local"
+        });
+        yield { type: "phase", phase: "completed" };
+        return;
+      }
       yield {
         type: "tool-start",
         toolName: approval.toolName,
@@ -255,6 +415,67 @@ class LocalQueryEngine implements QueryEngine {
         toolName: localToolResult.toolName ?? approval.toolName,
         status: localToolResult.status ?? "completed"
       };
+    } else if (approveTargetId !== undefined && this.pendingOrchestrationApprovals.length > 0) {
+      const approval = this.takePendingOrchestrationApproval(approveTargetId);
+      if (!approval) {
+        output = approveTargetId
+          ? `No pending orchestration approval with id ${approveTargetId}.`
+          : "No pending orchestration approval.";
+        yield {
+          type: "message-delta",
+          messageId,
+          delta: output
+        };
+      } else {
+        const executionPlan = await buildApprovedExecutionPlan(approval, this.options.workspace);
+        if (!this.isToolAllowedByActiveSkill(executionPlan.toolName)) {
+          output = this.buildSkillToolBlockReply(executionPlan.toolName);
+          yield {
+            type: "message-delta",
+            messageId,
+            delta: output
+          };
+          yield {
+            type: "tool-end",
+            toolName: executionPlan.toolName,
+            status: "blocked"
+          };
+          yield {
+            type: "message-complete",
+            messageId,
+            text: output
+          };
+          this.messages.push({
+            id: messageId,
+            role: "assistant",
+            text: output,
+            source: "local"
+          });
+          yield { type: "phase", phase: "completed" };
+          return;
+        }
+        yield {
+          type: "tool-start",
+          toolName: executionPlan.toolName,
+          detail: executionPlan.prompt
+        };
+        const localToolResult = await runLocalTool(executionPlan.prompt, this.options.workspace);
+        if (!isHandledLocalToolResult(localToolResult)) {
+          throw new Error(`Tool handler missing for approved orchestration ${executionPlan.toolName}`);
+        }
+        output = this.buildOrchestrationApprovalDecisionReply(approval, "approved", localToolResult.output);
+        this.recordToolActivity(executionPlan.toolName, approval.target, localToolResult.output);
+        yield {
+          type: "message-delta",
+          messageId,
+          delta: output
+        };
+        yield {
+          type: "tool-end",
+          toolName: executionPlan.toolName,
+          status: localToolResult.status ?? "completed"
+        };
+      }
     } else if (denyTargetId !== undefined && this.pendingApprovals.length > 0) {
       const approval = this.takePendingApproval(denyTargetId);
       if (!approval) {
@@ -296,64 +517,21 @@ class LocalQueryEngine implements QueryEngine {
         toolName: approval.toolName,
         status: "blocked"
       };
+    } else if (denyTargetId !== undefined && this.pendingOrchestrationApprovals.length > 0) {
+      const approval = this.takePendingOrchestrationApproval(denyTargetId);
+      output = approval
+        ? this.buildOrchestrationApprovalDecisionReply(approval, "denied")
+        : denyTargetId
+          ? `No pending orchestration approval with id ${denyTargetId}.`
+          : "No pending orchestration approval.";
+      yield {
+        type: "message-delta",
+        messageId,
+        delta: output
+      };
     } else if (localToolName) {
-      const inspection = inspectLocalTool(trimmed, this.permissions);
-
-      if (inspection.decision?.behavior === "allow") {
-        yield {
-          type: "tool-start",
-          toolName: localToolName,
-          detail: trimmed
-        };
-        const localToolResult = await runLocalTool(trimmed, this.options.workspace);
-        if (!isHandledLocalToolResult(localToolResult)) {
-          throw new Error(`Tool handler missing for ${localToolName}`);
-        }
-        output = localToolResult.output;
-        this.recordToolActivity(localToolName, inspection.detail ?? "", output);
-        yield {
-          type: "message-delta",
-          messageId,
-          delta: output
-        };
-        yield {
-          type: "tool-end",
-          toolName: localToolResult.toolName ?? localToolName,
-          status: localToolResult.status ?? "completed"
-        };
-      } else if (inspection.decision?.behavior === "ask" && inspection.toolName) {
-        const pendingApproval: PendingApproval = {
-          id: createId("approval"),
-          prompt: trimmed,
-          toolName: inspection.toolName,
-          detail: inspection.detail ?? trimmed,
-          reason: inspection.decision.reason,
-          createdAt: new Date().toISOString(),
-          sessionId: this.sessionId
-        };
-        this.pendingApprovals.push(pendingApproval);
-        this.persistPendingApprovals();
-        const activeApproval = this.pendingApprovals[0] ?? pendingApproval;
-        output =
-          this.pendingApprovals.length === 1
-            ? `Approval required for ${inspection.toolName}: ${inspection.decision.reason}\nRun /approve or /deny.`
-            : `Approval queued for ${inspection.toolName}: ${inspection.decision.reason}\nPending approvals: ${this.pendingApprovals.length}. Next up: ${activeApproval.toolName} ${activeApproval.detail}.\nRun /approve or /deny to process the queue.`;
-        yield {
-          type: "approval-request",
-          approvalId: activeApproval.id,
-          toolName: activeApproval.toolName,
-          detail: activeApproval.detail,
-          reason: activeApproval.reason,
-          queuePosition: 1,
-          totalPending: this.pendingApprovals.length
-        };
-        yield {
-          type: "message-delta",
-          messageId,
-          delta: output
-        };
-      } else {
-        output = `${localToolName[0].toUpperCase()}${localToolName.slice(1)} blocked: ${inspection.decision?.reason ?? "permission denied"}`;
+      if (!this.isToolAllowedByActiveSkill(localToolName)) {
+        output = this.buildSkillToolBlockReply(localToolName);
         yield {
           type: "message-delta",
           messageId,
@@ -364,6 +542,75 @@ class LocalQueryEngine implements QueryEngine {
           toolName: localToolName,
           status: "blocked"
         };
+      } else {
+        const inspection = inspectLocalTool(trimmed, this.permissions);
+
+        if (inspection.decision?.behavior === "allow") {
+          yield {
+            type: "tool-start",
+            toolName: localToolName,
+            detail: trimmed
+          };
+          const localToolResult = await runLocalTool(trimmed, this.options.workspace);
+          if (!isHandledLocalToolResult(localToolResult)) {
+            throw new Error(`Tool handler missing for ${localToolName}`);
+          }
+          output = localToolResult.output;
+          this.recordToolActivity(localToolName, inspection.detail ?? "", output);
+          yield {
+            type: "message-delta",
+            messageId,
+            delta: output
+          };
+          yield {
+            type: "tool-end",
+            toolName: localToolResult.toolName ?? localToolName,
+            status: localToolResult.status ?? "completed"
+          };
+        } else if (inspection.decision?.behavior === "ask" && inspection.toolName) {
+          const pendingApproval: PendingApproval = {
+            id: createId("approval"),
+            prompt: trimmed,
+            toolName: inspection.toolName,
+            detail: inspection.detail ?? trimmed,
+            reason: inspection.decision.reason,
+            createdAt: new Date().toISOString(),
+            sessionId: this.sessionId
+          };
+          this.pendingApprovals.push(pendingApproval);
+          this.persistPendingApprovals();
+          const activeApproval = this.pendingApprovals[0] ?? pendingApproval;
+          output =
+            this.pendingApprovals.length === 1
+              ? `Approval required for ${inspection.toolName}: ${inspection.decision.reason}\nRun /approve or /deny.`
+              : `Approval queued for ${inspection.toolName}: ${inspection.decision.reason}\nPending approvals: ${this.pendingApprovals.length}. Next up: ${activeApproval.toolName} ${activeApproval.detail}.\nRun /approve or /deny to process the queue.`;
+          yield {
+            type: "approval-request",
+            approvalId: activeApproval.id,
+            toolName: activeApproval.toolName,
+            detail: activeApproval.detail,
+            reason: activeApproval.reason,
+            queuePosition: 1,
+            totalPending: this.pendingApprovals.length
+          };
+          yield {
+            type: "message-delta",
+            messageId,
+            delta: output
+          };
+        } else {
+          output = `${localToolName[0].toUpperCase()}${localToolName.slice(1)} blocked: ${inspection.decision?.reason ?? "permission denied"}`;
+          yield {
+            type: "message-delta",
+            messageId,
+            delta: output
+          };
+          yield {
+            type: "tool-end",
+            toolName: localToolName,
+            status: "blocked"
+          };
+        }
       }
     } else if (!this.options.currentProvider) {
       output = 'No available provider. Run `codeclaw setup` or `codeclaw config` to configure one.';
@@ -506,11 +753,15 @@ class LocalQueryEngine implements QueryEngine {
 
   private resolveBuiltinReply(prompt: string): string | null {
     if (parseApprovalCommand(prompt, "/approve") !== undefined) {
-      return this.pendingApprovals.length > 0 ? null : "No pending approval.";
+      return this.pendingApprovals.length > 0 || this.pendingOrchestrationApprovals.length > 0
+        ? null
+        : "No pending approval.";
     }
 
     if (parseApprovalCommand(prompt, "/deny") !== undefined) {
-      return this.pendingApprovals.length > 0 ? null : "No pending approval.";
+      return this.pendingApprovals.length > 0 || this.pendingOrchestrationApprovals.length > 0
+        ? null
+        : "No pending approval.";
     }
 
     if (matchesCommand(prompt, "/status")) {
@@ -546,7 +797,7 @@ class LocalQueryEngine implements QueryEngine {
     }
 
     if (matchesCommand(prompt, "/skills")) {
-      return this.buildSkillsReply();
+      return this.buildSkillsReply(prompt);
     }
 
     if (matchesCommand(prompt, "/hooks")) {
@@ -572,11 +823,131 @@ class LocalQueryEngine implements QueryEngine {
     return buildBuiltinReply(prompt);
   }
 
+  private async resolveCommandReply(prompt: string): Promise<string | undefined> {
+    if (matchesCommand(prompt, "/doctor")) {
+      return runDoctor();
+    }
+
+    if (matchesCommand(prompt, "/summary")) {
+      return this.buildSummaryReply();
+    }
+
+    if (matchesCommand(prompt, "/export")) {
+      return this.handleExportCommand(prompt);
+    }
+
+    if (matchesCommand(prompt, "/reload-plugins")) {
+      return this.buildReloadPluginsReply();
+    }
+
+    if (matchesCommand(prompt, "/debug-tool-call")) {
+      return this.buildDebugToolCallReply(prompt);
+    }
+
+    if (matchesCommand(prompt, "/mcp")) {
+      return this.handleMcpCommand(prompt);
+    }
+
+    if (matchesCommand(prompt, "/review")) {
+      const reviewGoal = prompt.replace("/review", "").trim();
+      if (!reviewGoal) {
+        return "Usage: /review <goal>";
+      }
+
+      const reviewSkill = this.skillRegistry.get("review");
+      const plan = buildOrchestrationPlan(`review ${reviewGoal}`, this.buildOrchestrationContext());
+      const disallowedSkillTools = this.getDisallowedSkillToolsForPlan(plan, reviewSkill);
+
+      if (disallowedSkillTools.length > 0) {
+        return [
+          "Review",
+          `goal: ${reviewGoal}`,
+          `skill: ${reviewSkill?.name ?? "review"}`,
+          `blocked-tools: ${disallowedSkillTools.join(", ")}`,
+          `reason: review lane only allows ${reviewSkill?.allowedTools.join(", ") ?? "read-only tools"}`
+        ].join("\n");
+      }
+
+      const execution = await executeOrchestrationPlan(plan, this.buildOrchestrationContext());
+      const reflector = reflectOnExecution(plan.goals, execution, this.recentGapSignatures);
+      const gapSignature = buildGapSignature(execution.gaps);
+
+      if (gapSignature) {
+        this.recentGapSignatures.push(gapSignature);
+        if (this.recentGapSignatures.length > 5) {
+          this.recentGapSignatures.shift();
+        }
+      }
+
+      this.pendingOrchestrationApprovals = execution.approvalRequests
+        .filter((request) => request.status === "pending")
+        .map((request) => ({
+          ...request,
+          planGoal: plan.userGoal
+        }));
+
+      return this.buildReviewReply(plan, execution, reflector);
+    }
+
+    if (matchesCommand(prompt, "/plan")) {
+      const userGoal = prompt.replace("/plan", "").trim();
+      if (!userGoal) {
+        return "Usage: /plan <goal>";
+      }
+
+      const plan = buildOrchestrationPlan(userGoal, this.buildOrchestrationContext());
+      return this.buildPlanReply(plan);
+    }
+
+    if (matchesCommand(prompt, "/orchestrate")) {
+      const userGoal = prompt.replace("/orchestrate", "").trim();
+      if (!userGoal) {
+        return "Usage: /orchestrate <goal>";
+      }
+
+      const plan = buildOrchestrationPlan(userGoal, this.buildOrchestrationContext());
+      const disallowedSkillTools = this.getDisallowedSkillToolsForPlan(plan);
+      if (disallowedSkillTools.length > 0) {
+        return [
+          "Orchestration",
+          `goal: ${plan.userGoal}`,
+          `intent: ${plan.intent.type}`,
+          `skill: ${this.activeSkill?.name ?? "none"}`,
+          `blocked-tools: ${disallowedSkillTools.join(", ")}`,
+          `reason: active skill only allows ${this.activeSkill?.allowedTools.join(", ") ?? "default tools"}`
+        ].join("\n");
+      }
+
+      const execution = await executeOrchestrationPlan(plan, this.buildOrchestrationContext());
+      const reflector = reflectOnExecution(plan.goals, execution, this.recentGapSignatures);
+      const gapSignature = buildGapSignature(execution.gaps);
+
+      if (gapSignature) {
+        this.recentGapSignatures.push(gapSignature);
+        if (this.recentGapSignatures.length > 5) {
+          this.recentGapSignatures.shift();
+        }
+      }
+
+      this.pendingOrchestrationApprovals = execution.approvalRequests
+        .filter((request) => request.status === "pending")
+        .map((request) => ({
+          ...request,
+          planGoal: plan.userGoal
+        }));
+
+      return this.buildOrchestrationReply(plan, execution, reflector);
+    }
+
+    return undefined;
+  }
+
   private buildStatusReply(): string {
     const activeApproval = this.pendingApprovals[0];
     const pending = activeApproval
       ? `${activeApproval.toolName} pending approval (${this.pendingApprovals.length} queued)`
       : "none";
+    const orchestrationPending = this.pendingOrchestrationApprovals[0];
 
     return [
       `session: ${this.sessionId}`,
@@ -585,10 +956,12 @@ class LocalQueryEngine implements QueryEngine {
       `model: ${this.modelLabel}`,
       `mode: ${this.permissionMode}`,
       `workspace: ${this.options.workspace}`,
+      `skill: ${this.activeSkill?.name ?? "none"}`,
       `messages: ${this.messages.length}`,
       `estimated-tokens: ${this.lastEstimatedTokens}`,
       `reactive-compacts: ${this.reactiveCompactCount}`,
-      `pending-approval: ${pending}`
+      `pending-approval: ${pending}`,
+      `pending-orchestration-approval: ${orchestrationPending ? `${orchestrationPending.operation} ${orchestrationPending.target} (${this.pendingOrchestrationApprovals.length} queued)` : "none"}`
     ].join("\n");
   }
 
@@ -621,6 +994,7 @@ class LocalQueryEngine implements QueryEngine {
     return [
       `session: ${this.sessionId}`,
       `messages: ${this.messages.length}`,
+      `active-skill: ${this.activeSkill?.name ?? "none"}`,
       `last-assistant-message: ${lastAssistantMessage?.text.slice(0, 120) ?? "none"}`
     ].join("\n");
   }
@@ -633,15 +1007,19 @@ class LocalQueryEngine implements QueryEngine {
   }
 
   private buildApprovalsReply(): string {
-    if (this.pendingApprovals.length === 0) {
+    if (this.pendingApprovals.length === 0 && this.pendingOrchestrationApprovals.length === 0) {
       return "No pending approvals.";
     }
 
     return [
-      `pending approvals: ${this.pendingApprovals.length}`,
+      `pending approvals: ${this.pendingApprovals.length + this.pendingOrchestrationApprovals.length}`,
       ...this.pendingApprovals.map(
         (approval, index) =>
           `${index + 1}. ${approval.id}  ${approval.toolName}  ${approval.detail}  ${approval.reason}`
+      ),
+      ...this.pendingOrchestrationApprovals.map(
+        (approval, index) =>
+          `${this.pendingApprovals.length + index + 1}. ${approval.id}  orchestration:${approval.operation}  ${approval.target}  ${approval.reason}`
       )
     ].join("\n");
   }
@@ -685,11 +1063,44 @@ class LocalQueryEngine implements QueryEngine {
     ].join("\n");
   }
 
-  private buildSkillsReply(): string {
-    return [
-      "skills: none configured inside the Phase 1 scaffold",
-      "Note: platform-level Codex skills may still be available outside the in-app agent loop."
-    ].join("\n");
+  private buildSkillsReply(prompt: string): string {
+    const suffix = prompt.slice("/skills".length).trim();
+
+    if (!suffix) {
+      const skills = this.skillRegistry.list();
+      return [
+        `active-skill: ${this.activeSkill?.name ?? "none"}`,
+        `discovered-skills: ${skills.length}`,
+        ...skills.map((skill) => `- ${formatSkill(skill)}`),
+        "Use `/skills use <name>` to activate a skill or `/skills clear` to return to the default flow."
+      ].join("\n");
+    }
+
+    if (suffix === "clear") {
+      this.activeSkill = null;
+      return "Cleared active skill. Returning to the default flow.";
+    }
+
+    if (suffix.startsWith("use ")) {
+      const requestedSkill = suffix.slice("use ".length).trim();
+      if (!requestedSkill) {
+        return "Usage: /skills use <name>";
+      }
+
+      const skill = this.skillRegistry.get(requestedSkill);
+      if (!skill) {
+        return `Unknown skill: ${requestedSkill}\nAvailable: ${this.skillRegistry.list().map((item) => item.name).join(", ")}`;
+      }
+
+      this.activeSkill = skill;
+      return [
+        `Activated skill: ${skill.name}`,
+        skill.description,
+        `allowed-tools: ${skill.allowedTools.join(", ")}`
+      ].join("\n");
+    }
+
+    return "Usage: /skills, /skills use <name>, /skills clear";
   }
 
   private buildHooksReply(): string {
@@ -707,7 +1118,279 @@ class LocalQueryEngine implements QueryEngine {
       "Bootstrap checklist:",
       "1. Run `codeclaw setup` to configure providers.",
       "2. Use `/mode auto` or `/mode acceptEdits` when you want non-blocking edits.",
-      "3. Start with `/read`, `/glob`, `/symbol`, `/definition`, `/references`, `/bash`, or a normal prompt."
+      "3. Start with `/read`, `/glob`, `/symbol`, `/definition`, `/references`, `/plan`, `/orchestrate`, `/bash`, or a normal prompt."
+    ].join("\n");
+  }
+
+  private buildSummaryReply(): string {
+    const compactCandidates = this.messages.slice(1);
+    const summary = compactCandidates.length > 0 ? this.buildCompactSummary(compactCandidates) : "No transcript to summarize yet.";
+
+    return [
+      "Summary",
+      `session: ${this.sessionId}`,
+      `skill: ${this.activeSkill?.name ?? "none"}`,
+      `messages: ${this.messages.length}`,
+      summary
+    ].join("\n");
+  }
+
+  private async handleExportCommand(prompt: string): Promise<string> {
+    const requestedPath = prompt.replace("/export", "").trim();
+    const target = requestedPath || `codeclaw-session-${this.sessionId}.md`;
+    const absoluteTarget = resolveWorkspaceTarget(this.options.workspace, target);
+    const content = buildTranscriptMarkdown(this.messages);
+    await mkdir(path.dirname(absoluteTarget), { recursive: true });
+    await writeFile(absoluteTarget, `${content}\n`, "utf8");
+
+    return [
+      "Export complete.",
+      `path: ${absoluteTarget}`,
+      `messages: ${this.messages.length}`
+    ].join("\n");
+  }
+
+  private buildReloadPluginsReply(): string {
+    const discoveredSkills = this.skillRegistry.list();
+    return [
+      "Plugin reload complete.",
+      "local-plugins: 0",
+      `builtin-skills: ${discoveredSkills.length}`,
+      `active-skill: ${this.activeSkill?.name ?? "none"}`
+    ].join("\n");
+  }
+
+  private buildDebugToolCallReply(prompt: string): string {
+    const command = prompt.replace("/debug-tool-call", "").trim();
+    if (!command) {
+      return "Usage: /debug-tool-call <command>";
+    }
+
+    const toolName = detectLocalTool(command);
+    if (!toolName) {
+      return `not-a-local-tool: ${command}`;
+    }
+
+    const inspection = inspectLocalTool(command, this.permissions);
+    const skillAllowed = this.isToolAllowedByActiveSkill(toolName);
+
+    return [
+      "Debug Tool Call",
+      `prompt: ${command}`,
+      `tool: ${toolName}`,
+      `detail: ${inspection.detail ?? "-"}`,
+      `permission-behavior: ${inspection.decision?.behavior ?? "unknown"}`,
+      `permission-reason: ${inspection.decision?.reason ?? "none"}`,
+      `active-skill: ${this.activeSkill?.name ?? "none"}`,
+      `skill-allows-tool: ${skillAllowed ? "yes" : "no"}`
+    ].join("\n");
+  }
+
+  private async handleMcpCommand(prompt: string): Promise<string> {
+    const suffix = prompt.slice("/mcp".length).trim();
+    if (!suffix) {
+      const servers = await listMcpServers(this.options.workspace);
+      return [
+        "MCP",
+        `servers: ${servers.length}`,
+        ...servers.map((server) => `- ${server.name} (${server.transport}, ${server.status}) tools=${server.toolCount} resources=${server.resourceCount}`),
+        "Commands: /mcp resources <server>, /mcp tools <server>, /mcp read <server> <resource>, /mcp call <server> <tool> <input>"
+      ].join("\n");
+    }
+
+    const [subcommand, ...rest] = suffix.split(/\s+/);
+    if (subcommand === "resources") {
+      const serverName = rest[0] ?? "workspace-mcp";
+      const resources = await listMcpResources(this.options.workspace, serverName);
+      return [
+        "MCP Resources",
+        `server: ${serverName}`,
+        ...resources.map((resource) => `- ${resource.uri} (${resource.name}) ${resource.description}`)
+      ].join("\n");
+    }
+
+    if (subcommand === "tools") {
+      const serverName = rest[0] ?? "workspace-mcp";
+      const tools = listMcpTools(serverName);
+      return [
+        "MCP Tools",
+        `server: ${serverName}`,
+        ...tools.map((tool) => `- ${tool.name} ${tool.description}`)
+      ].join("\n");
+    }
+
+    if (subcommand === "read") {
+      const serverName = rest[0];
+      const resource = rest[1];
+      if (!serverName || !resource) {
+        return "Usage: /mcp read <server> <resource>";
+      }
+
+      const decision = this.permissions.evaluate({
+        tool: "mcp-read",
+        server: serverName,
+        resource
+      });
+      if (decision.behavior === "deny") {
+        return `MCP read blocked: ${decision.reason}`;
+      }
+
+      const content = await readMcpResource(this.options.workspace, serverName, resource);
+      return [
+        "MCP Resource",
+        `server: ${serverName}`,
+        `resource: ${resource}`,
+        "",
+        content
+      ].join("\n");
+    }
+
+    if (subcommand === "call") {
+      const serverName = rest[0];
+      const toolName = rest[1];
+      const input = rest.slice(2).join(" ");
+      if (!serverName || !toolName) {
+        return "Usage: /mcp call <server> <tool> <input>";
+      }
+
+      const decision = this.permissions.evaluate({
+        tool: "mcp-call",
+        server: serverName,
+        toolName
+      });
+      if (decision.behavior !== "allow") {
+        return decision.behavior === "ask"
+          ? `MCP tool call requires approval in mode ${this.permissionMode}. Switch to /mode auto or /mode acceptEdits to execute.\nserver: ${serverName}\ntool: ${toolName}`
+          : `MCP tool call blocked: ${decision.reason}`;
+      }
+
+      const output = await callMcpTool(this.options.workspace, serverName, toolName, input);
+      return [
+        "MCP Tool",
+        `server: ${serverName}`,
+        `tool: ${toolName}`,
+        "",
+        output
+      ].join("\n");
+    }
+
+    return "Usage: /mcp, /mcp resources <server>, /mcp tools <server>, /mcp read <server> <resource>, /mcp call <server> <tool> <input>";
+  }
+
+  private isToolAllowedByActiveSkill(toolName: LocalToolName): boolean {
+    return this.activeSkill ? this.activeSkill.allowedTools.includes(toolName) : true;
+  }
+
+  private buildSkillToolBlockReply(toolName: LocalToolName): string {
+    if (!this.activeSkill) {
+      return `${toolName} blocked: permission denied`;
+    }
+
+    return `Skill ${this.activeSkill.name} blocks ${toolName}. Allowed tools: ${this.activeSkill.allowedTools.join(", ")}`;
+  }
+
+  private getDisallowedSkillToolsForPlan(plan: OrchestrationPlan, skillOverride?: SkillDefinition | null): LocalToolName[] {
+    const effectiveSkill = skillOverride ?? this.activeSkill;
+    if (!effectiveSkill) {
+      return [];
+    }
+
+    return unique(
+      plan.goals
+        .flatMap((goal) => goal.actions.map((action) => actionToRequiredTool(action)))
+        .filter((toolName) => !effectiveSkill.allowedTools.includes(toolName))
+    );
+  }
+
+  private buildOrchestrationContext(): OrchestrationContext {
+    return {
+      workspace: this.options.workspace,
+      currentProvider: this.currentProvider,
+      permissionMode: this.permissionMode
+    };
+  }
+
+  private buildPlanReply(plan: OrchestrationPlan): string {
+    return [
+      "Planner",
+      `goal: ${plan.userGoal}`,
+      `intent: ${plan.intent.type} (confidence ${plan.intent.confidence.toFixed(2)})`,
+      `strategy: ${plan.strategy.type} - ${plan.strategy.detail}`,
+      buildWriteLaneAssessment(plan, this.permissionMode),
+      `goals: ${plan.goals.length}`,
+      ...plan.goals.map(formatGoal)
+    ].join("\n");
+  }
+
+  private buildOrchestrationReply(
+    plan: OrchestrationPlan,
+    execution: ExecutionResult,
+    reflector: ReflectorResult
+  ): string {
+    return [
+      "Orchestration",
+      `goal: ${plan.userGoal}`,
+      `intent: ${plan.intent.type}`,
+      `strategy: ${plan.strategy.type}`,
+      `checks-run: ${execution.cost.checksRun}`,
+      `completed-goals: ${execution.completed.length}`,
+      `failed-goals: ${execution.failed.length}`,
+      `duration-ms: ${execution.duration}`,
+      buildWriteLaneAssessment(plan, this.permissionMode),
+      execution.observations.length > 0
+        ? `observations: ${execution.observations.map(formatObservation).join(" | ")}`
+        : "observations: none",
+      execution.gaps.length > 0
+        ? `gaps: ${execution.gaps.map((gap) => `${gap.goalId} ${gap.description}`).join(" | ")}`
+        : "gaps: none",
+      `actions-run: ${execution.actionLogs.length}`,
+      execution.actionLogs.length > 0 ? `action-logs: ${execution.actionLogs.join(" | ")}` : "action-logs: none",
+      `approval-requests: ${execution.approvalRequests.length > 0 ? execution.approvalRequests.map((request) => `${request.id} ${request.operation} ${request.target} (${request.status})`).join(" | ") : "none"}`,
+      `reflector-decision: ${reflector.decision}`,
+      `is-complete: ${reflector.isComplete ? "yes" : "no"}`,
+      reflector.newGoals.length > 0
+        ? `next-goals: ${reflector.newGoals.map((goal) => goal.description).join(" | ")}`
+        : "next-goals: none"
+    ].join("\n");
+  }
+
+  private buildReviewReply(
+    plan: OrchestrationPlan,
+    execution: ExecutionResult,
+    reflector: ReflectorResult
+  ): string {
+    return [
+      "Review",
+      `goal: ${plan.userGoal}`,
+      "skill: review",
+      `checks-run: ${execution.cost.checksRun}`,
+      `failed-goals: ${execution.failed.length}`,
+      execution.actionLogs.length > 0 ? `action-logs: ${execution.actionLogs.join(" | ")}` : "action-logs: none",
+      execution.gaps.length > 0
+        ? `findings: ${execution.gaps.map((gap) => `${gap.description} (${gap.rootCause})`).join(" | ")}`
+        : "findings: no explicit gaps detected",
+      `reflector-decision: ${reflector.decision}`
+    ].join("\n");
+  }
+
+  private buildOrchestrationApprovalDecisionReply(
+    approval: PendingOrchestrationApproval,
+    outcome: "approved" | "denied",
+    executionOutput?: string
+  ): string {
+    const reflector = reflectOnApprovalOutcome(approval, outcome);
+
+    return [
+      `${outcome === "approved" ? "Approved" : "Denied"} orchestration ${approval.operation}: ${approval.target}`,
+      `original-goal: ${approval.planGoal}`,
+      executionOutput ? `tool-output: ${clipLine(executionOutput, 200)}` : "tool-output: none",
+      `reflector-decision: ${reflector.decision}`,
+      reflector.gaps.length > 0
+        ? `gaps: ${reflector.gaps.map((gap) => `${gap.description} (${gap.rootCause})`).join(" | ")}`
+        : "gaps: none",
+      reflector.newGoals.length > 0
+        ? `next-goals: ${reflector.newGoals.map((goal) => goal.description).join(" | ")}`
+        : "next-goals: none"
     ].join("\n");
   }
 
@@ -901,6 +1584,24 @@ class LocalQueryEngine implements QueryEngine {
     return approval ?? null;
   }
 
+  private takePendingOrchestrationApproval(targetId: string | null): PendingOrchestrationApproval | null {
+    if (this.pendingOrchestrationApprovals.length === 0) {
+      return null;
+    }
+
+    if (!targetId) {
+      return this.pendingOrchestrationApprovals.shift() ?? null;
+    }
+
+    const approvalIndex = this.pendingOrchestrationApprovals.findIndex((approval) => approval.id === targetId);
+    if (approvalIndex < 0) {
+      return null;
+    }
+
+    const [approval] = this.pendingOrchestrationApprovals.splice(approvalIndex, 1);
+    return approval ?? null;
+  }
+
   private persistPendingApprovals(): void {
     if (this.pendingApprovals.length === 0) {
       clearPendingApprovals(this.options.approvalsDir);
@@ -931,7 +1632,7 @@ class LocalQueryEngine implements QueryEngine {
   }
 
   private getProviderMessages(): EngineMessage[] {
-    return this.messages.filter((message) => {
+    const providerMessages = this.messages.filter((message) => {
       if (message.role === "user") {
         return message.source === "user";
       }
@@ -942,6 +1643,24 @@ class LocalQueryEngine implements QueryEngine {
 
       return false;
     });
+
+    if (!this.activeSkill) {
+      return providerMessages;
+    }
+
+    const firstUserIndex = providerMessages.findIndex((message) => message.role === "user");
+    if (firstUserIndex < 0) {
+      return providerMessages;
+    }
+
+    return providerMessages.map((message, index) =>
+      index === firstUserIndex
+        ? {
+            ...message,
+            text: injectSkillPrompt(this.activeSkill as SkillDefinition, message.text)
+          }
+        : message
+    );
   }
 
   private buildProviderFailureMessage(error: Error): string {
@@ -977,12 +1696,14 @@ class LocalQueryEngine implements QueryEngine {
     permissionMode: PermissionMode;
     providerLabel: string;
     fallbackProviderLabel: string;
+    activeSkillName: string | null;
   } {
     return {
       modelLabel: this.modelLabel,
       permissionMode: this.permissionMode,
       providerLabel: this.currentProvider?.displayName ?? "not-configured",
-      fallbackProviderLabel: this.fallbackProvider?.displayName ?? "none"
+      fallbackProviderLabel: this.fallbackProvider?.displayName ?? "none",
+      activeSkillName: this.activeSkill?.name ?? null
     };
   }
 

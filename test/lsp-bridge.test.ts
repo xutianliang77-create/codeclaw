@@ -65,7 +65,7 @@ describe("real multilspy bridge", () => {
     expect(result.degraded).toBe(false);
     expect(result.items).toHaveLength(3);
     expect(result.items.filter((item) => item.relation === "reference" && item.line === 4)).toHaveLength(2);
-  });
+  }, 15_000);
 
   it.runIf(canRunRealBridge)("prefers the anchor language in a mixed-language workspace", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-bridge-"));
@@ -89,5 +89,5 @@ describe("real multilspy bridge", () => {
 
     expect(result.degraded).toBe(false);
     expect(result.items[0]?.file).toBe("sample.ts");
-  });
+  }, 15_000);
 });

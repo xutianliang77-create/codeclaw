@@ -1,22 +1,23 @@
 ## 📌 SESSION HANDOFF STATUS
-### Current Work: v0.5 已进入 Phase 1.5.2 的结果质量增强阶段：真实 `multilspy` backend 已默认优先接入 CLI 主流程，`/glob` 的旧回归也已修复；同时 `/definition` 已修正为真正的 definition 查询，`references` 覆盖率、去重/排序和多语言 backend 选择也完成了一轮增强
+### Current Work: v0.5 已从 Phase 1.5 的 LSP 主线继续推进到下一阶段能力探索，最小 `Planner / Executor / Reflector` 主线已接入 QueryEngine；当前支持显式 `/plan <goal>` 与 `/orchestrate <goal>`，并已从“纯检查型 orchestration”推进到“受控执行多种读类动作 + orchestration 级写入审批 + approved 后更稳导出区块锚点 scaffold/patch 执行”的最小执行型主线
 ### Background Tasks: 无常驻后台进程
 ### Next Session Priorities:
-1. 继续排查 TUI + IME 兼容；在此之前建议优先使用 `--plain`
-2. 继续优化真实 LSP backend 的结果质量，尤其是更复杂项目下的 references 覆盖率、更多语言的真实 backend 选择，以及 TS/JS 的 symbol/documentSymbol 排序
-3. 根据需要继续推进下一阶段功能，而不是再卡在基础设施收尾上
-3. 修复 `test/query-engine.test.ts` 里现有的 `/glob src/**/*.ts` 回归；这次在完整回归时暴露出来，但与 multilspy 安装无关
-3. 继续扩展语言规则和排序策略，尤其是 Java/C#/C-family 的误报控制
-4. 在 T2.5 基础上补更细粒度中断/会话管理和更完整的 API 文档样例
+1. 继续扩展 Executor 的受控动作集合，优先评估是否接入受限 `bash` 验证命令，以及更细粒度的 package-script allowlist
+2. 继续做更精确的函数级 patch，让目标函数命中不只依赖文件名/目标词，而是更明确利用 goal 里的符号线索
+3. 在当前块级锚点基础上继续减少整文件重写范围，探索更少靠字符串替换的结构化 edit 策略
+4. 继续完善 Reflector：加入更明确的 gap 分类、失败记忆和升级策略，而不是只做单轮 replan/escalate
+5. 评估是否引入独立的 orchestration transcript/state，避免未来 Planner/Executor/Reflector 扩展时与普通聊天 transcript 过度耦合
 ### Resume Checklist:
 1. `cd /Users/xutianliang/Downloads/codeclaw`
 2. `npm install`
-3. `npm run lint`
-4. `npm run typecheck`
-5. `npm run test`
-6. `bun run build`
-7. `npm run dev`
-8. 在 REPL 中输入 `help`
+3. `npm run setup:lsp`
+4. `npm run lint`
+5. `npm run typecheck`
+6. `npm run test`
+7. `bun run build`
+8. `node dist/cli.js --plain`
+9. 在 REPL 中输入 `/plan fix src/agent/queryEngine.ts`
+10. 在 REPL 中输入 `/orchestrate analyze src/agent/queryEngine.ts`
 
 ### Completed This Session
 1. 创建最小工程脚手架：`package.json`、`tsconfig.json`、`eslint.config.js`、`scripts/build.mjs`
@@ -153,6 +154,110 @@
 132. 新增真实桥接回归测试 `test/lsp-bridge.test.ts`
 133. 验证“同一行多个 references 不会丢失”
 134. 验证“混合语言工作区里会优先选择锚点语言对应的真实 backend”
+135. 将真实 LSP 运行时纳入标准安装流程：新增 `requirements-lsp.txt`
+136. 新增 `scripts/setup-lsp.sh`，统一创建 `.venv-lsp`、安装 `multilspy`、安装 `typescript-language-server` / `typescript`
+137. 在 `package.json` 中新增 `npm run setup:lsp`
+138. 新增 `docs/LSP_SETUP.md`，说明真实 LSP 的安装与运行策略
+139. 新增 `src/orchestration/types.ts`，引入最小编排域模型：`Intent / GoalDefinition / CompletionCheck / ExecutionResult / ReflectorResult`
+140. 新增 `src/orchestration/intentParser.ts`、`goalPlanner.ts`、`executor.ts`、`reflector.ts` 和 `index.ts`，形成最小 `Planner / Executor / Reflector` 骨架
+141. Planner 现在会为每个 goal 生成显式 completion checks，覆盖 `path-exists / workspace-has-source-files / provider-available / tool-available / package-script-present / permission-mode`
+142. Executor 现在会基于工作区、provider、权限模式和 package scripts 执行这些检查，并产出结构化 observations 与 gaps
+143. Reflector 现在只基于检查结果决定 `complete / replan / escalated`，并修复了“重复失败识别被随机 goalId/checkId 干扰”的根因
+144. 在 `src/agent/queryEngine.ts` 中接入显式 `/plan <goal>` 与 `/orchestrate <goal>` 命令，不影响普通聊天和现有工具流
+145. `/orchestrate` 当前会跑一轮 `planner -> executor -> reflector`，并在 QueryEngine 内维护最近 gap signatures，用于识别重复失败并升级
+146. 新增 `test/orchestration.test.ts`，覆盖“显式 completion checks”“基于检查失败的 replan”“重复 gap 的 escalated”
+147. 扩展 `test/query-engine.test.ts`，覆盖 `/plan`、`/orchestrate` 和重复 gap 升级的主流程
+148. 全量校验重新通过：`lint / typecheck / test / build` 全绿，当前共 12 个测试文件、73 个测试
+149. 将 `GoalDefinition` 从“只有 completion checks”扩展为“completion checks + execution actions”
+150. 新增最小受控动作模型：`inspect-file`、`inspect-symbol`、`inspect-pattern`、`run-package-script(typecheck)`
+151. Planner 现在会根据目标自动生成少量安全动作：文件目标会触发 `inspect-file`，函数/符号目标会触发 `inspect-symbol`，分析类缺少显式目标时会用 `inspect-pattern`
+152. Validation goal 现在在 `create/fix` 场景下不只检查 `typecheck` 脚本存在，还会实际执行 allowlisted `typecheck`
+153. Executor 现在在 checks 全部通过后，会顺序执行这些安全动作，并把结果写入 `actionLogs` 与结构化 observations
+154. QueryEngine 的 `/plan` 输出现在会显示每个 goal 的 `actions`
+155. QueryEngine 的 `/orchestrate` 输出现在会显示 `actions-run` 与 `action-logs`
+156. 新增 orchestration 动作级测试，验证文件检查、符号检查和 `typecheck` 脚本执行都会真实发生
+157. 全量校验再次通过：当前共 12 个测试文件、74 个测试
+158. 将读类 orchestration 动作继续扩展：新增 `inspect-references`
+159. Planner 现在在识别到函数/符号目标时，会同时生成 `inspect-symbol` 与 `inspect-references`
+160. Planner 现在在识别到显式文件目标时，还会补一层目录级 `inspect-pattern`，用于查看相邻源码文件
+161. Executor 已支持真实执行 `/references`，并把引用检查写入 observations 与 action-logs
+162. `/plan` 与 `/orchestrate` 输出现在会显式展示 `write-lane` 评估，说明为什么当前 executor 仍保持 read-only，不直接接写工具
+163. 新增测试覆盖：`inspect-references` 会真实执行；`/plan` 和 `/orchestrate` 会展示 `write-lane` / `action-logs`
+164. 全量校验保持通过：当前仍为 12 个测试文件、74 个测试
+165. 新增 orchestration 动作 `request-write-approval`，用于把潜在写操作显式建模进执行计划
+166. `create / fix / task` 且带目标文件时，Planner 现在会生成写入审批动作，而不是静默假设后续可直接写文件
+167. Executor 现在会把这类动作转成结构化 `approvalRequests`，状态初始为 `pending`，并写入 `actionLogs`
+168. Reflector 现在会优先识别 `pending approval`，并返回新决策 `approval-required`
+169. 新增 `reflectOnApprovalOutcome()`，可对 orchestration 审批的 `approved / denied / timed_out` 给出明确反思结果
+170. QueryEngine 现在维护独立的 orchestration pending approval 队列，不和现有本地工具 pending approval 队列混用
+171. `/approvals` 现在会同时列出本地工具审批和 orchestration 审批
+172. `/approve`、`/deny` 在本地工具审批队列为空时，会继续处理 orchestration 审批
+173. orchestration 审批被 `approved` 后，会返回 `reflector-decision: replan` 和 follow-up goals；被 `denied` 后，会返回 `reflector-decision: escalated`
+174. 新增测试覆盖：`approval-required` 决策、`/approvals` 中的 orchestration 条目、以及 orchestration `/approve` `/deny` 路径
+175. 全量校验再次通过：当前共 12 个测试文件、78 个测试
+176. 新增 `src/orchestration/approvalExecution.ts`，专门负责把已批准的 orchestration approval 物化成真正的本地工具执行计划
+177. 当前已批准的 orchestration `write` 会被物化成真实 `/write`，`replace` 会在读取目标文件后物化成真实 `/replace`
+178. 为了保持“非自动生成内容”的边界，approved 后写入的内容目前是 deterministic placeholder，而不是模型生成的实现代码
+179. `QueryEngine` 在处理已批准的 orchestration approval 时，现在会真正触发本地 `write/replace` 工具、产出 `tool-start/tool-end`，并把结果写回 transcript
+180. orchestration 审批批准回复现在会带 `tool-output`
+181. 新增测试覆盖：`buildApprovedExecutionPlan()` 会正确生成 `write/replace` 命令；`/approve` 后会真实创建文件或修改目标文件
+182. 全量校验再次通过：当前共 12 个测试文件、80 个测试
+183. 将 approved 后的 `write` 语义从“通用 placeholder 文本”升级为“语言感知 scaffold”
+184. 目前 `.ts/.js` 会生成带导出函数和输入接口的确定性 scaffold，`.tsx/.jsx` 会生成组件 scaffold，`.py` 会生成确定性函数 scaffold，`.md` 会生成结构化文档 scaffold
+185. 将 approved 后的 `replace` 语义从“仅在首行前塞 placeholder”升级为“保留原锚点 + 注入确定性 patch snippet”
+186. 目前 `.ts/.js` 会插入 `apply<PascalCase>NameApprovedPatch` 一类确定性 patch 导出，其他语言也会按扩展名生成更接近实际代码结构的 patch
+187. 更新测试覆盖：approved 后创建的新文件现在断言真实 scaffold 结构；approved 的 replace 现在断言真实 patch 导出而不是 placeholder 注释
+188. 全量校验保持通过：当前仍为 12 个测试文件、80 个测试
+189. 进一步收紧 replace 锚点：approved 后的 replace 不再只盯单行，而是优先定位“最后一个函数/类代码块”，找不到时才回退到最后一个声明块或最后非空行
+190. 当前 `.ts/.tsx/.js/.jsx/.mjs/.cjs` 会优先选最后一个顶层函数/类块作为 patch 锚点，`.py` 会优先选最后一个顶层 `def/class` 块
+191. 这让 approved 后的 patch 更接近“函数级 patch”，也降低了把 patch 插到普通常量行后的风险
+192. 更新测试覆盖：`buildApprovedExecutionPlan()` 现在断言多行函数块级 replace 锚点；`query-engine` 的 approved replace 用例也改成真实函数块场景
+193. 为避免环境波动导致误报，`query-engine` 的 `/orchestrate` 回归在该场景下显式关闭真实 LSP；`lsp-bridge` 的真实桥接测试超时上调到 15 秒
+194. 全量校验保持通过：当前仍为 12 个测试文件、80 个测试
+195. 将 approved 后的 replace 物化策略从“运行时 `/replace` 替换块文本”改成“先在内存里按锚点块生成完整新文件，再用 `/write` 落盘”
+196. 这让 approved 后的 edit 更少依赖脆弱的字符串 replace，也为后续更结构化的 edit 策略留出了更干净的扩展点
+197. 新增更稳的导出区块锚点选择策略：会综合 `planGoal` 中的符号线索、文件 stem 派生名、是否导出、是否 `export default` 来选择更合适的插入块
+198. 当前在 TS/JS/Python 文件里，如果有更匹配的命名函数/类块，会优先围绕该块插入 patch；若存在 `export default`，也会尽量避免把 patch 粗暴贴在 default 导出后面
+199. 更新测试覆盖：approved replace 现在断言 `buildApprovedExecutionPlan()` 生成的是 `/write` 全文件改写计划，而不是 `/replace`
+200. 全量校验保持通过：当前仍为 12 个测试文件、80 个测试
+201. 继续把 approved replace 推进到更精确的函数级 patch：当 `planGoal` / 文件 stem 与目标函数名命中时，优先在函数体内部插入确定性 no-op patch，而不是继续在函数块后面追加导出 helper
+202. 当前 `.ts/.tsx/.js/.jsx/.mjs/.cjs` 会优先把 patch 插到目标函数体内，且尽量落在首个 `return/throw/yield` 之前；`.py` 会优先把 patch 插到目标 `def` 内、落在 `return/raise/yield` 之前
+203. 这让 approved edit 更接近“函数级 patch”，同时继续保留原函数签名和主体结构，减少对脆弱字符串 replace 的依赖
+204. 修正函数命中条件：不再只认和 `planGoal` 完全同名的符号，当前会接受文件 stem / goal 符号与函数名的部分匹配，例如 `fix existing.ts` 能命中 `existingFeature()`，`fix worker.py` 能命中 `existing_worker()`
+205. 更新测试覆盖：TS replace 现在断言 patch marker 被插入目标函数体内；新增 Python replace 回归，断言确定性 marker 会在 `return` 前落入目标函数内部；全量校验再次通过，当前共 12 个测试文件、81 个测试
+206. 继续把 approved replace 从“手工拼整文件数组”推进到更明确的结构化 edit 策略：新增 `LineEditPlan`，当前 replace 会先生成 line-edit 计划，再统一应用到源文件行集
+207. 当前函数级 patch 和非函数 fallback 都走同一套 line-edit 应用链：命中目标函数时生成“函数体内插入”计划；命不中时生成“锚点块后追加 deterministic patch”计划
+208. 这让底层 edit 语义更清晰，也减少了后续扩展更多 edit 类型时继续回到字符串拼接逻辑的风险
+209. 新增回归测试：当目标文件没有可命中的函数时，approved replace 仍会在最佳非函数锚点后追加 deterministic patch，保证 fallback 路径不回退
+210. 全量校验再次通过：当前共 12 个测试文件、82 个测试
+211. 开始补齐 `Phase 2` 扩展入口层，优先落地 `T2.8 Skill System`：新增 `src/skills/registry.ts`，提供 3 个内建 skill（`review` / `explain` / `patch`）及对应 `allowedTools`
+212. `/skills` 不再是占位文案：当前支持列出已发现 skill、`/skills use <name>` 激活 skill、`/skills clear` 清空 skill，会话内可见当前 active skill
+213. skill prompt injection 已接入 provider 主流程：当 active skill 存在时，首条发给模型的 user message 会自动注入 skill 名称、约束和工作流提示
+214. allowedTools 约束已接入主流程：active skill 会拦截不允许的本地工具调用，也会阻断需要超出技能工具集的 `/orchestrate` 执行；这让 skill 不只是提示词，而是真正影响执行边界
+215. 新增回归测试：覆盖 skill 列表/激活、provider prompt 注入、读型 skill 对 `/write` 的拦截，以及 read-only skill 对写型 orchestration 的阻断；全量校验再次通过，当前共 12 个测试文件、85 个测试
+216. 开始补齐 `T2.7 Remaining Commands`：`/doctor`、`/review`、`/summary`、`/export`、`/reload-plugins`、`/debug-tool-call` 已全部接入 `QueryEngine`
+217. 新命令都复用了现有核心模块：`/doctor` 复用 `runDoctor()`，`/review` 复用 Planner/Executor/Reflector 编排链，`/summary` 复用 transcript/compact 摘要逻辑，`/export` 复用会话 transcript 导出，`/debug-tool-call` 复用本地工具解析和权限检查
+218. `/export` 当前支持默认导出或自定义相对路径导出，并会自动创建目标目录；导出内容为 markdown transcript，保持最小可读性
+219. `/review` 当前走 review lane：以 `review <goal>` 进入现有编排链，并显式展示 `skill: review`、`action-logs` 和 `reflector-decision`；这让 review 命令不只是切 skill，而是真正复用可验证执行路径
+220. 新增回归测试：覆盖 `/summary`、`/debug-tool-call`、`/export`、`/reload-plugins`、`/review`、`/doctor`；全量校验再次通过，当前共 12 个测试文件、86 个测试
+221. 完成 `T2.6 MCP` 的最小闭环：新增 `src/mcp/service.ts`，提供本地 in-process `workspace-mcp` server，可列出 server、resources、tools，支持 `read resource` 和 `call tool`
+222. 当前 `workspace-mcp` 暴露 3 个资源能力：`workspace://summary`、`workspace://package-json`、`workspace://progress-log`；暴露 2 个工具：`search-files` 和 `read-snippet`
+223. `/mcp` 命令已接入 `QueryEngine`，当前支持：`/mcp`、`/mcp resources <server>`、`/mcp tools <server>`、`/mcp read <server> <resource>`、`/mcp call <server> <tool> <input>`
+224. MCP 读资源和工具调用已受权限模型约束：`mcp-read` 走低风险通道，`mcp-call` 走中风险通道；在 `plan/default` 下，MCP tool call 会被明确拦住，在 `auto/acceptEdits` 下可执行
+225. 新增回归测试：`test/mcp-service.test.ts` 覆盖 server/resource/tool 能力；`test/query-engine.test.ts` 覆盖 `/mcp` 命令链路和权限约束；全量校验再次通过，当前共 13 个测试文件、89 个测试
+226. TODO：当用户输入“某个文件路径 + 读取/看看/总结”这类自然语言请求时，自动路由到 `/read`，避免普通对话路径吞掉本地文件读取意图
+227. Phase 2 收尾项开始补齐：新增 [test/orchestration-playback.test.ts](/Users/xutianliang/Downloads/codeclaw/test/orchestration-playback.test.ts)，用 10 条真实任务样例回放 Planner / Executor / Reflector
+228. 当前 10 条回放样例覆盖 4 类结果：`complete`、`approval-required`、`replan`、`escalated`；同时覆盖 `query/analyze/create/fix/task` 五类 intent
+229. 回放样例里既有读类完成路径，也有写入审批路径、缺 provider 的重规划路径，以及 repeated failure 的升级路径；这让 Phase 2 不再只靠零散单测证明，而是有一组完整任务样例
+230. 新增 [docs/PHASE2_PLAYBACKS.md](/Users/xutianliang/Downloads/codeclaw/docs/PHASE2_PLAYBACKS.md)，把 10 条样例、预期 intent、预期决策和验证目的整理成一页交付文档
+231. 当前 Phase 2 的“Planner / Executor / Reflector 集成样例收口”已经具备：一组可执行回放测试 + 一页样例矩阵文档；后续若继续扩样例，只需要在 playback suite 里追加场景即可
+232. 全量校验再次通过：当前共 14 个测试文件、99 个测试
+233. 再补 QueryEngine 级端到端样例：新增 [test/query-engine-e2e.test.ts](/Users/xutianliang/Downloads/codeclaw/test/query-engine-e2e.test.ts)，通过 `IngressGateway + QueryEngine` 覆盖入口级真实链路
+234. 当前 E2E 样例覆盖 3 条主链：`review + MCP + shared session`、`orchestration approval + export`、`skill prompt injection + provider lane + command lane coexistence`
+235. 新增 [docs/PHASE2_DELIVERY.md](/Users/xutianliang/Downloads/codeclaw/docs/PHASE2_DELIVERY.md)，明确给出当前 `Phase 2` 的交付结论：在当前 MVP 边界下可正式收口，并列出已知延期项
+236. 为保证回放类与 E2E 类测试稳定，相关样例测试显式固定到 fallback LSP 路径，避免真实 multilspy bridge 启动耗时带来的 5 秒默认测试超时噪音；真实 LSP 仍由 `lsp-bridge` / `lsp-service` 专项测试覆盖
+237. 当前 `Phase 2` 已同时具备：能力实现、命令入口、SDK/HTTP、MCP、Skills、10 条 playback、3 条 E2E 样例，以及对应交付文档，可作为正式转入下一阶段的依据
+238. 全量校验再次通过：当前共 15 个测试文件、102 个测试
 
 ### Verification Snapshot
 1. `npm run lint` 通过
@@ -161,9 +266,16 @@
 4. 实机验证通过：最小 TS 工作区下，`scripts/lsp_multilspy_bridge.py` 已能返回真实 `degraded: false` 的 symbol / definition / references 结果
 5. 实机验证通过：当前 `codeclaw` 仓库下，真实 multilspy `definition createQueryEngine` 与 `references createQueryEngine` 已返回 `degraded: false` 结果
 6. 实机验证通过：CLI plain REPL 主流程下，未设置 `CODECLAW_ENABLE_REAL_LSP` 时 `/definition createQueryEngine` 默认显示 `LSPTool backend: multilspy`
-7. 当前全量验证通过：`typecheck / build / test` 均通过，测试总数 65
+7. 当前全量验证通过：`lint / typecheck / build / test` 均通过，测试总数 74
 8. 当前定向验证通过：`test/lsp-service.ts`、`test/local-tools.ts`、`test/query-engine.ts` 均通过；实机 `scripts/lsp_multilspy_bridge.py --kind definition --query createQueryEngine` 返回真实 `degraded: false` 结果
-9. 当前全量验证通过：`npm run test` 共 67 个测试，全部通过；`typecheck / build` 也通过
+9. 当前最小编排主线已验证通过：`test/orchestration.test.ts` 与 `test/query-engine.test.ts` 中的 `/plan`、`/orchestrate`、重复 gap 升级断言全部通过
+10. 当前最小执行型 orchestration 已验证通过：`/orchestrate` 不再只是跑 checks，还会真实执行 `inspect-file / inspect-symbol / run-package-script(typecheck)` 并回传 `action-logs`
+11. 当前读类增强已验证通过：`/orchestrate` 已会真实执行 `inspect-references`，并在输出中显式展示 `write-lane` 评估与更细粒度的 `action-logs`
+12. 当前 orchestration 审批语义已验证通过：`/orchestrate create ...` 会返回 `reflector-decision: approval-required`，`/approvals` 会列出 orchestration 审批，`/approve` / `/deny` 会触发对应的 Reflector 分支
+13. 当前 approved 后的真实执行链已验证通过：orchestration `/approve` 不再只返回 follow-up goal，而是会真实触发本地 `write/replace` 工具并修改目标文件
+14. 当前 approved 后的执行内容已验证升级：新文件会得到语言感知 scaffold，existing 文件会得到更像真实 patch 的确定性导出/片段，而不再只是 placeholder 文本
+15. 当前 replace 锚点已验证升级：在 TS/JS/Python 这类文件里，会优先把 patch 插到最后一个函数/类代码块后，而不是简单贴在单行声明后
+16. 当前 approved replace 的底层落盘策略也已验证升级：先在内存里构造完整新文件，再用 `/write` 落盘；这减少了对运行时字符串 replace 的依赖
 4. `bun run build` 通过
 5. `node dist/cli.js --version` 可输出 `0.5.0`
 6. `node dist/cli.js setup`、`node dist/cli.js config` 与 `node dist/cli.js doctor` 已用临时 HOME 验证
@@ -204,5 +316,5 @@
 4. `/diff` 当前报告的是会话跟踪的编辑文件，而不是完整 git patch
 5. `maxRetries`、`headers`、`apiKeyRequiredOverride` 已记录为 TODO，等接第一个非官方网关时再补
 6. 当前仓库中的 `scripts/lsp_multilspy_bridge.py` 已升级为真实 multilspy 桥接，但仍缺少针对大工作区的性能优化与更细的语言特化策略
-7. 2026-04-22 本轮完整 `npm run test` 暴露了一个与本次安装无关的现有回归：`test/query-engine.test.ts` 中 `/glob src/**/*.ts` 期望失败，当前返回 `[no matches]`
-8. 当前已无已知的测试级阻塞问题；后续主要是继续做更高层功能和 LSP 结果质量优化
+7. 当前 approved 后的执行链已从 placeholder 升级为语言感知 scaffold/patch，并增加了更安全的块级和导出区锚点；但仍然不是通用 AST 级 edit 语义，也还没有接真正的实现生成
+8. 当前已无已知的测试级阻塞问题；后续主要是继续扩展 `Planner / Executor / Reflector` 的动作集合、审批语义和反思能力，并继续优化 LSP 结果质量
