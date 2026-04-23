@@ -381,6 +381,8 @@
 24. 已完成开源前最小清理：删除临时文件 `a.ts`，并将 `docs/`、`PROGRESS_LOG.md`、`test/lsp-bridge.test.ts` 中暴露本机绝对路径的内容改为相对路径或运行时路径
 25. 开源前全量校验已重新通过：`npm run lint`、`npm run typecheck`、`npm run test`、`bun run build`
 26. 当前测试总数更新为：`20` 个测试文件，`120` 个测试，全部通过
+27. 已新增开源首页 `README.md`，补齐项目简介、能力边界、快速启动、LSP、HTTP API 与 WeChat Bot 入口说明
+28. 已新增首版发布说明 `docs/RELEASE_v0.5.0.md`，整理 `v0.5.0` 的交付范围、验证快照与已知边界
 24. 微信卡片已增强为“最新输入 + 最新回复”，并加入微信软长度限制裁剪，减少超长文本发不全的问题
 25. 微信 worker 已进一步优化：除了收到入站消息立即继续下一轮外，也会在轮询周期内主动 flush 会话同步卡片，把 CLI 侧的新消息推回微信
 26. 本轮已通过定向验证：`npm run lint`、`npm run typecheck`、`./node_modules/.bin/vitest run test/wechat-adapter.test.ts test/wechat-worker.test.ts test/wechat-e2e.test.ts test/query-engine.test.ts`、`bun run build`
