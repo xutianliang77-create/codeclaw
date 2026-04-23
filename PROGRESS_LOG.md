@@ -383,6 +383,9 @@
 26. 当前测试总数更新为：`20` 个测试文件，`120` 个测试，全部通过
 27. 已新增开源首页 `README.md`，补齐项目简介、能力边界、快速启动、LSP、HTTP API 与 WeChat Bot 入口说明
 28. 已新增首版发布说明 `docs/RELEASE_v0.5.0.md`，整理 `v0.5.0` 的交付范围、验证快照与已知边界
+29. 已修复微信卡片里“最新输入/最新回复”跨轮次错配：现在卡片会把最新 assistant 回复与其前一条 user 输入配对，不再出现截图里“输入是你在干嘛，但回复却是上一轮 35B-A3B 解释”的混搭
+30. 已新增回归测试锁定该行为：`test/wechat-adapter.test.ts` 现在覆盖“最新 assistant 回复不应和更晚的一条 user 输入错误拼接”
+31. 已按开源仓库清理要求，从当前 Git 版本中移除 `VER_0.5_DEV_TASKS.md` 与 `VER_0.5_TECH_DESIGN.md`
 24. 微信卡片已增强为“最新输入 + 最新回复”，并加入微信软长度限制裁剪，减少超长文本发不全的问题
 25. 微信 worker 已进一步优化：除了收到入站消息立即继续下一轮外，也会在轮询周期内主动 flush 会话同步卡片，把 CLI 侧的新消息推回微信
 26. 本轮已通过定向验证：`npm run lint`、`npm run typecheck`、`./node_modules/.bin/vitest run test/wechat-adapter.test.ts test/wechat-worker.test.ts test/wechat-e2e.test.ts test/query-engine.test.ts`、`bun run build`

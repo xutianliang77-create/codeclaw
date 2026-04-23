@@ -12,14 +12,32 @@ function clip(text: string, maxLength = 600): string {
   return `${normalized.slice(0, maxLength - 3)}...`;
 }
 
-function findLatestAssistantMessage(messages: EngineMessage[]): string {
-  const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant");
-  return latestAssistant?.text.trim() || "暂无回复。";
-}
+function findLatestTurn(messages: EngineMessage[]): {
+  latestInput: string;
+  latestReply: string;
+} {
+  const latestAssistantIndex = [...messages]
+    .map((message, index) => ({ message, index }))
+    .reverse()
+    .find((entry) => entry.message.role === "assistant")?.index;
 
-function findLatestUserMessage(messages: EngineMessage[]): string {
-  const latestUser = [...messages].reverse().find((message) => message.role === "user");
-  return latestUser?.text.trim() || "暂无输入。";
+  if (latestAssistantIndex === undefined) {
+    const latestUser = [...messages].reverse().find((message) => message.role === "user");
+    return {
+      latestInput: latestUser?.text.trim() || "暂无输入。",
+      latestReply: "暂无回复。"
+    };
+  }
+
+  const latestAssistant = messages[latestAssistantIndex];
+  const latestUser = [...messages.slice(0, latestAssistantIndex)]
+    .reverse()
+    .find((message) => message.role === "user");
+
+  return {
+    latestInput: latestUser?.text.trim() || "暂无输入。",
+    latestReply: latestAssistant?.text.trim() || "暂无回复。"
+  };
 }
 
 function trimCardToWechatLimit(sections: string[]): string {
@@ -32,8 +50,9 @@ function trimCardToWechatLimit(sections: string[]): string {
 }
 
 export function buildWechatMarkdownCard(input: WechatCardRenderInput): string {
-  const latestInput = clip(findLatestUserMessage(input.snapshot.messages), 180);
-  const latestReply = clip(findLatestAssistantMessage(input.snapshot.messages), 700);
+  const latestTurn = findLatestTurn(input.snapshot.messages);
+  const latestInput = clip(latestTurn.latestInput, 180);
+  const latestReply = clip(latestTurn.latestReply, 700);
   const approval = input.snapshot.pendingApproval;
   const orchestrationApproval = input.snapshot.pendingOrchestrationApproval;
 

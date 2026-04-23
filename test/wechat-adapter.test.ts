@@ -6,6 +6,7 @@ import {
   createWechatIngressMessage,
   WechatBotAdapter
 } from "../src/channels/wechat/adapter";
+import { buildWechatMarkdownCard } from "../src/channels/wechat/formatter";
 
 async function collect(stream: AsyncGenerator<unknown>): Promise<void> {
   while (true) {
@@ -272,5 +273,33 @@ describe("wechat adapter", () => {
     expect(cards[0]?.markdown).toContain("## 最新输入");
     expect(cards[0]?.markdown).toContain("remember this cli note");
     expect(cards[0]?.markdown).toContain("## 最新回复");
+  });
+
+  it("pairs the displayed input with the same turn as the latest assistant reply", () => {
+    const markdown = buildWechatMarkdownCard({
+      snapshot: {
+        sessionId: "session-1",
+        providerName: "LM Studio",
+        fallbackProviderName: "OpenAI",
+        model: "qwen",
+        permissionMode: "plan",
+        workspace: process.cwd(),
+        activeSkillName: null,
+        messages: [
+          { id: "u-1", role: "user", text: "35B-A3B 是什么", createdAt: 1 },
+          { id: "a-1", role: "assistant", text: "这是上一轮的解释", createdAt: 2 },
+          { id: "u-2", role: "user", text: "你在干嘛", createdAt: 3 }
+        ],
+        pendingApproval: null,
+        pendingOrchestrationApproval: null
+      },
+      traceId: "trace-1",
+      contextToken: "session-1",
+      variant: "session-sync"
+    });
+
+    expect(markdown).toContain("## 最新输入\n35B-A3B 是什么");
+    expect(markdown).toContain("## 最新回复\n这是上一轮的解释");
+    expect(markdown).not.toContain("## 最新输入\n你在干嘛");
   });
 });
