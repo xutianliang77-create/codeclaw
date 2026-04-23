@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import type { EngineMessage, EnginePhase, PendingApprovalView, QueryEngine } from "../agent/types";
@@ -125,6 +125,14 @@ export function App({
       : null
   );
   const [pendingApproval, setPendingApproval] = useState<PendingApprovalState>(initialPendingApproval);
+
+  useEffect(() => {
+    return queryEngine.subscribe(() => {
+      setRuntimeState(queryEngine.getRuntimeState());
+      setMessages(queryEngine.getMessages());
+      setPendingApproval(queryEngine.getPendingApproval());
+    });
+  }, [queryEngine]);
 
   useInput((value, key) => {
     if (key.escape) {

@@ -8,7 +8,7 @@
 4. 继续完善 Reflector：加入更明确的 gap 分类、失败记忆和升级策略，而不是只做单轮 replan/escalate
 5. 评估是否引入独立的 orchestration transcript/state，避免未来 Planner/Executor/Reflector 扩展时与普通聊天 transcript 过度耦合
 ### Resume Checklist:
-1. `cd /Users/xutianliang/Downloads/codeclaw`
+1. `cd <repo-root>`
 2. `npm install`
 3. `npm run setup:lsp`
 4. `npm run lint`
@@ -84,13 +84,13 @@
 62. 实现本地 `CodeClawSdkClient`，封装 `healthCheck / sendMessage / streamMessage / interrupt`
 63. 增加 bearer auth 骨架：`CODECLAW_GATEWAY_TOKEN`
 64. 为 HTTP handler、SDK wrapper 和 auth 骨架补齐无端口依赖的单元测试
-65. 补充 [docs/HTTP_API.md](/Users/xutianliang/Downloads/codeclaw/docs/HTTP_API.md) 文档
-66. 补充 [examples/http-client.mjs](/Users/xutianliang/Downloads/codeclaw/examples/http-client.mjs) 与 [examples/sdk-client.ts](/Users/xutianliang/Downloads/codeclaw/examples/sdk-client.ts) 示例客户端
+65. 补充 `docs/HTTP_API.md` 文档
+66. 补充 `examples/http-client.mjs` 与 `examples/sdk-client.ts` 示例客户端
 67. 为本地工具补齐 `GlobTool`，新增 `/glob <pattern>` 命令
 68. 为 QueryEngine 补齐 `/approvals`、`/diff`、`/skills`、`/hooks`、`/init` 等 Phase 1 收尾命令
 69. 为会话内文件活动增加最小跟踪，`/memory` 可显示 recent-reads / changed-files，`/diff` 可显示 session-tracked edits
 70. 为 App 增加本地 `/exit` 退出处理，并更新界面 footer hints
-71. 新增 [docs/PHASE1_DELIVERY.md](/Users/xutianliang/Downloads/codeclaw/docs/PHASE1_DELIVERY.md) 作为 Phase 1 交付说明
+71. 新增 `docs/PHASE1_DELIVERY.md` 作为 Phase 1 交付说明
 72. 新增 `test/command-regression.test.ts`，覆盖 `setup / config / doctor` 的基础回归路径
 73. 为 `query-engine` 补齐 glob、approvals、memory、diff、skills/hooks/init 等 transcript 回归测试
 74. 为 `local-tools` 补齐 glob 匹配测试
@@ -246,15 +246,15 @@
 224. MCP 读资源和工具调用已受权限模型约束：`mcp-read` 走低风险通道，`mcp-call` 走中风险通道；在 `plan/default` 下，MCP tool call 会被明确拦住，在 `auto/acceptEdits` 下可执行
 225. 新增回归测试：`test/mcp-service.test.ts` 覆盖 server/resource/tool 能力；`test/query-engine.test.ts` 覆盖 `/mcp` 命令链路和权限约束；全量校验再次通过，当前共 13 个测试文件、89 个测试
 226. TODO：当用户输入“某个文件路径 + 读取/看看/总结”这类自然语言请求时，自动路由到 `/read`，避免普通对话路径吞掉本地文件读取意图
-227. Phase 2 收尾项开始补齐：新增 [test/orchestration-playback.test.ts](/Users/xutianliang/Downloads/codeclaw/test/orchestration-playback.test.ts)，用 10 条真实任务样例回放 Planner / Executor / Reflector
+227. Phase 2 收尾项开始补齐：新增 `test/orchestration-playback.test.ts`，用 10 条真实任务样例回放 Planner / Executor / Reflector
 228. 当前 10 条回放样例覆盖 4 类结果：`complete`、`approval-required`、`replan`、`escalated`；同时覆盖 `query/analyze/create/fix/task` 五类 intent
 229. 回放样例里既有读类完成路径，也有写入审批路径、缺 provider 的重规划路径，以及 repeated failure 的升级路径；这让 Phase 2 不再只靠零散单测证明，而是有一组完整任务样例
-230. 新增 [docs/PHASE2_PLAYBACKS.md](/Users/xutianliang/Downloads/codeclaw/docs/PHASE2_PLAYBACKS.md)，把 10 条样例、预期 intent、预期决策和验证目的整理成一页交付文档
+230. 新增 `docs/PHASE2_PLAYBACKS.md`，把 10 条样例、预期 intent、预期决策和验证目的整理成一页交付文档
 231. 当前 Phase 2 的“Planner / Executor / Reflector 集成样例收口”已经具备：一组可执行回放测试 + 一页样例矩阵文档；后续若继续扩样例，只需要在 playback suite 里追加场景即可
 232. 全量校验再次通过：当前共 14 个测试文件、99 个测试
-233. 再补 QueryEngine 级端到端样例：新增 [test/query-engine-e2e.test.ts](/Users/xutianliang/Downloads/codeclaw/test/query-engine-e2e.test.ts)，通过 `IngressGateway + QueryEngine` 覆盖入口级真实链路
+233. 再补 QueryEngine 级端到端样例：新增 `test/query-engine-e2e.test.ts`，通过 `IngressGateway + QueryEngine` 覆盖入口级真实链路
 234. 当前 E2E 样例覆盖 3 条主链：`review + MCP + shared session`、`orchestration approval + export`、`skill prompt injection + provider lane + command lane coexistence`
-235. 新增 [docs/PHASE2_DELIVERY.md](/Users/xutianliang/Downloads/codeclaw/docs/PHASE2_DELIVERY.md)，明确给出当前 `Phase 2` 的交付结论：在当前 MVP 边界下可正式收口，并列出已知延期项
+235. 新增 `docs/PHASE2_DELIVERY.md`，明确给出当前 `Phase 2` 的交付结论：在当前 MVP 边界下可正式收口，并列出已知延期项
 236. 为保证回放类与 E2E 类测试稳定，相关样例测试显式固定到 fallback LSP 路径，避免真实 multilspy bridge 启动耗时带来的 5 秒默认测试超时噪音；真实 LSP 仍由 `lsp-bridge` / `lsp-service` 专项测试覆盖
 237. 当前 `Phase 2` 已同时具备：能力实现、命令入口、SDK/HTTP、MCP、Skills、10 条 playback、3 条 E2E 样例，以及对应交付文档，可作为正式转入下一阶段的依据
 238. 全量校验再次通过：当前共 15 个测试文件、102 个测试
@@ -299,7 +299,7 @@
 24. T2.5 SDK/HTTP API 已可用：本地 gateway 支持 health、JSON、SSE 和 SDK wrapper，且复用同一 Session 语义
 25. HTTP API 文档和示例客户端已补齐，可直接作为外部接入参考
 26. Phase 1 收尾命令和工具已补齐：`/glob`、`/approvals`、`/diff`、`/skills`、`/hooks`、`/init` 已可执行
-27. Phase 1 交付说明文档已补齐，当前可按 [docs/PHASE1_DELIVERY.md](/Users/xutianliang/Downloads/codeclaw/docs/PHASE1_DELIVERY.md) 作为收口说明
+27. Phase 1 交付说明文档已补齐，当前可按 `docs/PHASE1_DELIVERY.md` 作为收口说明
 28. provider 请求上下文已收敛到真实会话消息，不再把启动欢迎语、slash commands 和本地工具回显直接发给模型
 29. 本地 provider 流式回复不再因全局 `timeoutMs` 在生成中途被中断；当前 `timeoutMs` 只用于连接/首响应阶段
 30. Phase 1.5.1 已有可用骨架：`/symbol`、`/definition`、`/references` 已能在无 LSP server 场景下工作，并明确标识 `fallback-regex-index`
@@ -318,3 +318,83 @@
 6. 当前仓库中的 `scripts/lsp_multilspy_bridge.py` 已升级为真实 multilspy 桥接，但仍缺少针对大工作区的性能优化与更细的语言特化策略
 7. 当前 approved 后的执行链已从 placeholder 升级为语言感知 scaffold/patch，并增加了更安全的块级和导出区锚点；但仍然不是通用 AST 级 edit 语义，也还没有接真正的实现生成
 8. 当前已无已知的测试级阻塞问题；后续主要是继续扩展 `Planner / Executor / Reflector` 的动作集合、审批语义和反思能力，并继续优化 LSP 结果质量
+
+### Phase 3.5 Progress
+1. 已新增 `src/channels/wechat/adapter.ts`、`src/channels/wechat/formatter.ts`、`src/channels/wechat/types.ts`，形成最小可测的微信适配层
+2. 微信入口现在会把 iLink 风格消息映射成 `IngressMessage`，并在 `channelSpecific` 中保留 `chatId / chatType / senderId / contextToken`
+3. 微信会话上下文采用 `wechat:<chatType>:<chatId>:<senderId>` 作用域，避免同一用户跨群聊/私聊串会话
+4. 微信 adapter 内部已实现按 `contextToken/sessionId` 复用 runtime，可真实做到“首次建会话，后续继续同一会话”
+5. `QueryEngine` 已补充 `getChannelSnapshot()`，渠道侧现在可以复用同一份消息、审批和运行态快照生成卡片
+6. 已支持 Markdown 卡片输出：普通消息回复卡、审批通知卡、恢复会话卡
+7. 已支持审批通知/恢复：待审批时可生成包含 `detail / reason / queue` 和 `/approve` `/deny` 提示的微信卡片
+8. 新增 `test/wechat-adapter.test.ts`，覆盖 context mapping、session continue、markdown card、approval notify / resume
+9. 已新增 `src/channels/wechat/handler.ts`，提供最小 webhook 边界：`GET /health`、`POST /v1/wechat/events`
+10. webhook 事件当前支持 `message`、`resume`、`approval-notify` 三类输入，可直接产出微信 Markdown 卡片
+11. 已新增 `test/wechat-handler.test.ts`，覆盖批量 webhook 事件、空消息丢弃、handler health、bearer auth
+12. 已新增 `src/channels/wechat/ilink.ts`，支持把 raw iLink 风格 payload 归一化为统一 `WechatWebhookRequest`
+13. 当前 `/v1/wechat/events` 已同时兼容“标准化 webhook request”和“raw iLink 风格 payload”两种输入
+14. 已支持 approval sweep：adapter 可一次收集所有活跃 session 的待审批卡片，handler 提供 `POST /v1/wechat/approvals/sweep`
+15. `test/wechat-adapter.test.ts` 已增加 approval sweep 覆盖；`test/wechat-handler.test.ts` 已增加 raw payload normalize 与 approval sweep 覆盖
+16. 已新增 `src/channels/wechat/service.ts`，形成独立微信服务入口；CLI 现在支持 `codeclaw wechat` 启动本地微信 adapter webhook
+17. 已新增 `docs/WECHAT_BOT.md`，补齐启动方式、接口、raw iLink payload 示例和当前边界
+18. 已新增 `test/wechat-e2e.test.ts`，覆盖“微信消息 -> orchestration approval -> resume -> /approve -> 真正写文件”的端到端链路
+19. 当前 T3.5 验收口径已满足：
+    - 微信消息能创建和继续 session
+    - 审批状态机与 CLI 一致
+    - approval notify / resume 已通过微信卡片闭环验证
+20. 已新增 `src/channels/wechat/token.ts`、`src/channels/wechat/worker.ts`，真实 iLink worker 现在支持 `token_file -> pollUpdates -> sendMessage`
+21. CLI 现在支持 `codeclaw wechat --worker`，会从 `gateway.bots.ilinkWechat.tokenFile` 或 `CODECLAW_ILINK_WECHAT_TOKEN_FILE` 读取 token 文件
+22. 已新增 `test/wechat-worker.test.ts`，覆盖 token_file 读取和真实轮询回发链路
+23. 当前 T3.5 已完整收口：webhook 入口、raw payload normalize、approval sweep、独立 service、真实轮询 worker、端到端链路均已具备
+24. 当前全量验证通过：`npm run lint`、`npm run typecheck`、`npm run test`、`bun run build`
+25. 当前测试总数更新为：`20` 个测试文件，`115` 个测试，全部通过
+
+### Next Session Priorities
+1. T3.5 已完成，若继续深化可考虑接真实 iLink API 字段细节和更强的发送失败重试
+2. 为微信卡片补更细的审批恢复路径，尤其是 orchestration approval 的专门文案和 resume 提示
+3. 开始 Phase 3 其他主线，优先考虑插件系统或 RAG，而不是回头扩张 Phase 1/2 范围
+
+### T3.5 Protocol Alignment Update
+1. 已按腾讯云 iLink 微信 Bot 协议重写微信协议层：`src/channels/wechat/worker.ts` 不再使用假设的 `GET /pollUpdates` 与 `POST /sendMessage`，而是改为真实 `POST ilink/bot/getupdates` 与 `POST ilink/bot/sendmessage`
+2. iLink 请求头现已对齐真实协议：统一附带 `AuthorizationType: ilink_bot_token`、随机 `X-WECHAT-UIN` 与 `Authorization: Bearer <bot_token>`
+3. `src/channels/wechat/worker.ts` 已补 `get_updates_buf` 长轮询游标；35 秒超时已作为正常空轮询处理，而不是错误退出
+4. `sendmessage` payload 已切到真实 `msg` 结构：包含 `from_user_id`、`to_user_id`、`client_id`、`message_type`、`message_state`、`item_list` 与 `context_token`
+5. `src/channels/wechat/token.ts` 已扩成真实凭证模型，当前会保存并读取：`bot_token`、`baseurl`、`ilink_bot_id`、`ilink_user_id`
+6. 已新增 `src/channels/wechat/auth.ts` 与 `src/channels/wechat/loginManager.ts`，支持最小扫码登录状态机：`get_bot_qrcode -> get_qrcode_status -> 保存 token_file`
+7. `QueryEngine` 已新增 `/wechat` 与 `/wechat status`；在 CLI 里输入 `/wechat` 即可拉起二维码登录流程
+8. `src/channels/wechat/ilink.ts` 已按真实 `msgs/item_list/context_token` 协议解析入站消息，不再只依赖旧的简化 `message.content.text`
+9. `docs/WECHAT_BOT.md` 已按新协议重写，补充了 `/wechat` 扫码登录、真实 iLink 路径、真实 token_file 结构和 worker 运行方式
+10. 当前 T3.5 协议修正已收口：`QueryEngine` 的 `/wechat` 命令测试已补齐，专项与全量校验重新收绿
+11. 已修复 CLI `/wechat` 默认回退逻辑：即使老的 `config.yaml` 没有显式写 `gateway.bots.ilinkWechat.tokenFile`，CLI 也会回退到项目默认 token 路径 `~/.claude/wechat-ibot/default.json`，不再错误提示“未配置”
+12. 已补终端二维码显示：新增 `qrcode` 依赖并在 `/wechat` 输出里渲染 `terminal-qr`，不再只打印 `qrcode: ...` 文本；同时把默认 iLink 地址统一成 `https://ilinkai.weixin.qq.com`
+13. 已修正终端二维码的真实扫码内容：`terminal-qr` 现在优先编码 `qrcode-image` URL，而不是内部 `qrcode` token；这解决了“看得到二维码但微信扫不出来”的问题
+14. 已新增 `/wechat refresh`：二维码有效期由 iLink 服务端控制，客户端无法真正延长 TTL，因此增加了显式换码命令，便于在快过期时立即刷新出一张新二维码
+15. 已支持“微信加入当前 session”：在当前 CLI 会话执行 `/wechat` 时，会把微信 adapter 绑定到当前 `queryEngine` runtime；后续微信消息将复用这个 session，而不是总是新建独立 session
+16. 已支持登录确认后自动起 worker：`IlinkWechatLoginManager` 新增 `onConfirmed` 钩子，CLI 在扫码确认后会自动启动同进程微信 worker，不再要求手动再开一个 `wechat --worker`
+17. 已收紧微信 session 绑定优先级：显式执行 `/wechat` 绑定当前 session 后，adapter 会优先使用共享 runtime，不再被旧 `context_token` 抢回旧 session
+18. 已回收旧的同 userKey 微信 runtime：重新绑定当前 session 时，会清理旧 userKey 对应的 runtime 映射，避免“微信同时挂在两个 session 上”的现象
+19. 已补 QueryEngine 订阅能力：CLI 现在会订阅同一 session 的外部写入，微信消息进入当前 session 后，CLI transcript 会同步更新，不再出现“同 session 但界面不互通”的假象
+20. 已优化微信 worker 响应节奏：收到消息后立即继续下一轮 `getupdates`，空闲时本地轮询间隔默认从 `1000ms` 降到 `100ms`
+21. 当前全量验证重新收绿：`npm run lint`、`npm run typecheck`、`npm run test`、`bun run build` 全部通过
+22. 当前测试总数更新为：`20` 个测试文件，`118` 个测试，全部通过
+23. 已修复“微信/CLI 同 session 但输入信息不互通”：`QueryEngine` 现在在 user turn 入栈时也会通知订阅者，CLI 可看到微信输入；wechat adapter 也能为非微信来源的新 assistant turn 生成会话同步卡片
+24. 已完成开源前最小清理：删除临时文件 `a.ts`，并将 `docs/`、`PROGRESS_LOG.md`、`test/lsp-bridge.test.ts` 中暴露本机绝对路径的内容改为相对路径或运行时路径
+25. 开源前全量校验已重新通过：`npm run lint`、`npm run typecheck`、`npm run test`、`bun run build`
+26. 当前测试总数更新为：`20` 个测试文件，`120` 个测试，全部通过
+24. 微信卡片已增强为“最新输入 + 最新回复”，并加入微信软长度限制裁剪，减少超长文本发不全的问题
+25. 微信 worker 已进一步优化：除了收到入站消息立即继续下一轮外，也会在轮询周期内主动 flush 会话同步卡片，把 CLI 侧的新消息推回微信
+26. 本轮已通过定向验证：`npm run lint`、`npm run typecheck`、`./node_modules/.bin/vitest run test/wechat-adapter.test.ts test/wechat-worker.test.ts test/wechat-e2e.test.ts test/query-engine.test.ts`、`bun run build`
+27. 已修复 wechat auto-worker 因长轮询超时直接退出的问题：`TimeoutError` 现在按正常空轮询处理，`LONG_POLL_TIMEOUT_MS` 已恢复到 `35_000`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: T3.5 微信协议层已对齐真实 iLink 协议，并已完成测试与文档收口
+### Background Tasks: 无
+### Next Session Priorities:
+1. 用真实 iLink 环境验证 `/wechat` 扫码登录与 `codeclaw wechat --worker` 的线上链路
+2. 若真实环境字段存在差异，优先修 `auth/worker/ilink parser` 的协议细节
+3. 全量稳定后继续 Phase 3 其他主线
+### Resume Checklist:
+1. `node dist/cli.js --plain`
+2. 在 CLI 里执行 `/wechat`
+3. 登录成功后执行 `node dist/cli.js wechat --worker`
+4. 如需回归验证：`npm run lint && npm run typecheck && npm run test && bun run build`

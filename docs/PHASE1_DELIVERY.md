@@ -107,4 +107,4 @@ Standard setup:
 npm run setup:lsp
 ```
 
-See [LSP_SETUP.md](/Users/xutianliang/Downloads/codeclaw/docs/LSP_SETUP.md) for the full install flow.
+See [LSP_SETUP.md](./LSP_SETUP.md) for the full install flow.

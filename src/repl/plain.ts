@@ -44,12 +44,29 @@ export async function runPlainRepl(options: {
     terminal: true
   });
   let isRunning = false;
+  const printedMessageIds = new Set<string>();
 
   printBoot(bootInfo, queryEngine.getSessionId());
 
   for (const message of queryEngine.getMessages()) {
+    printedMessageIds.add(message.id);
     printBlock(message.role, message.text);
   }
+
+  const unsubscribe = queryEngine.subscribe(() => {
+    if (isRunning) {
+      return;
+    }
+
+    for (const message of queryEngine.getMessages()) {
+      if (printedMessageIds.has(message.id)) {
+        continue;
+      }
+
+      printedMessageIds.add(message.id);
+      printBlock(message.role, message.text);
+    }
+  });
 
   readline.on("SIGINT", () => {
     if (isRunning) {
@@ -133,8 +150,13 @@ export async function runPlainRepl(options: {
       if (!turnFailed && assistantText) {
         printBlock("assistant", assistantText);
       }
+
+      for (const message of queryEngine.getMessages()) {
+        printedMessageIds.add(message.id);
+      }
     }
   } finally {
+    unsubscribe();
     readline.close();
   }
 }

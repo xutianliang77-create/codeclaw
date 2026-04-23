@@ -183,5 +183,5 @@ HTTP API 复用和 CLI 相同的会话模型：
 
 仓库里已经包含两个样例：
 
-1. [examples/http-client.mjs](/Users/xutianliang/Downloads/codeclaw/examples/http-client.mjs)
-2. [examples/sdk-client.ts](/Users/xutianliang/Downloads/codeclaw/examples/sdk-client.ts)
+1. `examples/http-client.mjs`
+2. `examples/sdk-client.ts`

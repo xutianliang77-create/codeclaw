@@ -31,10 +31,10 @@ That conclusion is based on:
 
 Primary files:
 
-- [src/orchestration/goalPlanner.ts](/Users/xutianliang/Downloads/codeclaw/src/orchestration/goalPlanner.ts)
-- [src/orchestration/executor.ts](/Users/xutianliang/Downloads/codeclaw/src/orchestration/executor.ts)
-- [src/orchestration/reflector.ts](/Users/xutianliang/Downloads/codeclaw/src/orchestration/reflector.ts)
-- [src/orchestration/approvalExecution.ts](/Users/xutianliang/Downloads/codeclaw/src/orchestration/approvalExecution.ts)
+- `src/orchestration/goalPlanner.ts`
+- `src/orchestration/executor.ts`
+- `src/orchestration/reflector.ts`
+- `src/orchestration/approvalExecution.ts`
 
 ### 2. External Entry Points
 
@@ -45,10 +45,10 @@ Primary files:
 
 Primary files:
 
-- [src/sdk/httpServer.ts](/Users/xutianliang/Downloads/codeclaw/src/sdk/httpServer.ts)
-- [src/sdk/client.ts](/Users/xutianliang/Downloads/codeclaw/src/sdk/client.ts)
-- [src/ingress/gateway.ts](/Users/xutianliang/Downloads/codeclaw/src/ingress/gateway.ts)
-- [src/mcp/service.ts](/Users/xutianliang/Downloads/codeclaw/src/mcp/service.ts)
+- `src/sdk/httpServer.ts`
+- `src/sdk/client.ts`
+- `src/ingress/gateway.ts`
+- `src/mcp/service.ts`
 
 ### 3. Skill and Productivity Layer
 
@@ -65,22 +65,22 @@ Primary files:
 
 Primary files:
 
-- [src/skills/registry.ts](/Users/xutianliang/Downloads/codeclaw/src/skills/registry.ts)
-- [src/agent/queryEngine.ts](/Users/xutianliang/Downloads/codeclaw/src/agent/queryEngine.ts)
+- `src/skills/registry.ts`
+- `src/agent/queryEngine.ts`
 
 ## Evidence
 
 ### Playback Suites
 
-- [test/orchestration-playback.test.ts](/Users/xutianliang/Downloads/codeclaw/test/orchestration-playback.test.ts)
+- `test/orchestration-playback.test.ts`
   - 10 real task samples
   - covers `complete / approval-required / replan / escalated`
-- [docs/PHASE2_PLAYBACKS.md](/Users/xutianliang/Downloads/codeclaw/docs/PHASE2_PLAYBACKS.md)
+- `docs/PHASE2_PLAYBACKS.md`
   - sample matrix and expected outcomes
 
 ### QueryEngine End-to-End Examples
 
-- [test/query-engine-e2e.test.ts](/Users/xutianliang/Downloads/codeclaw/test/query-engine-e2e.test.ts)
+- `test/query-engine-e2e.test.ts`
   - ingress + review + MCP
   - ingress + orchestration approval + export
   - provider lane + skill prompt injection + command lane coexistence
@@ -109,4 +109,3 @@ Phase 2 is closed for MVP scope, but these are intentionally deferred:
 Recommended next move: begin Phase 3 cautiously, while keeping the remaining
 deferred items tracked as targeted follow-up work rather than re-opening
 Phase 2 wholesale.
-

@@ -14,6 +14,19 @@ export type PermissionMode =
 export type ProviderType = "anthropic" | "openai" | "ollama" | "lmstudio";
 
 export interface CodeClawConfig {
+  gateway?: {
+    enabledChannels?: Array<{
+      type: "cli" | "sdk" | "wechat" | "mcp" | "http";
+    }>;
+    bots?: {
+      ilinkWechat?: {
+        enabled?: boolean;
+        tokenFile?: string;
+        baseUrl?: string;
+        pollIntervalMs?: number;
+      };
+    };
+  };
   provider: {
     default: ProviderType;
     fallback: ProviderType;
@@ -63,6 +76,17 @@ export function resolveConfigPaths(homeDir = homedir()): ConfigPaths {
 
 export function createDefaultConfig(cwd = process.cwd()): CodeClawConfig {
   return {
+    gateway: {
+      enabledChannels: [{ type: "cli" }],
+      bots: {
+        ilinkWechat: {
+          enabled: false,
+          tokenFile: "~/.claude/wechat-ibot/default.json",
+          baseUrl: "https://ilinkai.weixin.qq.com",
+          pollIntervalMs: 100
+        }
+      }
+    },
     provider: {
       default: "anthropic",
       fallback: "openai"

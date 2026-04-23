@@ -6,8 +6,9 @@ import { ProviderConfigApp } from "./app/ProviderConfigApp";
 import { loadConfigCommandState } from "./commands/config";
 import { runDoctor } from "./commands/doctor";
 import { loadSetupCommandState } from "./commands/setup";
+import { createWechatBotService } from "./channels/wechat/service";
 import { IngressGateway } from "./ingress/gateway";
-import { resolveConfigPaths } from "./lib/config";
+import { createDefaultConfig, resolveConfigPaths } from "./lib/config";
 import { loadRuntimeSelection } from "./provider/registry";
 import { runPlainRepl } from "./repl/plain";
 import { startGatewayServer } from "./sdk/httpServer";
@@ -27,6 +28,8 @@ Usage:
   codeclaw setup           Open interactive first-run setup
   codeclaw config          Open interactive provider config
   codeclaw gateway         Start the local HTTP gateway
+  codeclaw wechat          Start the local WeChat adapter webhook
+  codeclaw wechat --worker Start the iLink WeChat polling worker
 `);
 }
 
@@ -104,13 +107,89 @@ async function main(): Promise<void> {
   const runtime = await loadRuntimeSelection();
   const paths = resolveConfigPaths();
   installCrashLogging(paths.logsDir);
+  const configDefaults = createDefaultConfig(runtime.config?.defaults.workspace ?? process.cwd());
+  const configuredWechatTokenFile =
+    runtime.config?.gateway?.bots?.ilinkWechat?.tokenFile ??
+    configDefaults.gateway?.bots?.ilinkWechat?.tokenFile ??
+    process.env.CODECLAW_ILINK_WECHAT_TOKEN_FILE;
+  const configuredWechatBaseUrl =
+    runtime.config?.gateway?.bots?.ilinkWechat?.baseUrl ??
+    configDefaults.gateway?.bots?.ilinkWechat?.baseUrl ??
+    process.env.CODECLAW_ILINK_WECHAT_BASE_URL ??
+    "https://ilinkai.weixin.qq.com";
+  const wechatService = createWechatBotService({
+    createQueryEngine(overrides) {
+      return createQueryEngine({
+        currentProvider: runtime.selection?.current ?? null,
+        fallbackProvider: runtime.selection?.fallback ?? null,
+        permissionMode: runtime.config?.defaults.permissionMode ?? "plan",
+        workspace: runtime.config?.defaults.workspace ?? process.cwd(),
+        autoCompactThreshold: runtime.config?.memory.l1AutoCompactThreshold,
+        approvalsDir: paths.approvalsDir,
+        ...overrides
+      });
+    }
+  });
+  let autoWechatWorkerPromise: Promise<void> | null = null;
+  let autoWechatWorkerStarted = false;
+  const ensureAutoWechatWorkerStarted = async (): Promise<void> => {
+    if (autoWechatWorkerStarted || autoWechatWorkerPromise) {
+      return;
+    }
+
+    const tokenFile = configuredWechatTokenFile;
+    if (!tokenFile) {
+      return;
+    }
+
+    const worker = wechatService.createWorker({
+      tokenFile,
+      baseUrl: configuredWechatBaseUrl,
+      pollIntervalMs:
+        runtime.config?.gateway?.bots?.ilinkWechat?.pollIntervalMs ??
+        configDefaults.gateway?.bots?.ilinkWechat?.pollIntervalMs ??
+        (process.env.CODECLAW_ILINK_WECHAT_POLL_INTERVAL_MS
+          ? Number.parseInt(process.env.CODECLAW_ILINK_WECHAT_POLL_INTERVAL_MS, 10)
+          : undefined)
+    });
+
+    autoWechatWorkerPromise = worker
+      .run()
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.stack ?? error.message : String(error);
+        console.error(`CodeClaw wechat auto-worker failed:\n${message}`);
+      })
+      .finally(() => {
+        autoWechatWorkerStarted = false;
+        autoWechatWorkerPromise = null;
+      });
+    autoWechatWorkerStarted = true;
+    console.log("CodeClaw wechat auto-worker started");
+  };
+  const wechatLoginManager = configuredWechatTokenFile
+    ? wechatService.createLoginManager({
+        tokenFile: configuredWechatTokenFile,
+        baseUrl: configuredWechatBaseUrl,
+        onConfirmed: async () => {
+          await ensureAutoWechatWorkerStarted();
+        }
+      })
+    : undefined;
   const queryEngine = createQueryEngine({
     currentProvider: runtime.selection?.current ?? null,
     fallbackProvider: runtime.selection?.fallback ?? null,
     permissionMode: runtime.config?.defaults.permissionMode ?? "plan",
     workspace: runtime.config?.defaults.workspace ?? process.cwd(),
     autoCompactThreshold: runtime.config?.memory.l1AutoCompactThreshold,
-    approvalsDir: paths.approvalsDir
+    approvalsDir: paths.approvalsDir,
+    wechat: {
+      tokenFile: configuredWechatTokenFile,
+      baseUrl: configuredWechatBaseUrl,
+      attachCurrentSession: () => {
+        wechatService.attachSharedRuntime(queryEngine);
+      },
+      loginManager: wechatLoginManager
+    }
   });
   const ingressGateway = new IngressGateway(queryEngine);
 
@@ -131,6 +210,50 @@ async function main(): Promise<void> {
     console.log(`CodeClaw gateway listening on http://127.0.0.1:${port}`);
     if (authToken) {
       console.log("Gateway auth: bearer token enabled");
+    }
+    return;
+  }
+
+  if (command === "wechat") {
+    const runWorker = restArgs.includes("--worker");
+    const portFlagIndex = restArgs.findIndex((arg) => arg === "--port");
+    const parsedPort =
+      portFlagIndex >= 0 && restArgs[portFlagIndex + 1]
+        ? Number.parseInt(restArgs[portFlagIndex + 1] ?? "", 10)
+        : Number.NaN;
+    const port = Number.isFinite(parsedPort) ? parsedPort : 3100;
+    const authToken = process.env.CODECLAW_WECHAT_TOKEN ?? null;
+    if (runWorker) {
+      const tokenFile = configuredWechatTokenFile;
+      if (!tokenFile) {
+        throw new Error(
+          "iLink WeChat worker requires gateway.bots.ilinkWechat.tokenFile or CODECLAW_ILINK_WECHAT_TOKEN_FILE"
+        );
+      }
+
+      const worker = wechatService.createWorker({
+        tokenFile,
+        baseUrl: configuredWechatBaseUrl,
+        pollIntervalMs:
+          runtime.config?.gateway?.bots?.ilinkWechat?.pollIntervalMs ??
+          configDefaults.gateway?.bots?.ilinkWechat?.pollIntervalMs ??
+          (process.env.CODECLAW_ILINK_WECHAT_POLL_INTERVAL_MS
+            ? Number.parseInt(process.env.CODECLAW_ILINK_WECHAT_POLL_INTERVAL_MS, 10)
+            : undefined)
+      });
+
+      console.log("CodeClaw wechat worker started");
+      await worker.run();
+      return;
+    }
+
+    await wechatService.start({
+      port,
+      authToken
+    });
+    console.log(`CodeClaw wechat adapter listening on http://127.0.0.1:${port}`);
+    if (authToken) {
+      console.log("WeChat adapter auth: bearer token enabled");
     }
     return;
   }

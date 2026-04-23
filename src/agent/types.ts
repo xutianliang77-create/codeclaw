@@ -22,6 +22,40 @@ export interface PendingApprovalView {
   totalPending: number;
 }
 
+export interface PendingOrchestrationApprovalView {
+  id: string;
+  operation: "write" | "append" | "replace";
+  target: string;
+  reason: string;
+  queuePosition: number;
+  totalPending: number;
+}
+
+export interface ChannelSessionSnapshot {
+  sessionId: string;
+  messages: EngineMessage[];
+  pendingApproval: PendingApprovalView | null;
+  pendingOrchestrationApproval: PendingOrchestrationApprovalView | null;
+  runtime: {
+    modelLabel: string;
+    permissionMode: PermissionMode;
+    providerLabel: string;
+    fallbackProviderLabel: string;
+    activeSkillName: string | null;
+  };
+}
+
+export interface WechatLoginStateView {
+  phase: "idle" | "waiting" | "scanned" | "confirmed" | "expired" | "error";
+  qrcode?: string;
+  qrcodeImageContent?: string;
+  tokenFile: string;
+  baseUrl: string;
+  message: string;
+  ilinkBotId?: string;
+  ilinkUserId?: string;
+}
+
 export interface QueryEngineOptions {
   currentProvider: ProviderStatus | null;
   fallbackProvider: ProviderStatus | null;
@@ -30,6 +64,17 @@ export interface QueryEngineOptions {
   autoCompactThreshold?: number;
   approvalsDir?: string;
   fetchImpl?: typeof fetch;
+  wechat?: {
+    tokenFile?: string;
+    baseUrl?: string;
+    attachCurrentSession?(): void;
+    loginManager?: {
+      ensureStarted(): Promise<WechatLoginStateView>;
+      restart?(): Promise<WechatLoginStateView>;
+      refreshStatus(): Promise<WechatLoginStateView>;
+      getState(): WechatLoginStateView;
+    };
+  };
 }
 
 export type EngineEvent =
@@ -79,8 +124,10 @@ export type EngineEvent =
 export interface QueryEngine {
   submitMessage(prompt: string): AsyncGenerator<EngineEvent>;
   interrupt(): void;
+  subscribe(listener: () => void): () => void;
   getMessages(): EngineMessage[];
   getPendingApproval(): PendingApprovalView | null;
+  getChannelSnapshot(): ChannelSessionSnapshot;
   getSessionId(): string;
   setModel(model: string): void;
   getRuntimeState(): {

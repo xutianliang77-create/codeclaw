@@ -5,6 +5,7 @@ import type { StoredPendingApproval } from "../approvals/store";
 import { runDoctor } from "../commands/doctor";
 import type { PermissionMode } from "../lib/config";
 import { callMcpTool, listMcpResources, listMcpServers, listMcpTools, readMcpResource } from "../mcp/service";
+import QRCode from "qrcode";
 import {
   buildApprovedExecutionPlan,
   buildGapSignature,
@@ -32,12 +33,15 @@ import type { SkillDefinition } from "../skills/registry";
 import { detectLocalTool, inspectLocalTool, isHandledLocalToolResult, runLocalTool } from "../tools/local";
 import type { LocalToolName } from "../tools/local";
 import type {
+  ChannelSessionSnapshot,
   EngineEvent,
   EngineMessage,
   EngineMessageSource,
   PendingApprovalView,
+  PendingOrchestrationApprovalView,
   QueryEngine,
-  QueryEngineOptions
+  QueryEngineOptions,
+  WechatLoginStateView
 } from "./types";
 
 function createId(prefix: string): string {
@@ -46,7 +50,7 @@ function createId(prefix: string): string {
 
 function buildBuiltinReply(prompt: string): string | null {
   if (prompt === "help" || prompt === "/help") {
-    return "Available commands: help, doctor, setup, config, /status, /resume, /session, /providers, /context, /memory, /compact, /approvals, /diff, /skills, /skills use <name>, /skills clear, /hooks, /init, /doctor, /review <goal>, /summary, /export [path], /reload-plugins, /debug-tool-call <command>, /plan <goal>, /orchestrate <goal>, /model <name>, /mode <permission-mode>, /approve [id], /deny [id], /read <path>, /glob <pattern>, /symbol <name>, /definition <name>, /references <name>, /bash <command>, /write <path> :: <content>, /append <path> :: <content>, /replace <path> :: <find> :: <replace>, /exit.";
+    return "Available commands: help, doctor, setup, config, /status, /resume, /session, /providers, /context, /memory, /compact, /approvals, /diff, /skills, /skills use <name>, /skills clear, /hooks, /init, /doctor, /review <goal>, /summary, /export [path], /reload-plugins, /debug-tool-call <command>, /mcp, /wechat, /wechat status, /wechat refresh, /plan <goal>, /orchestrate <goal>, /model <name>, /mode <permission-mode>, /approve [id], /deny [id], /read <path>, /glob <pattern>, /symbol <name>, /definition <name>, /references <name>, /bash <command>, /write <path> :: <content>, /append <path> :: <content>, /replace <path> :: <find> :: <replace>, /exit.";
   }
 
   if (prompt === "doctor") {
@@ -164,6 +168,69 @@ function formatSkill(skill: SkillDefinition): string {
   return `${skill.name} (${skill.source}) - ${skill.description} [tools: ${skill.allowedTools.join(", ")}]`;
 }
 
+function formatWechatLoginState(state: WechatLoginStateView): string {
+  const terminalQr =
+    state.phase !== "error"
+      ? renderTerminalQr(state.qrcodeImageContent ?? state.qrcode ?? null)
+      : null;
+
+  return [
+    "WeChat",
+    `phase: ${state.phase}`,
+    `token-file: ${state.tokenFile}`,
+    `base-url: ${state.baseUrl}`,
+    `message: ${state.message}`,
+    ...(state.qrcode ? [`qrcode: ${state.qrcode}`] : []),
+    ...(state.qrcodeImageContent ? [`qrcode-image: ${state.qrcodeImageContent}`] : []),
+    ...(state.ilinkBotId ? [`ilink-bot-id: ${state.ilinkBotId}`] : []),
+    ...(state.ilinkUserId ? [`ilink-user-id: ${state.ilinkUserId}`] : []),
+    ...(terminalQr ? ["", "terminal-qr:", terminalQr] : [])
+  ].join("\n");
+}
+
+function renderTerminalQr(content: string | null): string | null {
+  if (!content) {
+    return null;
+  }
+
+  const qr = QRCode.create(content, {
+    errorCorrectionLevel: "M"
+  });
+  const size = qr.modules.size;
+  const data = qr.modules.data;
+  const quietZone = 2;
+  const rows: string[] = [];
+
+  for (let y = -quietZone; y < size + quietZone; y += 2) {
+    let line = "";
+    for (let x = -quietZone; x < size + quietZone; x += 1) {
+      const upper = isQrDark(data, size, x, y);
+      const lower = isQrDark(data, size, x, y + 1);
+
+      if (upper && lower) {
+        line += " ";
+      } else if (upper) {
+        line += "▀";
+      } else if (lower) {
+        line += "▄";
+      } else {
+        line += "█";
+      }
+    }
+    rows.push(line);
+  }
+
+  return rows.join("\n");
+}
+
+function isQrDark(data: Uint8Array | number[], size: number, x: number, y: number): boolean {
+  if (x < 0 || y < 0 || x >= size || y >= size) {
+    return false;
+  }
+
+  return Boolean(data[y * size + x]);
+}
+
 function injectSkillPrompt(skill: SkillDefinition, prompt: string): string {
   return [
     `[Skill: ${skill.name}]`,
@@ -228,6 +295,7 @@ class LocalQueryEngine implements QueryEngine {
   private readonly sessionId = createId("session");
   private readonly messages: EngineMessage[];
   private readonly skillRegistry = createSkillRegistry();
+  private readonly listeners = new Set<() => void>();
   private interrupted = false;
   private abortController: AbortController | null = null;
   private modelLabel: string;
@@ -297,6 +365,7 @@ class LocalQueryEngine implements QueryEngine {
       source: trimmed.startsWith("/") ? "command" : "user"
     });
     this.lastEstimatedTokens = estimateMessageTokens(this.messages);
+    this.notifyListeners();
 
     yield { type: "phase", phase: "planning" };
 
@@ -360,6 +429,7 @@ class LocalQueryEngine implements QueryEngine {
           text: output,
           source: "local"
         });
+        this.notifyListeners();
         yield { type: "phase", phase: "completed" };
         return;
       }
@@ -391,6 +461,7 @@ class LocalQueryEngine implements QueryEngine {
           text: output,
           source: "local"
         });
+        this.notifyListeners();
         yield { type: "phase", phase: "completed" };
         return;
       }
@@ -451,6 +522,7 @@ class LocalQueryEngine implements QueryEngine {
             text: output,
             source: "local"
           });
+          this.notifyListeners();
           yield { type: "phase", phase: "completed" };
           return;
         }
@@ -728,6 +800,7 @@ class LocalQueryEngine implements QueryEngine {
         text: haltedText,
         source: assistantMessageSource
       });
+      this.notifyListeners();
       yield {
         type: "message-complete",
         messageId,
@@ -743,6 +816,7 @@ class LocalQueryEngine implements QueryEngine {
       text: output,
       source: assistantMessageSource
     });
+    this.notifyListeners();
     yield {
       type: "message-complete",
       messageId,
@@ -846,6 +920,10 @@ class LocalQueryEngine implements QueryEngine {
 
     if (matchesCommand(prompt, "/mcp")) {
       return this.handleMcpCommand(prompt);
+    }
+
+    if (matchesCommand(prompt, "/wechat")) {
+      return this.handleWechatCommand(prompt);
     }
 
     if (matchesCommand(prompt, "/review")) {
@@ -1277,6 +1355,41 @@ class LocalQueryEngine implements QueryEngine {
     return "Usage: /mcp, /mcp resources <server>, /mcp tools <server>, /mcp read <server> <resource>, /mcp call <server> <tool> <input>";
   }
 
+  private async handleWechatCommand(prompt: string): Promise<string> {
+    this.options.wechat?.attachCurrentSession?.();
+
+    const loginManager = this.options.wechat?.loginManager;
+    if (!loginManager) {
+      return "WeChat login is not configured. Set gateway.bots.ilinkWechat.tokenFile and start the CLI again.";
+    }
+
+    const suffix = prompt.slice("/wechat".length).trim();
+    if (suffix === "status") {
+      return formatWechatLoginState(await loginManager.refreshStatus());
+    }
+    if (suffix === "refresh" || suffix === "restart") {
+      const refreshed = loginManager.restart ? await loginManager.restart() : await loginManager.ensureStarted();
+      return [
+        formatWechatLoginState(refreshed),
+        "",
+        "Generated a fresh WeChat login QR code. Scan it soon, or run /wechat refresh again."
+      ].join("\n");
+    }
+
+    const current = await loginManager.refreshStatus();
+    if (current.phase === "confirmed") {
+      return formatWechatLoginState(current);
+    }
+
+    const started = await loginManager.ensureStarted();
+    const guidance =
+      started.phase === "waiting" || started.phase === "scanned"
+        ? "Use WeChat to scan the QR code. Run /wechat status to refresh login state."
+        : "Run /wechat status after fixing the connection or configuration.";
+
+    return [formatWechatLoginState(started), "", guidance].join("\n");
+  }
+
   private isToolAllowedByActiveSkill(toolName: LocalToolName): boolean {
     return this.activeSkill ? this.activeSkill.allowedTools.includes(toolName) : true;
   }
@@ -1545,6 +1658,13 @@ class LocalQueryEngine implements QueryEngine {
     this.abortController?.abort();
   }
 
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
   getMessages(): EngineMessage[] {
     return [...this.messages];
   }
@@ -1563,6 +1683,28 @@ class LocalQueryEngine implements QueryEngine {
       reason: activeApproval.reason,
       queuePosition: 1,
       totalPending: this.pendingApprovals.length
+    };
+  }
+
+  getChannelSnapshot(): ChannelSessionSnapshot {
+    const pendingApproval = this.getPendingApproval();
+    const pendingOrchestrationApproval = this.pendingOrchestrationApprovals[0]
+      ? {
+          id: this.pendingOrchestrationApprovals[0].id,
+          operation: this.pendingOrchestrationApprovals[0].operation,
+          target: this.pendingOrchestrationApprovals[0].target,
+          reason: this.pendingOrchestrationApprovals[0].reason,
+          queuePosition: 1,
+          totalPending: this.pendingOrchestrationApprovals.length
+        } satisfies PendingOrchestrationApprovalView
+      : null;
+
+    return {
+      sessionId: this.sessionId,
+      messages: this.getMessages(),
+      pendingApproval,
+      pendingOrchestrationApproval,
+      runtime: this.getRuntimeState()
     };
   }
 
@@ -1731,6 +1873,12 @@ class LocalQueryEngine implements QueryEngine {
       if (detail) {
         this.changedFiles.add(detail);
       }
+    }
+  }
+
+  private notifyListeners(): void {
+    for (const listener of this.listeners) {
+      listener();
     }
   }
 }

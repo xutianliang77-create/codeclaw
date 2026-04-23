@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const tempDirs: string[] = [];
-const workspaceRoot = "/Users/xutianliang/Downloads/codeclaw";
+const workspaceRoot = process.cwd();
 const bridgeScript = path.join(workspaceRoot, "scripts", "lsp_multilspy_bridge.py");
 const venvPython = path.join(workspaceRoot, ".venv-lsp", "bin", "python");
 const canRunRealBridge = existsSync(bridgeScript) && existsSync(venvPython);

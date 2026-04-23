@@ -183,7 +183,43 @@ describe("query engine", () => {
       currentProvider: provider,
       fallbackProvider: null,
       permissionMode: "plan",
-      workspace
+      workspace,
+      wechat: {
+        tokenFile: "~/.claude/wechat-ibot/default.json",
+        baseUrl: "https://ilinkai.weixin.qq.com",
+        loginManager: {
+          async ensureStarted() {
+            return {
+              phase: "waiting" as const,
+              tokenFile: "~/.claude/wechat-ibot/default.json",
+              baseUrl: "https://ilinkai.weixin.qq.com",
+              qrcode: "qr-1",
+              qrcodeImageContent: "https://example.test/qr.png",
+              message: "scan the QR code with WeChat to join"
+            };
+          },
+          async refreshStatus() {
+            return {
+              phase: "waiting" as const,
+              tokenFile: "~/.claude/wechat-ibot/default.json",
+              baseUrl: "https://ilinkai.weixin.qq.com",
+              qrcode: "qr-1",
+              qrcodeImageContent: "https://example.test/qr.png",
+              message: "scan the QR code with WeChat to join"
+            };
+          },
+          getState() {
+            return {
+              phase: "waiting" as const,
+              tokenFile: "~/.claude/wechat-ibot/default.json",
+              baseUrl: "https://ilinkai.weixin.qq.com",
+              qrcode: "qr-1",
+              qrcodeImageContent: "https://example.test/qr.png",
+              message: "scan the QR code with WeChat to join"
+            };
+          }
+        }
+      }
     });
 
     const events = await collect(engine.submitMessage("/definition greetUser"));
@@ -266,7 +302,43 @@ describe("query engine", () => {
       currentProvider: provider,
       fallbackProvider: null,
       permissionMode: "plan",
-      workspace
+      workspace,
+      wechat: {
+        tokenFile: "~/.claude/wechat-ibot/default.json",
+        baseUrl: "https://ilinkai.weixin.qq.com",
+        loginManager: {
+          async ensureStarted() {
+            return {
+              phase: "waiting" as const,
+              tokenFile: "~/.claude/wechat-ibot/default.json",
+              baseUrl: "https://ilinkai.weixin.qq.com",
+              qrcode: "qr-1",
+              qrcodeImageContent: "https://example.test/qr.png",
+              message: "scan the QR code with WeChat to join"
+            };
+          },
+          async refreshStatus() {
+            return {
+              phase: "waiting" as const,
+              tokenFile: "~/.claude/wechat-ibot/default.json",
+              baseUrl: "https://ilinkai.weixin.qq.com",
+              qrcode: "qr-1",
+              qrcodeImageContent: "https://example.test/qr.png",
+              message: "scan the QR code with WeChat to join"
+            };
+          },
+          getState() {
+            return {
+              phase: "waiting" as const,
+              tokenFile: "~/.claude/wechat-ibot/default.json",
+              baseUrl: "https://ilinkai.weixin.qq.com",
+              qrcode: "qr-1",
+              qrcodeImageContent: "https://example.test/qr.png",
+              message: "scan the QR code with WeChat to join"
+            };
+          }
+        }
+      }
     });
 
     await collect(engine.submitMessage("/write first.txt :: one"));
@@ -386,7 +458,43 @@ describe("query engine", () => {
       currentProvider: provider,
       fallbackProvider: null,
       permissionMode: "plan",
-      workspace
+      workspace,
+      wechat: {
+        tokenFile: "~/.claude/wechat-ibot/default.json",
+        baseUrl: "https://ilinkai.weixin.qq.com",
+        loginManager: {
+          async ensureStarted() {
+            return {
+              phase: "waiting" as const,
+              tokenFile: "~/.claude/wechat-ibot/default.json",
+              baseUrl: "https://ilinkai.weixin.qq.com",
+              qrcode: "qr-1",
+              qrcodeImageContent: "https://example.test/qr.png",
+              message: "scan the QR code with WeChat to join"
+            };
+          },
+          async refreshStatus() {
+            return {
+              phase: "waiting" as const,
+              tokenFile: "~/.claude/wechat-ibot/default.json",
+              baseUrl: "https://ilinkai.weixin.qq.com",
+              qrcode: "qr-1",
+              qrcodeImageContent: "https://example.test/qr.png",
+              message: "scan the QR code with WeChat to join"
+            };
+          },
+          getState() {
+            return {
+              phase: "waiting" as const,
+              tokenFile: "~/.claude/wechat-ibot/default.json",
+              baseUrl: "https://ilinkai.weixin.qq.com",
+              qrcode: "qr-1",
+              qrcodeImageContent: "https://example.test/qr.png",
+              message: "scan the QR code with WeChat to join"
+            };
+          }
+        }
+      }
     });
 
     await collect(engine.submitMessage("/skills use review"));
@@ -413,7 +521,43 @@ describe("query engine", () => {
       currentProvider: provider,
       fallbackProvider: null,
       permissionMode: "plan",
-      workspace
+      workspace,
+      wechat: {
+        tokenFile: "~/.claude/wechat-ibot/default.json",
+        baseUrl: "https://ilinkai.weixin.qq.com",
+        loginManager: {
+          async ensureStarted() {
+            return {
+              phase: "waiting" as const,
+              tokenFile: "~/.claude/wechat-ibot/default.json",
+              baseUrl: "https://ilinkai.weixin.qq.com",
+              qrcode: "qr-1",
+              qrcodeImageContent: "https://example.test/qr.png",
+              message: "scan the QR code with WeChat to join"
+            };
+          },
+          async refreshStatus() {
+            return {
+              phase: "waiting" as const,
+              tokenFile: "~/.claude/wechat-ibot/default.json",
+              baseUrl: "https://ilinkai.weixin.qq.com",
+              qrcode: "qr-1",
+              qrcodeImageContent: "https://example.test/qr.png",
+              message: "scan the QR code with WeChat to join"
+            };
+          },
+          getState() {
+            return {
+              phase: "waiting" as const,
+              tokenFile: "~/.claude/wechat-ibot/default.json",
+              baseUrl: "https://ilinkai.weixin.qq.com",
+              qrcode: "qr-1",
+              qrcodeImageContent: "https://example.test/qr.png",
+              message: "scan the QR code with WeChat to join"
+            };
+          }
+        }
+      }
     });
 
     await collect(engine.submitMessage("/summary"));
@@ -441,6 +585,11 @@ describe("query engine", () => {
 
     await collect(engine.submitMessage("/doctor"));
     expect(engine.getMessages().at(-1)?.text).toContain("CodeClaw 0.5.0");
+
+    await collect(engine.submitMessage("/wechat"));
+    expect(engine.getMessages().at(-1)?.text).toContain("WeChat");
+    expect(engine.getMessages().at(-1)?.text).toContain("qrcode: qr-1");
+    expect(engine.getMessages().at(-1)?.text).toContain("/wechat status");
   });
 
   it("supports the minimal MCP command loop and constrains MCP tool calls by mode", async () => {

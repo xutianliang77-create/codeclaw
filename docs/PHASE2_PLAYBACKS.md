@@ -35,7 +35,7 @@ Planner / Executor / Reflector lane with realistic task samples.
 
 The executable playback suite lives in:
 
-- [test/orchestration-playback.test.ts](/Users/xutianliang/Downloads/codeclaw/test/orchestration-playback.test.ts)
+- `test/orchestration-playback.test.ts`
 
 It is intended to act as the primary Phase 2 sample playback proof until a
 larger replay harness is added.
