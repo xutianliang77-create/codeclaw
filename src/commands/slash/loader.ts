@@ -38,10 +38,14 @@ import mcpCommand from "./builtins/mcp";
 import wechatCommand from "./builtins/wechat";
 import helpCommand from "./builtins/help";
 import planCommand from "./builtins/plan";
+import reviewCommand from "./builtins/review";
+import orchestrateCommand from "./builtins/orchestrate";
 
 const BUILTINS: Array<SlashCommand | SlashCommand[]> = [
   helpCommand,
   planCommand,
+  reviewCommand,
+  orchestrateCommand,
   modeCommand,
   doctorCommand,
   statusCommand,

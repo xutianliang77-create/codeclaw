@@ -135,9 +135,11 @@ describe("loadBuiltins", () => {
       "/debug-tool-call",
       "/mcp",
       "/wechat",
-      // help / plan
+      // workflow + help
       "/help",
       "/plan",
+      "/review",
+      "/orchestrate",
     ]) {
       expect(reg.has(name)).toBe(true);
     }
@@ -228,6 +230,36 @@ describe("delegating builtins · duck-type pattern", () => {
     const out = await reg.dispatch("/plan goal", {});
     if (out?.result.kind !== "reply") throw new Error("expected reply");
     expect(out.result.text).toContain("unavailable");
+  });
+
+  it("/review delegates to runReviewCommand (async)", async () => {
+    const reg = new SlashRegistry();
+    loadBuiltins(reg);
+    const holder = {
+      runReviewCommand: async (p: string) => `REVIEW:${p}`,
+    };
+    const out = await reg.dispatch("/review src/api", holder);
+    expect(out?.result).toEqual({ kind: "reply", text: "REVIEW:/review src/api" });
+  });
+
+  it("/orchestrate delegates to runOrchestrateCommand (async)", async () => {
+    const reg = new SlashRegistry();
+    loadBuiltins(reg);
+    const holder = {
+      runOrchestrateCommand: async (p: string) => `ORCH:${p}`,
+    };
+    const out = await reg.dispatch("/orchestrate add tests", holder);
+    expect(out?.result).toEqual({ kind: "reply", text: "ORCH:/orchestrate add tests" });
+  });
+
+  it("/review and /orchestrate degrade when method missing", async () => {
+    const reg = new SlashRegistry();
+    loadBuiltins(reg);
+    for (const cmd of ["/review goal", "/orchestrate goal"]) {
+      const out = await reg.dispatch(cmd, {});
+      if (out?.result.kind !== "reply") throw new Error("expected reply");
+      expect(out.result.text).toContain("unavailable");
+    }
   });
 
   it("/help dispatches to registry.generateHelp via getSlashRegistry()", async () => {

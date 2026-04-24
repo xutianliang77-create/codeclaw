@@ -940,90 +940,88 @@ class LocalQueryEngine implements QueryEngine {
     //   /doctor /summary /export /reload-plugins /debug-tool-call /mcp /wechat
     // 老的 build*/handle* 私有方法保留供 registry 通过 duck-type 调用。
 
-    if (matchesCommand(prompt, "/review")) {
-      const reviewGoal = prompt.replace("/review", "").trim();
-      if (!reviewGoal) {
-        return "Usage: /review <goal>";
-      }
-
-      const reviewSkill = this.skillRegistry.get("review");
-      const plan = buildOrchestrationPlan(`review ${reviewGoal}`, this.buildOrchestrationContext());
-      const disallowedSkillTools = this.getDisallowedSkillToolsForPlan(plan, reviewSkill);
-
-      if (disallowedSkillTools.length > 0) {
-        return [
-          "Review",
-          `goal: ${reviewGoal}`,
-          `skill: ${reviewSkill?.name ?? "review"}`,
-          `blocked-tools: ${disallowedSkillTools.join(", ")}`,
-          `reason: review lane only allows ${reviewSkill?.allowedTools.join(", ") ?? "read-only tools"}`
-        ].join("\n");
-      }
-
-      const execution = await executeOrchestrationPlan(plan, this.buildOrchestrationContext());
-      const reflector = reflectOnExecution(plan.goals, execution, this.recentGapSignatures);
-      const gapSignature = buildGapSignature(execution.gaps);
-
-      if (gapSignature) {
-        this.recentGapSignatures.push(gapSignature);
-        if (this.recentGapSignatures.length > 5) {
-          this.recentGapSignatures.shift();
-        }
-      }
-
-      this.pendingOrchestrationApprovals = execution.approvalRequests
-        .filter((request) => request.status === "pending")
-        .map((request) => ({
-          ...request,
-          planGoal: plan.userGoal
-        }));
-
-      return this.buildReviewReply(plan, execution, reflector);
-    }
-
-    // /plan 已迁移到 SlashRegistry（W2-02 batch6），实际逻辑在 runPlanCommand。
-
-    if (matchesCommand(prompt, "/orchestrate")) {
-      const userGoal = prompt.replace("/orchestrate", "").trim();
-      if (!userGoal) {
-        return "Usage: /orchestrate <goal>";
-      }
-
-      const plan = buildOrchestrationPlan(userGoal, this.buildOrchestrationContext());
-      const disallowedSkillTools = this.getDisallowedSkillToolsForPlan(plan);
-      if (disallowedSkillTools.length > 0) {
-        return [
-          "Orchestration",
-          `goal: ${plan.userGoal}`,
-          `intent: ${plan.intent.type}`,
-          `skill: ${this.activeSkill?.name ?? "none"}`,
-          `blocked-tools: ${disallowedSkillTools.join(", ")}`,
-          `reason: active skill only allows ${this.activeSkill?.allowedTools.join(", ") ?? "default tools"}`
-        ].join("\n");
-      }
-
-      const execution = await executeOrchestrationPlan(plan, this.buildOrchestrationContext());
-      const reflector = reflectOnExecution(plan.goals, execution, this.recentGapSignatures);
-      const gapSignature = buildGapSignature(execution.gaps);
-
-      if (gapSignature) {
-        this.recentGapSignatures.push(gapSignature);
-        if (this.recentGapSignatures.length > 5) {
-          this.recentGapSignatures.shift();
-        }
-      }
-
-      this.pendingOrchestrationApprovals = execution.approvalRequests
-        .filter((request) => request.status === "pending")
-        .map((request) => ({
-          ...request,
-          planGoal: plan.userGoal
-        }));
-
-      return this.buildOrchestrationReply(plan, execution, reflector);
-    }
+    // /review /orchestrate 已迁移到 SlashRegistry（W2-02 batch7），
+    // 实际逻辑在 runReviewCommand / runOrchestrateCommand。
 
     return undefined;
+  }
+
+  /**
+   * 共用：跑出一个 plan 的完整 execute → reflect → gap → pendingApproval 副作用流，
+   * 由 /review 与 /orchestrate 调用。
+   */
+  private async executePlanWithSideEffects(plan: OrchestrationPlan): Promise<{
+    execution: Awaited<ReturnType<typeof executeOrchestrationPlan>>;
+    reflector: ReturnType<typeof reflectOnExecution>;
+  }> {
+    const execution = await executeOrchestrationPlan(plan, this.buildOrchestrationContext());
+    const reflector = reflectOnExecution(plan.goals, execution, this.recentGapSignatures);
+    const gapSignature = buildGapSignature(execution.gaps);
+
+    if (gapSignature) {
+      this.recentGapSignatures.push(gapSignature);
+      if (this.recentGapSignatures.length > 5) {
+        this.recentGapSignatures.shift();
+      }
+    }
+
+    this.pendingOrchestrationApprovals = execution.approvalRequests
+      .filter((request) => request.status === "pending")
+      .map((request) => ({
+        ...request,
+        planGoal: plan.userGoal
+      }));
+
+    return { execution, reflector };
+  }
+
+  /** 给 /review slash builtin 用 */
+  public async runReviewCommand(prompt: string): Promise<string> {
+    const reviewGoal = prompt.replace("/review", "").trim();
+    if (!reviewGoal) {
+      return "Usage: /review <goal>";
+    }
+
+    const reviewSkill = this.skillRegistry.get("review");
+    const plan = buildOrchestrationPlan(`review ${reviewGoal}`, this.buildOrchestrationContext());
+    const disallowedSkillTools = this.getDisallowedSkillToolsForPlan(plan, reviewSkill);
+
+    if (disallowedSkillTools.length > 0) {
+      return [
+        "Review",
+        `goal: ${reviewGoal}`,
+        `skill: ${reviewSkill?.name ?? "review"}`,
+        `blocked-tools: ${disallowedSkillTools.join(", ")}`,
+        `reason: review lane only allows ${reviewSkill?.allowedTools.join(", ") ?? "read-only tools"}`
+      ].join("\n");
+    }
+
+    const { execution, reflector } = await this.executePlanWithSideEffects(plan);
+    return this.buildReviewReply(plan, execution, reflector);
+  }
+
+  /** 给 /orchestrate slash builtin 用 */
+  public async runOrchestrateCommand(prompt: string): Promise<string> {
+    const userGoal = prompt.replace("/orchestrate", "").trim();
+    if (!userGoal) {
+      return "Usage: /orchestrate <goal>";
+    }
+
+    const plan = buildOrchestrationPlan(userGoal, this.buildOrchestrationContext());
+    const disallowedSkillTools = this.getDisallowedSkillToolsForPlan(plan);
+    if (disallowedSkillTools.length > 0) {
+      return [
+        "Orchestration",
+        `goal: ${plan.userGoal}`,
+        `intent: ${plan.intent.type}`,
+        `skill: ${this.activeSkill?.name ?? "none"}`,
+        `blocked-tools: ${disallowedSkillTools.join(", ")}`,
+        `reason: active skill only allows ${this.activeSkill?.allowedTools.join(", ") ?? "default tools"}`
+      ].join("\n");
+    }
+
+    const { execution, reflector } = await this.executePlanWithSideEffects(plan);
+    return this.buildOrchestrationReply(plan, execution, reflector);
   }
 
   private buildStatusReply(): string {
