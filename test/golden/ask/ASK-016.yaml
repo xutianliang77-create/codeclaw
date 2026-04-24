@@ -1,0 +1,27 @@
+id: ASK-016
+version: 1
+category: tool-choice
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  我要在仓库里找出"所有调用了某个旧 API 函数的位置"，跨文件、跨语言不限制。
+  应该用 /grep（regex）还是 /symbol + /references？两者各自适合什么场景？
+expected:
+  must_mention:
+    - references 或 引用
+    - symbol 或 LSP 或 语义
+    - regex 或 正则 或 文本
+    - 跨语言 或 多语言
+  must_not_mention:
+    - 用 ls 即可
+    - 直接读所有文件
+  rubric: |
+    /symbol + /references：
+    - 走 LSP（multilspy 或 fallback regex 索引），能区分"同名变量在不同 scope"
+    - 但跨语言要分别启服务（TS / Py 各一），多语言混搭仓库覆盖不全
+    /grep：
+    - 单纯文本，跨语言一刀切，对"调用方都用统一 API 名"的场景够用
+    - 缺点：无法区分注释里的提及、字符串字面量、同名局部变量
+    实战建议：先用 /grep 拉出候选清单（cheap），再用 /references 在主语言（TS/Py）做语义确认（expensive）。
+  answer_key: ASK-016.md

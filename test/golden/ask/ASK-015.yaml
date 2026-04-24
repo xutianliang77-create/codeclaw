@@ -1,0 +1,23 @@
+id: ASK-015
+version: 1
+category: architecture
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  EngineFsm 的 phase 有 idle / planning / executing / reflecting / compacting / awaiting / halted 共 7 个。
+  为什么不把 reflecting 合进 executing？为什么 compacting 要单独成一个 phase 而不是在 executing 里偷偷做？
+expected:
+  must_mention:
+    - 可观测 或 observability 或 指标 或 metric
+    - reflector 或 反思
+    - 时长 或 duration 或 卡住
+  must_not_mention:
+    - reflecting 没用
+    - compacting 是 bug
+  rubric: |
+    分层目的是"对外可观测"：
+    - reflecting：是 Planner-Executor-Reflector 三段式里独立一档；监控里能看出"工具跑完但反思超慢"，这与"工具跑超慢"是两类问题。
+    - compacting：可能在任何 phase 里被触发（reactiveCompact），独立成 phase 让 /status 看得到"正在压缩历史"，对用户不至于以为卡死。
+    把它们藏进 executing 会让 P50 latency 失真、卡住根因排查困难。
+  answer_key: ASK-015.md

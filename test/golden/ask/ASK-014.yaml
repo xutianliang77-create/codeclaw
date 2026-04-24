@@ -1,0 +1,27 @@
+id: ASK-014
+version: 1
+category: architecture
+difficulty: hard
+requires:
+  tools: []
+prompt: |
+  CodeClaw 把 data.db 与 audit.db 拆成两个 SQLite 文件，连接也分别建。
+  为什么不用一个 db 多张表？这种拆分给开发 / 运维 / 审计带来哪些好处？有什么代价？
+expected:
+  must_mention:
+    - 写入吞吐 或 锁 或 lock 或 锁竞争
+    - 备份 或 backup 或 归档 或 archive
+    - 权限 或 permission 或 chmod 或 隔离
+  must_not_mention:
+    - SQLite 不支持事务
+    - 必须用 PostgreSQL
+  rubric: |
+    好处：
+    - 锁/吞吐：业务表频繁 read/write，审计纯 append；分库避免业务事务等审计 fsync。
+    - 备份策略：data.db 可丢可重建；audit.db 必须强备份且不可删，分文件方便差异化策略。
+    - 权限：可以对 audit.db chmod 400 / 不同用户 own，防本地用户改业务后顺手抹审计。
+    - 安全审计：取证场景里 audit.db 可独立挂载到只读 / 第三方系统校验。
+    代价：
+    - 应用层多一份连接管理（已封装在 storage/db.ts、audit.ts）。
+    - 不能跨库 JOIN（实际不需要，关联只走 ULID id）。
+  answer_key: ASK-014.md

@@ -1,0 +1,26 @@
+id: ASK-012
+version: 1
+category: debug
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  我跑 /doctor 后看到 storage 段提示 "data.db: locked"。
+  CodeClaw 用 better-sqlite3 + WAL 模式，怎么排查这个 lock？
+  最常见的根因是什么？应急处理 vs 根因修复分别怎么做？
+expected:
+  must_mention:
+    - WAL 或 wal
+    - 进程 或 process 或 pid
+    - 残留 或 lsof 或 fuser 或 占用
+  must_not_mention:
+    - 重装系统
+    - 关闭 SQLite
+  rubric: |
+    正确思路：
+    - 排查：lsof ~/.codeclaw/data.db / fuser，找占用进程；checkpoint 状态看 wal 是否长。
+    - 最常根因：上一个 codeclaw 进程崩了没退干净 / SDK 长连接 / wechat worker 子进程 hang。
+    - 应急：kill 占用进程；删 .db-shm / .db-wal 残留 lock 文件；重起。
+    - 根因修复：在退出钩子里调 db.close()；超时 watchdog；接 ipc 心跳。
+    答"重装" / "关掉 SQLite" 是不专业建议。
+  answer_key: ASK-012.md

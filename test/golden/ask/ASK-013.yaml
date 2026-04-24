@@ -1,0 +1,29 @@
+id: ASK-013
+version: 1
+category: debug
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  审计链 verify 失败，提示 "chain broken at event_id=01HX..."。
+  请说明可能的根因（至少 3 类）以及如何定位是"被人篡改"还是"自然损坏"。
+expected:
+  must_mention:
+    - 篡改 或 tamper
+    - 时钟 或 timestamp 或 系统时间
+    - 磁盘 或 损坏 或 corrupt 或 部分写
+    - prev_hash 或 hash
+  must_not_mention:
+    - 区块链回滚
+    - 关闭审计
+  rubric: |
+    可能根因（任 3）：
+    - 内容被改：某条 event 字段被人为修改（最严重，安全事件）
+    - 顺序错乱：插入伪造 / 删除中间事件 / 时钟回拨
+    - 自然损坏：磁盘掉电 / fs 部分写 / db 文件被替换
+    定位手法：
+    - 看断点前后 prev_hash 是否同时失配
+    - 比对 timestamp 单调性
+    - 与备份做 diff，看哪一段不同
+    - 翻系统日志看断点时间是否有掉电 / kernel panic
+  answer_key: ASK-013.md

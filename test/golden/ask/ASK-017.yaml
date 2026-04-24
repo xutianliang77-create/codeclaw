@@ -1,0 +1,31 @@
+id: ASK-017
+version: 1
+category: snippet
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  请给一段 TypeScript 代码：用 better-sqlite3 在内存里建一个临时 db、跑一次 PRAGMA journal_mode=WAL，
+  然后 prepare 一条简单 SELECT 1 并执行，输出结果。要求代码可直接 tsx 跑。
+expected:
+  must_mention:
+    - better-sqlite3
+    - WAL 或 wal
+    - prepare
+    - SELECT 1 或 select 1
+  must_not_mention:
+    - require(
+    - sqlite3 from "sqlite3"
+  rubric: |
+    可接受范例：
+      import Database from "better-sqlite3";
+      const db = new Database(":memory:");
+      db.pragma("journal_mode = WAL");
+      const row = db.prepare("SELECT 1 AS one").get();
+      console.log(row);
+      db.close();
+    扣分点：
+    - 用了 require 而非 import（tsx + ESM 友好）
+    - 引错包（node-sqlite3 而非 better-sqlite3）
+    - 漏 prepare、写 db.exec("SELECT 1") 也勉强算
+  answer_key: ASK-017.md

@@ -1,0 +1,33 @@
+id: ASK-018
+version: 1
+category: snippet
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  写一段 TypeScript：用 ulid 包的 monotonicFactory，连续生成 5 个 trace id，然后断言每一个都比前一个字典序大。
+  代码要能 tsx 直跑、有断言失败时抛错。
+expected:
+  must_mention:
+    - monotonicFactory
+    - ulid
+    - 字典序 或 < 或 localeCompare 或 字符串比较
+  must_not_mention:
+    - uuidv4
+    - require(
+  rubric: |
+    可接受范例：
+      import { monotonicFactory } from "ulid";
+      const ulid = monotonicFactory();
+      const ids = Array.from({ length: 5 }, () => ulid());
+      for (let i = 1; i < ids.length; i++) {
+        if (!(ids[i] > ids[i-1])) {
+          throw new Error(`monotonic broken at ${i}: ${ids[i-1]} >= ${ids[i]}`);
+        }
+      }
+      console.log("ok", ids);
+    要点：
+    - ulid 单调比较直接用 > 即可（字符串字典序），不需要 localeCompare
+    - 不要混用 UUID
+    - import 方式要 ESM
+  answer_key: ASK-018.md
