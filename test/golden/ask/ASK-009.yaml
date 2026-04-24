@@ -1,0 +1,23 @@
+id: ASK-009
+version: 1
+category: cli-usage
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  CodeClaw 读写对话元数据用 SQLite（~/.codeclaw/data.db），但消息正文和工具输出为什么要放到 JSONL 文件（transcript.jsonl / observations.jsonl）？
+  这种分层设计的好处是什么？
+expected:
+  must_mention:
+    - 索引 或 查询 或 元信息 或 meta
+    - append 或 追加 或 顺序写
+    - 体积 或 大文本 或 大正文
+  must_not_mention:
+    - SQLite 不支持 blob
+    - JSONL 是二进制
+  rubric: |
+    正确要点：
+    - 元信息（id / 时间 / 状态）入 SQLite，便于二级索引、JOIN、跨 session 聚合。
+    - 大正文（工具 stdout、对话消息全文）入 JSONL，append 顺序写便宜、易逐行 tail / grep、不会把 db 撑大。
+    反例：若正文塞到 db 里，全量扫描 / 索引重建 / VACUUM 都会很贵。
+  answer_key: ASK-009.md

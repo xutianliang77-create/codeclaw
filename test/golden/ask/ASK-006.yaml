@@ -1,0 +1,22 @@
+id: ASK-006
+version: 1
+category: code-understanding
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 approvals 存储（src/approvals/store.ts）查询待审批列表时使用 `ORDER BY ROWID ASC` 而不是 `ORDER BY created_at ASC`。
+  为什么？如果改回按 created_at 排序，会出现什么 bug？
+expected:
+  must_mention:
+    - 同一毫秒 或 相同时间戳 或 同一 ms
+    - 插入顺序 或 insertion order 或 FIFO
+    - ROWID
+  must_not_mention:
+    - created_at 字段不存在
+    - SQLite 不支持 ORDER BY
+  rubric: |
+    正确要点：同一毫秒内多条审批入库时 created_at 相同，按 created_at 排序会导致顺序不稳定；
+    ROWID 由 SQLite 内部单调递增，能稳定反映真实插入顺序。
+    bug 表现：用户先批准旧请求时可能被"后到的"先审批掉。
+  answer_key: ASK-006.md

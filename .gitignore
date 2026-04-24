@@ -19,3 +19,9 @@ tmp-phase1.txt
 
 # Golden Set runtime 报告（每次运行生成）
 /test/golden/reports/
+
+# Golden FIX workspace 的依赖与虚拟环境（由 runner 临时装）
+/test/golden/fix/**/node_modules/
+/test/golden/fix/**/.venv/
+/test/golden/fix/**/__pycache__/
+/test/golden/fix/**/.pytest_cache/

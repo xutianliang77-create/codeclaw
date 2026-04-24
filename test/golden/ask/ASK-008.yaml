@@ -1,0 +1,25 @@
+id: ASK-008
+version: 1
+category: cli-usage
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  用户发了高风险请求，CodeClaw 把决策挂到 pending approvals。
+  用户想用 /approve-pending 命令，怎么看到当前 pending 列表？怎么批准某一条？怎么拒绝？
+expected:
+  must_mention:
+    - list 或 查看 或 ls
+    - approve 或 允许 或 同意
+    - deny 或 拒绝
+    - token 或 id 或 编号
+  must_not_mention:
+    - /approve --all
+    - 按 Ctrl+C 批准
+  rubric: |
+    /approve-pending 支持：
+    - 无参数或 `list`：列出当前待审批请求（每条带 token / id）
+    - `approve <token>`：批准指定 token
+    - `deny <token>`：拒绝指定 token
+    回答里不该出现 `/approve --all` 这种不存在的用法，也不该把"按 Ctrl+C"说成批准手段。
+  answer_key: ASK-008.md

@@ -1,0 +1,23 @@
+id: ASK-007
+version: 1
+category: cli-usage
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 /doctor 命令会检查哪些分段？请列出主要段名。
+expected:
+  must_mention:
+    - storage
+    - runtime
+    - libs 或 libraries 或 依赖
+    - tokenFile 或 token
+  must_not_mention:
+    - npm audit
+    - GPU
+  rubric: |
+    /doctor 覆盖：storage（data.db / audit.db 可达 & 迁移状态）、
+    runtime（Node / OS / cwd）、libs（ulid / better-sqlite3 / @noble/hashes / pino 版本）、
+    tokenFile（iLink wechat token 文件存在 & 权限 600）。
+    少 1 段可接受；凭空添加 "npm audit / GPU" 等与当前 doctor 无关的段 fail。
+  answer_key: ASK-007.md

@@ -1,0 +1,27 @@
+id: FIX-08
+version: 1
+language: py
+workspace: test/golden/fix/FIX-08/workspace
+setup:
+  install: "python -m venv .venv && . .venv/bin/activate && pip install -q -r requirements.txt"
+  verify_broken: ". .venv/bin/activate && pytest -q 2>&1 | grep -q 'failed'"
+prompt: |
+  这是一个 Flask + SQLAlchemy 极简 todo 服务。跑 `pytest` 会看到
+  `test_list_todos_no_n_plus_1` 失败：接口 `/todos` 实际触发了 (1 + N) 次 SELECT，
+  其中 N 是所属 user 的数量。
+  请修 `app.py`，用合适的 eager loading（joinedload / selectinload）消除 N+1。
+  不要改测试，不要换 ORM。
+expected:
+  post_verify: ". .venv/bin/activate && pytest -q 2>&1 | grep -q '3 passed'"
+  diff_scope:
+    allow_paths: ["app.py"]
+    max_files: 1
+    max_lines: 8
+  forbidden_changes:
+    - "requirements.txt"
+    - "test_*.py"
+    - "tests/**"
+  time_budget_sec: 240
+  token_budget_usd: 0.8
+category: orm-n-plus-one
+difficulty: medium

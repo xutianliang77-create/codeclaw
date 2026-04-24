@@ -1,0 +1,27 @@
+id: FIX-01
+version: 1
+language: ts
+workspace: test/golden/fix/FIX-01/workspace
+setup:
+  install: "npm ci --silent"
+  verify_broken: "npm test --silent 2>&1 | grep -q 'failed'"   # 确认初始 bug 存在
+prompt: |
+  这是一个极简的类 Express 路由匹配器。跑 `npm test` 会看到：
+    GET /users/:id/books/:bookId → 解析出的 params 错位，bookId 被塞到 id 里。
+  修复 `src/router.ts` 里的路径参数解析逻辑，使两个测试都通过。
+  请不要改测试文件，不要改 package.json。
+expected:
+  post_verify: "npm test --silent 2>&1 | grep -q '2 passed' && npm test --silent 2>&1 | grep -v 'failed' >/dev/null"
+  diff_scope:
+    allow_paths: ["src/**/*.ts"]
+    max_files: 1
+    max_lines: 10
+  forbidden_changes:
+    - "package.json"
+    - "package-lock.json"
+    - "test/**"
+    - "tsconfig.json"
+  time_budget_sec: 180
+  token_budget_usd: 0.5
+category: path-params
+difficulty: easy

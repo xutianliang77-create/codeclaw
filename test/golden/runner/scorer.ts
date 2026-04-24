@@ -16,10 +16,11 @@ import { matchesAny, matchesSubstring } from "./normalize";
 
 const PASS_THRESHOLD = 0.8;
 
-/** "A 或 B" → ["A","B"]；"A or B" → ["A","B"]；单个保留为 [s] */
+/** "A 或 B" → ["A","B"]；"A or B" → ["A","B"]；单个保留为 [s]
+ *  注意："or" 必须加 \b 词边界，否则会把 "proof-of-w|or|k" 这类英文词误切。 */
 function splitAlternatives(needle: string): string[] {
   return needle
-    .split(/\s*(?:或|\/|or|\|)\s*/i)
+    .split(/\s*(?:或|\/|\bor\b|\|)\s*/i)
     .map((s) => s.trim())
     .filter(Boolean);
 }

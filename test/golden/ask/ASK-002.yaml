@@ -1,0 +1,23 @@
+id: ASK-002
+version: 1
+category: code-understanding
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 ObservationRepo 在正文超过多大阈值时会从「合并 jsonl」切成「溢出独立文件」？
+  溢出文件写到哪里？数据库里哪个字段能识别这两种情况？
+expected:
+  must_mention:
+    - 100 KB 或 100KB 或 102400 或 OBSERVATION_OVERFLOW_THRESHOLD
+    - observations/ 或 溢出
+    - body_inline
+  must_not_mention:
+    - 1 MB
+    - 10 KB
+    - observations.db
+  rubric: |
+    正确答案：阈值 100 KB（OBSERVATION_OVERFLOW_THRESHOLD = 100*1024）；
+    溢出路径 sessions/{sid}/observations/{stepId}.jsonl（独立一条一文件）；
+    db 里 body_inline=0 表示溢出、=1 表示在合并 jsonl 内。
+  answer_key: ASK-002.md

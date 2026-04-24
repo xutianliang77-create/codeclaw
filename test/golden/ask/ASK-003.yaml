@@ -1,0 +1,23 @@
+id: ASK-003
+version: 1
+category: code-understanding
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  CodeClaw audit log 采用 BLAKE3 链式哈希，每条事件都引用一个 prev_hash。
+  prev_hash 在链的第一条事件上是什么？为什么需要链式哈希而不是每条事件单独哈希？
+expected:
+  must_mention:
+    - 0 或 全零 或 GENESIS 或 创世 或 空字符串
+    - 篡改 或 tamper 或 完整性 或 integrity
+    - 链 或 chain
+  must_not_mention:
+    - 区块链 挖矿
+    - proof-of-work
+    - 加密算法必须对称
+  rubric: |
+    prev_hash 首条事件为"全 0 / 空 / GENESIS"占位。
+    链式哈希目的是任何历史事件被篡改都会让后续 hash 全部失配，从而可检测。
+    单条哈希只能防单条被改，无法防"删/插"攻击。
+  answer_key: ASK-003.md

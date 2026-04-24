@@ -1,0 +1,22 @@
+id: ASK-004
+version: 1
+category: code-understanding
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  L1MemoryRepo 里有一个 markBodyMissing(messageId) 方法，它会把 l1_memory 行的 body_missing 置 1。
+  这个标志在什么场景下会被置 1？意味着数据的哪一部分还在、哪一部分丢了？
+expected:
+  must_mention:
+    - transcript.jsonl 或 jsonl 或 正文文件
+    - 元信息 或 meta 或 db
+    - 恢复 或 recover 或 回退
+  must_not_mention:
+    - 全部丢失
+    - 用户已删除账号
+  rubric: |
+    正确要点：正文 jsonl 不可读 / 丢失 / 解析失败时标记；
+    db 行还在（便于 UI 展示占位 & 后续恢复），正文不可读。
+    常见触发：磁盘损坏、手动删 transcript、跨机迁移丢文件。
+  answer_key: ASK-004.md

@@ -1,0 +1,22 @@
+id: ASK-005
+version: 1
+category: code-understanding
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 trace id 用 ULID 的 monotonicFactory 生成。
+  相比普通 ULID，monotonicFactory 解决了什么问题？
+  同一毫秒内连续生成两个 id，它们的关系是什么？
+expected:
+  must_mention:
+    - 单调 或 monotonic 或 递增
+    - 同一毫秒 或 相同时间戳 或 碰撞
+    - 有序 或 排序 或 顺序
+  must_not_mention:
+    - UUID v4
+    - 基于时钟回拨会无限等待
+  rubric: |
+    正确要点：monotonicFactory 保证同一毫秒内多次调用返回的 id 严格递增（随机部分 +1）；
+    这样按 id 排序 == 按时间+生成顺序排序；便于 ORDER BY id 保持事件真实顺序。
+  answer_key: ASK-005.md

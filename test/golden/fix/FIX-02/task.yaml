@@ -1,0 +1,27 @@
+id: FIX-02
+version: 1
+language: ts
+workspace: test/golden/fix/FIX-02/workspace
+setup:
+  install: "npm ci --silent"
+  verify_broken: "npm test --silent 2>&1 | grep -q 'failed'"
+prompt: |
+  这个极简 counter reducer 有一个缺陷：传入未定义的 action 类型时会抛错 / 返回 undefined，
+  破坏 React 使用方的 invariance（reducer 必须对任何 action 都返回合法 state）。
+  跑 `npm test` 会看到 "reducer returns prev state for unknown action" 失败。
+  请修 `src/reducer.ts`，不要改测试。
+expected:
+  post_verify: "npm test --silent 2>&1 | grep -q '3 passed' && npm test --silent 2>&1 | grep -v 'failed' >/dev/null"
+  diff_scope:
+    allow_paths: ["src/**/*.ts"]
+    max_files: 1
+    max_lines: 8
+  forbidden_changes:
+    - "package.json"
+    - "package-lock.json"
+    - "test/**"
+    - "tsconfig.json"
+  time_budget_sec: 120
+  token_budget_usd: 0.3
+category: reducer-exhaustiveness
+difficulty: easy
