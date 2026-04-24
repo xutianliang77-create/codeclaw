@@ -142,7 +142,7 @@ export class SlashRegistry {
     ];
 
     const lines: string[] = [];
-    lines.push("Available slash commands:");
+    lines.push("Available commands (slash):");
     for (const cat of order) {
       const cmds = byCat.get(cat);
       if (!cmds || cmds.length === 0) continue;

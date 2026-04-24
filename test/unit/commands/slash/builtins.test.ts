@@ -135,6 +135,8 @@ describe("loadBuiltins", () => {
       "/debug-tool-call",
       "/mcp",
       "/wechat",
+      // help
+      "/help",
     ]) {
       expect(reg.has(name)).toBe(true);
     }
@@ -204,6 +206,25 @@ describe("delegating builtins · duck-type pattern", () => {
     expect(c?.result).toEqual({ kind: "reply", text: "COMPACT:/compact 50" });
     const m = await reg.dispatch("/model gpt-4.1", compactHolder);
     expect(m?.result).toEqual({ kind: "reply", text: "MODEL:/model gpt-4.1" });
+  });
+
+  it("/help dispatches to registry.generateHelp via getSlashRegistry()", async () => {
+    const reg = new SlashRegistry();
+    loadBuiltins(reg);
+    const helpHolder = { getSlashRegistry: () => reg };
+    const out = await reg.dispatch("/help", helpHolder);
+    if (out?.result.kind !== "reply") throw new Error("expected reply");
+    expect(out.result.text).toContain("Available commands");
+    expect(out.result.text).toContain("/help");
+    expect(out.result.text).toContain("/status");
+  });
+
+  it("/help degrades when getSlashRegistry missing", async () => {
+    const reg = new SlashRegistry();
+    loadBuiltins(reg);
+    const out = await reg.dispatch("/help", {});
+    if (out?.result.kind !== "reply") throw new Error("expected reply");
+    expect(out.result.text).toContain("unavailable");
   });
 
   it("async batch-4 commands resolve via Promise<string>", async () => {

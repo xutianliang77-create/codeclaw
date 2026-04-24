@@ -36,8 +36,10 @@ import reloadPluginsCommand from "./builtins/reloadPlugins";
 import debugToolCallCommand from "./builtins/debugToolCall";
 import mcpCommand from "./builtins/mcp";
 import wechatCommand from "./builtins/wechat";
+import helpCommand from "./builtins/help";
 
 const BUILTINS: Array<SlashCommand | SlashCommand[]> = [
+  helpCommand,
   modeCommand,
   doctorCommand,
   statusCommand,

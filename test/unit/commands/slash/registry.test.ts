@@ -164,7 +164,7 @@ describe("SlashRegistry.generateHelp", () => {
       })
     );
     const help = reg.generateHelp();
-    expect(help).toContain("Available slash commands:");
+    expect(help).toContain("Available commands");
     expect(help).toContain("[session]");
     expect(help).toContain("[observability]");
     expect(help).toContain("/status");

@@ -52,11 +52,12 @@ function createId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/**
+ * 模块级兜底回复（不依赖 SlashRegistry，给"help / doctor / setup / config / /exit"
+ * 这些非 slash 字面量留路径）。`/help` / `/exit` 在 queryEngine 里另外用 registry
+ * + 实例方法处理。
+ */
 function buildBuiltinReply(prompt: string): string | null {
-  if (prompt === "help" || prompt === "/help") {
-    return "Available commands: help, doctor, setup, config, /status, /resume, /session, /providers, /context, /memory, /compact, /approvals, /diff, /skills, /skills use <name>, /skills clear, /hooks, /init, /doctor, /review <goal>, /summary, /export [path], /reload-plugins, /debug-tool-call <command>, /mcp, /wechat, /wechat status, /wechat refresh, /plan <goal>, /orchestrate <goal>, /model <name>, /mode <permission-mode>, /approve [id], /deny [id], /read <path>, /glob <pattern>, /symbol <name>, /definition <name>, /references <name>, /bash <command>, /write <path> :: <content>, /append <path> :: <content>, /replace <path> :: <find> :: <replace>, /exit.";
-  }
-
   if (prompt === "doctor") {
     return "Run `npm run dev -- doctor` or `node dist/cli.js doctor` for environment diagnostics.";
   }
@@ -365,6 +366,11 @@ class LocalQueryEngine implements QueryEngine {
   private pendingOrchestrationApprovals: PendingOrchestrationApproval[] = [];
   private activeSkill: SkillDefinition | null = null;
   private readonly slashRegistry = new SlashRegistry();
+
+  /** 给 SlashCommand handler 通过 ctx.queryEngine 拿到 registry（供 /help 用） */
+  public getSlashRegistry(): SlashRegistry {
+    return this.slashRegistry;
+  }
 
   constructor(private readonly options: QueryEngineOptions) {
     this.currentProvider = options.currentProvider;
@@ -903,6 +909,11 @@ class LocalQueryEngine implements QueryEngine {
   }
 
   private resolveBuiltinReply(prompt: string): string | null {
+    // 裸字面量 "help" 走 registry，与 "/help" 等价输出
+    if (prompt === "help") {
+      return this.slashRegistry.generateHelp();
+    }
+
     if (parseApprovalCommand(prompt, "/approve") !== undefined) {
       return this.pendingApprovals.length > 0 || this.pendingOrchestrationApprovals.length > 0
         ? null
