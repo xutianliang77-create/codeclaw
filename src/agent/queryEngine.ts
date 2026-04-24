@@ -6,6 +6,8 @@ import { runDoctor } from "../commands/doctor";
 import type { PermissionMode } from "../lib/config";
 import { callMcpTool, listMcpResources, listMcpServers, listMcpTools, readMcpResource } from "../mcp/service";
 import { SlashRegistry, loadBuiltins } from "../commands/slash";
+import { EngineFsm } from "../fsm";
+import type { FsmSnapshot } from "../fsm";
 import QRCode from "qrcode";
 import {
   buildApprovedExecutionPlan,
@@ -366,10 +368,47 @@ class LocalQueryEngine implements QueryEngine {
   private pendingOrchestrationApprovals: PendingOrchestrationApproval[] = [];
   private activeSkill: SkillDefinition | null = null;
   private readonly slashRegistry = new SlashRegistry();
+  private readonly fsm = new EngineFsm();
 
   /** 给 SlashCommand handler 通过 ctx.queryEngine 拿到 registry（供 /help 用） */
   public getSlashRegistry(): SlashRegistry {
     return this.slashRegistry;
+  }
+
+  /** 给 /cost / /status 等消费者读 FSM 当前快照 */
+  public getFsmSnapshot(): FsmSnapshot {
+    return this.fsm.snapshot();
+  }
+
+  /**
+   * 同步 FSM phase 并返回对应 EngineEvent。
+   * 让 submitMessage 等 yield phase 的地方既保持事件流不变、又顺手更新 FSM。
+   */
+  private phaseEvent(
+    phase: "planning" | "executing" | "compacting" | "completed" | "halted"
+  ): { type: "phase"; phase: typeof phase } {
+    switch (phase) {
+      case "planning":
+        this.fsm.beginTurn();
+        break;
+      case "executing":
+        this.fsm.enterExecuting();
+        break;
+      case "compacting":
+        this.fsm.enterCompacting();
+        break;
+      case "completed":
+        if (!this.fsm.isHalted()) {
+          this.fsm.halt("completed", "success");
+        }
+        break;
+      case "halted":
+        if (!this.fsm.isHalted()) {
+          this.fsm.halt("user-cancelled", "abandoned");
+        }
+        break;
+    }
+    return { type: "phase", phase };
   }
 
   constructor(private readonly options: QueryEngineOptions) {
@@ -427,16 +466,16 @@ class LocalQueryEngine implements QueryEngine {
     this.lastEstimatedTokens = estimateMessageTokens(this.messages);
     this.notifyListeners();
 
-    yield { type: "phase", phase: "planning" };
+    yield this.phaseEvent("planning");
 
     if (!trimmed.startsWith("/")) {
       const autoCompactResult = this.maybeAutoCompact();
       if (autoCompactResult) {
-        yield { type: "phase", phase: "compacting" };
+        yield this.phaseEvent("compacting");
       }
     }
 
-    yield { type: "phase", phase: "executing" };
+    yield this.phaseEvent("executing");
 
     const messageId = createId("msg");
     let output = "";
@@ -497,7 +536,7 @@ class LocalQueryEngine implements QueryEngine {
           source: "local"
         });
         this.notifyListeners();
-        yield { type: "phase", phase: "completed" };
+        yield this.phaseEvent("completed");
         return;
       }
       this.persistPendingApprovals();
@@ -529,7 +568,7 @@ class LocalQueryEngine implements QueryEngine {
           source: "local"
         });
         this.notifyListeners();
-        yield { type: "phase", phase: "completed" };
+        yield this.phaseEvent("completed");
         return;
       }
       yield {
@@ -590,7 +629,7 @@ class LocalQueryEngine implements QueryEngine {
             source: "local"
           });
           this.notifyListeners();
-          yield { type: "phase", phase: "completed" };
+          yield this.phaseEvent("completed");
           return;
         }
         yield {
@@ -637,7 +676,7 @@ class LocalQueryEngine implements QueryEngine {
           text: output,
           source: "local"
         });
-        yield { type: "phase", phase: "completed" };
+        yield this.phaseEvent("completed");
         return;
       }
       this.persistPendingApprovals();
@@ -838,7 +877,7 @@ class LocalQueryEngine implements QueryEngine {
           if (reactiveCompactResult) {
             reactiveCompactTriggered = true;
             this.reactiveCompactCount += 1;
-            yield { type: "phase", phase: "compacting" };
+            yield this.phaseEvent("compacting");
             continue;
           }
         }
@@ -889,7 +928,7 @@ class LocalQueryEngine implements QueryEngine {
         messageId,
         text: haltedText
       };
-      yield { type: "phase", phase: "halted" };
+      yield this.phaseEvent("halted");
       return;
     }
 
@@ -905,7 +944,7 @@ class LocalQueryEngine implements QueryEngine {
       messageId,
       text: output
     };
-    yield { type: "phase", phase: "completed" };
+    yield this.phaseEvent("completed");
   }
 
   private resolveBuiltinReply(prompt: string): string | null {
@@ -1470,12 +1509,19 @@ class LocalQueryEngine implements QueryEngine {
     const filesChanged = this.changedFiles.size;
     const pendingTool = this.pendingApprovals.length;
     const pendingOrch = this.pendingOrchestrationApprovals.length;
+    const fsm = this.fsm.snapshot();
+    const haltLine = fsm.lastHalt
+      ? `last-halt: reason=${fsm.lastHalt.reason} completion=${fsm.lastHalt.completion}` +
+        (fsm.lastHalt.message ? ` message="${fsm.lastHalt.message}"` : "")
+      : "last-halt: none";
 
     return [
       "Cost & Activity Snapshot",
       `session: ${session}`,
       `provider: ${provider}`,
       `model: ${model}`,
+      `fsm-phase: ${fsm.phase}  (turn=${fsm.turn})`,
+      haltLine,
       `messages: ${messages}  (user=${userMessages}, assistant=${assistantMessages})`,
       `estimated-tokens (local heuristic, char/4): ${estimatedTokens}`,
       `compacts: ${compacts}  (reactive=${reactiveCompacts})`,

@@ -158,4 +158,6 @@ export interface QueryEngine {
     visionReason: string;
   };
   getReadFileState(): Record<string, never>;
+  /** 给 /cost / /status 等读 FSM 当前快照（W2-05） */
+  getFsmSnapshot?(): import("../fsm").FsmSnapshot;
 }

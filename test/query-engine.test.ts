@@ -73,6 +73,33 @@ describe("query engine", () => {
     expect(messages.at(-1)?.text).toContain("Available commands");
   });
 
+  it("drives FSM through one full turn (planning → executing → halted=completed)", async () => {
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+    });
+
+    // 起始：FSM 应在 idle，turn=0
+    const before = engine.getFsmSnapshot!();
+    expect(before.phase).toBe("idle");
+    expect(before.turn).toBe(0);
+    expect(before.lastHalt).toBeNull();
+
+    await collect(engine.submitMessage("help"));
+
+    // 一轮跑完，turn=1，已 halted=completed/success
+    const after = engine.getFsmSnapshot!();
+    expect(after.turn).toBe(1);
+    expect(after.phase).toBe("halted");
+    expect(after.lastHalt).toMatchObject({ reason: "completed", completion: "success" });
+
+    // 再来一轮，turn=2
+    await collect(engine.submitMessage("help"));
+    expect(engine.getFsmSnapshot!().turn).toBe(2);
+  });
+
   it("halts cleanly when interrupted mid-stream", async () => {
     const fetchImpl = async () =>
       new Response(
