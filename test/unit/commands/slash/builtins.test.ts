@@ -106,11 +106,12 @@ describe("/doctor builtin", () => {
 });
 
 describe("loadBuiltins", () => {
-  it("loads all batch-1+2+3 commands into a fresh registry", () => {
+  it("loads all batch-1..4 commands into a fresh registry", () => {
     const reg = new SlashRegistry();
     const count = loadBuiltins(reg);
-    expect(count).toBeGreaterThanOrEqual(15);
+    expect(count).toBeGreaterThanOrEqual(21);
     for (const name of [
+      // batch 1+2+3
       "/mode",
       "/doctor",
       "/diag",
@@ -127,6 +128,13 @@ describe("loadBuiltins", () => {
       "/init",
       "/compact",
       "/model",
+      // batch 4
+      "/summary",
+      "/export",
+      "/reload-plugins",
+      "/debug-tool-call",
+      "/mcp",
+      "/wechat",
     ]) {
       expect(reg.has(name)).toBe(true);
     }
@@ -196,6 +204,43 @@ describe("delegating builtins · duck-type pattern", () => {
     expect(c?.result).toEqual({ kind: "reply", text: "COMPACT:/compact 50" });
     const m = await reg.dispatch("/model gpt-4.1", compactHolder);
     expect(m?.result).toEqual({ kind: "reply", text: "MODEL:/model gpt-4.1" });
+  });
+
+  it("async batch-4 commands resolve via Promise<string>", async () => {
+    const reg = new SlashRegistry();
+    loadBuiltins(reg);
+    const asyncHolder = {
+      buildSummaryReply: () => "SUMMARY",
+      handleExportCommand: async (p: string) => `EXPORT:${p}`,
+      buildReloadPluginsReply: () => "RELOAD",
+      buildDebugToolCallReply: (p: string) => `DEBUG:${p}`,
+      handleMcpCommand: async (p: string) => `MCP:${p}`,
+      handleWechatCommand: async (p: string) => `WECHAT:${p}`,
+    };
+    expect((await reg.dispatch("/summary", asyncHolder))?.result).toEqual({
+      kind: "reply",
+      text: "SUMMARY",
+    });
+    expect((await reg.dispatch("/export to.txt", asyncHolder))?.result).toEqual({
+      kind: "reply",
+      text: "EXPORT:/export to.txt",
+    });
+    expect((await reg.dispatch("/reload-plugins", asyncHolder))?.result).toEqual({
+      kind: "reply",
+      text: "RELOAD",
+    });
+    expect((await reg.dispatch("/debug-tool-call read", asyncHolder))?.result).toEqual({
+      kind: "reply",
+      text: "DEBUG:/debug-tool-call read",
+    });
+    expect((await reg.dispatch("/mcp servers", asyncHolder))?.result).toEqual({
+      kind: "reply",
+      text: "MCP:/mcp servers",
+    });
+    expect((await reg.dispatch("/wechat status", asyncHolder))?.result).toEqual({
+      kind: "reply",
+      text: "WECHAT:/wechat status",
+    });
   });
 
   it("each delegated command degrades gracefully when holder lacks the method", async () => {

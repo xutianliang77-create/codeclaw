@@ -925,33 +925,9 @@ class LocalQueryEngine implements QueryEngine {
   }
 
   private async resolveCommandReply(prompt: string): Promise<string | undefined> {
-    if (matchesCommand(prompt, "/doctor")) {
-      return runDoctor();
-    }
-
-    if (matchesCommand(prompt, "/summary")) {
-      return this.buildSummaryReply();
-    }
-
-    if (matchesCommand(prompt, "/export")) {
-      return this.handleExportCommand(prompt);
-    }
-
-    if (matchesCommand(prompt, "/reload-plugins")) {
-      return this.buildReloadPluginsReply();
-    }
-
-    if (matchesCommand(prompt, "/debug-tool-call")) {
-      return this.buildDebugToolCallReply(prompt);
-    }
-
-    if (matchesCommand(prompt, "/mcp")) {
-      return this.handleMcpCommand(prompt);
-    }
-
-    if (matchesCommand(prompt, "/wechat")) {
-      return this.handleWechatCommand(prompt);
-    }
+    // 已迁移到 SlashRegistry（W2-02 batch 4）：
+    //   /doctor /summary /export /reload-plugins /debug-tool-call /mcp /wechat
+    // 老的 build*/handle* 私有方法保留供 registry 通过 duck-type 调用。
 
     if (matchesCommand(prompt, "/review")) {
       const reviewGoal = prompt.replace("/review", "").trim();

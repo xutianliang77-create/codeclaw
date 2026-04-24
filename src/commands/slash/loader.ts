@@ -30,6 +30,12 @@ import hooksCommand from "./builtins/hooks";
 import initCommand from "./builtins/init";
 import compactCommand from "./builtins/compact";
 import modelCommand from "./builtins/model";
+import summaryCommand from "./builtins/summary";
+import exportCommand from "./builtins/exportSession";
+import reloadPluginsCommand from "./builtins/reloadPlugins";
+import debugToolCallCommand from "./builtins/debugToolCall";
+import mcpCommand from "./builtins/mcp";
+import wechatCommand from "./builtins/wechat";
 
 const BUILTINS: Array<SlashCommand | SlashCommand[]> = [
   modeCommand,
@@ -47,6 +53,12 @@ const BUILTINS: Array<SlashCommand | SlashCommand[]> = [
   initCommand,
   compactCommand,
   modelCommand,
+  summaryCommand,
+  exportCommand,
+  reloadPluginsCommand,
+  debugToolCallCommand,
+  mcpCommand,
+  wechatCommand,
 ];
 
 export function loadBuiltins(registry: SlashRegistry): number {
