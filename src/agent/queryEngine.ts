@@ -399,7 +399,16 @@ class LocalQueryEngine implements QueryEngine {
         break;
       case "completed":
         if (!this.fsm.isHalted()) {
-          this.fsm.halt("completed", "success");
+          // 仍有待审批 → 这一轮其实是"被审批挡住"，halt reason 用 approval-required。
+          const blockedByApproval =
+            this.pendingApprovals.length + this.pendingOrchestrationApprovals.length > 0;
+          if (blockedByApproval) {
+            this.fsm.halt("approval-required", "blocked", {
+              message: "user approval needed before continuing",
+            });
+          } else {
+            this.fsm.halt("completed", "success");
+          }
         }
         break;
       case "halted":

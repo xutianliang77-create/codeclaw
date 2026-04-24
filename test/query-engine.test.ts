@@ -968,6 +968,13 @@ describe("query engine", () => {
       totalPending: 1
     });
     expect(lastMessage?.text).toContain("Run /approve or /deny");
+
+    // FSM 应记录 halt = approval-required / blocked（W2-06）
+    const fsm = engine.getFsmSnapshot!();
+    expect(fsm.lastHalt).toMatchObject({
+      reason: "approval-required",
+      completion: "blocked",
+    });
   });
 
   it("executes a pending write after /approve", async () => {
