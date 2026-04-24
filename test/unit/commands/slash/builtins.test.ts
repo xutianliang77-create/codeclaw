@@ -135,11 +135,12 @@ describe("loadBuiltins", () => {
       "/debug-tool-call",
       "/mcp",
       "/wechat",
-      // workflow + help
+      // workflow + help + new commands
       "/help",
       "/plan",
       "/review",
       "/orchestrate",
+      "/cost",
     ]) {
       expect(reg.has(name)).toBe(true);
     }
@@ -250,6 +251,23 @@ describe("delegating builtins · duck-type pattern", () => {
     };
     const out = await reg.dispatch("/orchestrate add tests", holder);
     expect(out?.result).toEqual({ kind: "reply", text: "ORCH:/orchestrate add tests" });
+  });
+
+  it("/cost delegates to runCostCommand", async () => {
+    const reg = new SlashRegistry();
+    loadBuiltins(reg);
+    const out = await reg.dispatch("/cost", {
+      runCostCommand: () => "COST_SNAPSHOT_OK",
+    });
+    expect(out?.result).toEqual({ kind: "reply", text: "COST_SNAPSHOT_OK" });
+  });
+
+  it("/cost degrades when runCostCommand missing", async () => {
+    const reg = new SlashRegistry();
+    loadBuiltins(reg);
+    const out = await reg.dispatch("/cost", {});
+    if (out?.result.kind !== "reply") throw new Error("expected reply");
+    expect(out.result.text).toContain("unavailable");
   });
 
   it("/review and /orchestrate degrade when method missing", async () => {

@@ -1450,6 +1450,45 @@ class LocalQueryEngine implements QueryEngine {
     };
   }
 
+  /**
+   * 给 /cost slash builtin 用：当前会话的活动快照。
+   *
+   * 注：当前只有"本地估算 token"（按字符 / 4），没有 provider 真实用量。
+   * 真实 input/output tokens 与价位换算落到 P0 W3 provider client 改造后。
+   */
+  public runCostCommand(): string {
+    const session = this.sessionId;
+    const provider = this.currentProvider?.displayName ?? "not-configured";
+    const model = this.modelLabel;
+    const messages = this.messages.length;
+    const userMessages = this.messages.filter((m) => m.role === "user").length;
+    const assistantMessages = this.messages.filter((m) => m.role === "assistant").length;
+    const estimatedTokens = this.lastEstimatedTokens;
+    const compacts = this.compactCount;
+    const reactiveCompacts = this.reactiveCompactCount;
+    const filesRead = this.recentReadFiles.size;
+    const filesChanged = this.changedFiles.size;
+    const pendingTool = this.pendingApprovals.length;
+    const pendingOrch = this.pendingOrchestrationApprovals.length;
+
+    return [
+      "Cost & Activity Snapshot",
+      `session: ${session}`,
+      `provider: ${provider}`,
+      `model: ${model}`,
+      `messages: ${messages}  (user=${userMessages}, assistant=${assistantMessages})`,
+      `estimated-tokens (local heuristic, char/4): ${estimatedTokens}`,
+      `compacts: ${compacts}  (reactive=${reactiveCompacts})`,
+      `files-read: ${filesRead}`,
+      `files-changed: ${filesChanged}`,
+      `pending-tool-approvals: ${pendingTool}`,
+      `pending-orchestration-approvals: ${pendingOrch}`,
+      "",
+      "note: real provider usage (input/output tokens, USD) will be tracked once the",
+      "      provider client surfaces usage; tracked in P0 W3.",
+    ].join("\n");
+  }
+
   /** 给 /plan slash builtin 用：解析 prompt → 构造 plan → 渲染 */
   public runPlanCommand(prompt: string): string {
     const userGoal = prompt.replace("/plan", "").trim();
