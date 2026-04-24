@@ -10,6 +10,7 @@ type PlainBootInfo = {
   providerReason: string;
   permissionMode: string;
   workspace: string;
+  visionSupport: "supported" | "unsupported" | "unknown";
 };
 
 function printLine(line = ""): void {
@@ -27,7 +28,7 @@ function printBoot(bootInfo: PlainBootInfo, sessionId: string): void {
     `CodeClaw  session: ${sessionId}  model: ${bootInfo.modelLabel}  mode: ${bootInfo.permissionMode}`
   );
   printLine(`cwd: ${bootInfo.workspace}`);
-  printLine(`provider: ${bootInfo.providerLabel}`);
+  printLine(`provider: ${bootInfo.providerLabel}  vision: ${bootInfo.visionSupport}`);
   printLine(bootInfo.providerReason);
   printLine();
 }

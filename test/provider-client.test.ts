@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import type { EngineMessage } from "../src/agent/types";
 import { streamProviderResponse } from "../src/provider/client";
 import type { ProviderStatus } from "../src/provider/types";
+
+const tempDirs: string[] = [];
 
 function createResponse(body: string): Response {
   return new Response(new ReadableStream({
@@ -37,6 +42,11 @@ const messages: EngineMessage[] = [
     text: "hello"
   }
 ];
+
+afterEach(async () => {
+  await Promise.all(tempDirs.map(async (dir) => rm(dir, { recursive: true, force: true })));
+  tempDirs.length = 0;
+});
 
 describe("provider client", () => {
   it("parses openai-compatible sse deltas", async () => {
@@ -124,5 +134,49 @@ describe("provider client", () => {
     }
 
     expect(chunks.join("")).toBe("Hello");
+  });
+
+  it("sends image_url parts for openai-compatible image messages", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "codeclaw-provider-image-"));
+    tempDirs.push(dir);
+    const imagePath = path.join(dir, "sample.png");
+    await writeFile(imagePath, Buffer.from("hello-image"));
+
+    let requestBody = "";
+    const fetchImpl = async (_input: string | URL | Request, init?: RequestInit) => {
+      requestBody = String(init?.body ?? "");
+      return createResponse(
+        [
+          'data: {"choices":[{"delta":{"content":"Seen"}}]}',
+          "data: [DONE]"
+        ].join("\n")
+      );
+    };
+
+    const multimodalMessages: EngineMessage[] = [
+      {
+        id: "u1",
+        role: "user",
+        text: "请看这张图",
+        attachments: [
+          {
+            kind: "image",
+            localPath: imagePath,
+            mimeType: "image/png",
+            fileName: "sample.png"
+          }
+        ]
+      }
+    ];
+
+    const chunks: string[] = [];
+    for await (const chunk of streamProviderResponse(baseProvider, multimodalMessages, { fetchImpl: fetchImpl as typeof fetch })) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.join("")).toBe("Seen");
+    expect(requestBody).toContain("\"type\":\"image_url\"");
+    expect(requestBody).toContain("\"url\":\"data:image/png;base64,");
+    expect(requestBody).toContain("\"text\":\"请看这张图\"");
   });
 });

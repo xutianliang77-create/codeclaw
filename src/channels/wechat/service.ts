@@ -3,6 +3,7 @@ import { WechatBotAdapter } from "./adapter";
 import { startWechatWebhookServer } from "./handler";
 import { IlinkWechatLoginManager } from "./loginManager";
 import { IlinkWechatWorker } from "./worker";
+import type { SpeechTranscriber } from "../../provider/speech";
 
 export interface WechatBotService {
   adapter: WechatBotAdapter;
@@ -36,11 +37,20 @@ export interface WechatBotService {
 export function createWechatBotService(options: {
   createQueryEngine: (overrides?: Partial<QueryEngineOptions>) => QueryEngine;
   defaultEngineOptions?: Partial<QueryEngineOptions>;
+  fetchImpl?: typeof fetch;
+  mediaCacheDir?: string;
+  transcribeAudio?: SpeechTranscriber;
 }): WechatBotService {
-  const adapter = new WechatBotAdapter(() =>
-    options.createQueryEngine({
-      ...options.defaultEngineOptions
-    })
+  const adapter = new WechatBotAdapter(
+    () =>
+      options.createQueryEngine({
+        ...options.defaultEngineOptions
+      }),
+    {
+      fetchImpl: options.fetchImpl,
+      mediaCacheDir: options.mediaCacheDir,
+      transcribeAudio: options.transcribeAudio
+    }
   );
 
   return {

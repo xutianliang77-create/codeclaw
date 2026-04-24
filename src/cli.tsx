@@ -9,6 +9,8 @@ import { loadSetupCommandState } from "./commands/setup";
 import { createWechatBotService } from "./channels/wechat/service";
 import { IngressGateway } from "./ingress/gateway";
 import { createDefaultConfig, resolveConfigPaths } from "./lib/config";
+import { detectProviderCapabilities } from "./provider/capabilities";
+import { createOpenAiCompatibleSpeechTranscriber } from "./provider/speech";
 import { loadRuntimeSelection } from "./provider/registry";
 import { runPlainRepl } from "./repl/plain";
 import { startGatewayServer } from "./sdk/httpServer";
@@ -117,6 +119,20 @@ async function main(): Promise<void> {
     configDefaults.gateway?.bots?.ilinkWechat?.baseUrl ??
     process.env.CODECLAW_ILINK_WECHAT_BASE_URL ??
     "https://ilinkai.weixin.qq.com";
+  const configuredSpeechAsr = runtime.config?.speech?.asr;
+  const speechApiKeyEnvVar = configuredSpeechAsr?.apiKeyEnvVar;
+  const speechApiKey = speechApiKeyEnvVar ? process.env[speechApiKeyEnvVar] : undefined;
+  const speechTranscriber =
+    configuredSpeechAsr?.enabled
+      ? createOpenAiCompatibleSpeechTranscriber({
+          baseUrl: configuredSpeechAsr.baseUrl ?? "http://127.0.0.1:1234/v1",
+          model: configuredSpeechAsr.model ?? "whisper-1",
+          timeoutMs: configuredSpeechAsr.timeoutMs ?? 60_000,
+          apiKey: speechApiKey,
+          language: configuredSpeechAsr.language,
+          prompt: configuredSpeechAsr.prompt
+        })
+      : undefined;
   const wechatService = createWechatBotService({
     createQueryEngine(overrides) {
       return createQueryEngine({
@@ -128,7 +144,8 @@ async function main(): Promise<void> {
         approvalsDir: paths.approvalsDir,
         ...overrides
       });
-    }
+    },
+    transcribeAudio: speechTranscriber
   });
   let autoWechatWorkerPromise: Promise<void> | null = null;
   let autoWechatWorkerStarted = false;
@@ -258,6 +275,8 @@ async function main(): Promise<void> {
     return;
   }
 
+  const capabilities = detectProviderCapabilities(runtime.selection?.current ?? null);
+
   if (usePlainRepl || command === "plain") {
     await runPlainRepl({
       bootInfo: {
@@ -265,7 +284,8 @@ async function main(): Promise<void> {
         modelLabel: runtime.selection?.current?.model ?? "scaffold",
         providerReason: runtime.selection?.current?.reason ?? "run `codeclaw setup` to initialize providers",
         permissionMode: runtime.config?.defaults.permissionMode ?? "plan",
-        workspace: runtime.config?.defaults.workspace ?? process.cwd()
+        workspace: runtime.config?.defaults.workspace ?? process.cwd(),
+        visionSupport: capabilities.vision
       },
       queryEngine,
       ingressGateway
@@ -280,7 +300,8 @@ async function main(): Promise<void> {
         modelLabel: runtime.selection?.current?.model ?? "scaffold",
         providerReason: runtime.selection?.current?.reason ?? "run `codeclaw setup` to initialize providers",
         permissionMode: runtime.config?.defaults.permissionMode ?? "plan",
-        workspace: runtime.config?.defaults.workspace ?? process.cwd()
+        workspace: runtime.config?.defaults.workspace ?? process.cwd(),
+        visionSupport: capabilities.vision
       }}
       queryEngine={queryEngine}
       ingressGateway={ingressGateway}

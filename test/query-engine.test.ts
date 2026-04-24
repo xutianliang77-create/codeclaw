@@ -289,10 +289,51 @@ describe("query engine", () => {
     await collect(engine.submitMessage("/status"));
     expect(engine.getMessages().at(-1)?.text).toContain("provider: OpenAI");
     expect(engine.getMessages().at(-1)?.text).toContain("mode: plan");
+    expect(engine.getMessages().at(-1)?.text).toContain("vision: supported");
 
     await collect(engine.submitMessage("/model gpt-4.1"));
     expect(engine.getMessages().at(-1)?.text).toContain("model set to gpt-4.1");
     expect(engine.getRuntimeState().modelLabel).toBe("gpt-4.1");
+  });
+
+  it("short-circuits image messages when the active model is text-only", async () => {
+    let fetchCalled = false;
+    const engine = createQueryEngine({
+      currentProvider: {
+        ...provider,
+        type: "lmstudio",
+        displayName: "LM Studio",
+        kind: "local",
+        requiresApiKey: false,
+        baseUrl: "http://127.0.0.1:1234/v1",
+        model: "qwen/qwen3.6-35b-a3b",
+        apiKey: undefined,
+        apiKeyEnvVar: undefined
+      },
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      fetchImpl: (async () => {
+        fetchCalled = true;
+        throw new Error("should not call provider");
+      }) as typeof fetch
+    });
+
+    await collect(
+      engine.submitMessage("帮我看下车牌号", {
+        channelSpecific: {
+          image: {
+            localPath: "/tmp/fake-image.jpg",
+            mimeType: "image/jpeg",
+            fileName: "fake-image.jpg"
+          }
+        }
+      })
+    );
+
+    expect(fetchCalled).toBe(false);
+    expect(engine.getMessages().at(-1)?.text).toContain("当前模型不支持图像理解");
+    expect(engine.getMessages().at(-1)?.text).toContain("qwen/qwen3.6-35b-a3b");
   });
 
   it("lists approval queue entries through /approvals", async () => {

@@ -3,6 +3,44 @@ import type { ChannelSessionSnapshot, EngineEvent } from "../../agent/types";
 
 export type WechatChatType = "direct" | "room";
 
+export interface WechatImageAttachment {
+  url?: string;
+  dataUrl?: string;
+  mimeType?: string;
+  fileName?: string;
+  width?: number;
+  height?: number;
+  sizeBytes?: number;
+}
+
+export interface WechatAudioAttachment {
+  url?: string;
+  dataUrl?: string;
+  mimeType?: string;
+  fileName?: string;
+  durationMs?: number;
+  sizeBytes?: number;
+}
+
+export interface WechatCachedImage {
+  localPath: string;
+  mimeType?: string;
+  fileName?: string;
+  width?: number;
+  height?: number;
+  sizeBytes?: number;
+  sourceUrl?: string;
+}
+
+export interface WechatCachedAudio {
+  localPath: string;
+  mimeType?: string;
+  fileName?: string;
+  durationMs?: number;
+  sizeBytes?: number;
+  sourceUrl?: string;
+}
+
 export interface WechatInboundMessage {
   messageId: string;
   senderId: string;
@@ -14,6 +52,8 @@ export interface WechatInboundMessage {
   contextToken?: string | null;
   sessionId?: string | null;
   mentionSelf?: boolean;
+  image?: WechatImageAttachment | null;
+  audio?: WechatAudioAttachment | null;
 }
 
 export interface WechatContextMapping {
@@ -46,6 +86,7 @@ export interface WechatCardRenderInput {
   contextToken: string;
   variant: "message" | "approval-notify" | "resume" | "session-sync";
   envelopes?: Array<DeliveryEnvelope<EngineEvent>>;
+  latestInputOverride?: string;
 }
 
 export type WechatWebhookEvent =

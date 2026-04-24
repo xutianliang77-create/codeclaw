@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { createQueryEngine } from "../src/agent/queryEngine";
 import {
   buildWechatContextMapping,
@@ -7,6 +10,13 @@ import {
   WechatBotAdapter
 } from "../src/channels/wechat/adapter";
 import { buildWechatMarkdownCard } from "../src/channels/wechat/formatter";
+
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(tempDirs.map(async (dir) => rm(dir, { recursive: true, force: true })));
+  tempDirs.length = 0;
+});
 
 async function collect(stream: AsyncGenerator<unknown>): Promise<void> {
   while (true) {
@@ -279,19 +289,22 @@ describe("wechat adapter", () => {
     const markdown = buildWechatMarkdownCard({
       snapshot: {
         sessionId: "session-1",
-        providerName: "LM Studio",
-        fallbackProviderName: "OpenAI",
-        model: "qwen",
-        permissionMode: "plan",
-        workspace: process.cwd(),
-        activeSkillName: null,
         messages: [
-          { id: "u-1", role: "user", text: "35B-A3B 是什么", createdAt: 1 },
-          { id: "a-1", role: "assistant", text: "这是上一轮的解释", createdAt: 2 },
-          { id: "u-2", role: "user", text: "你在干嘛", createdAt: 3 }
+          { id: "u-1", role: "user", text: "35B-A3B 是什么" },
+          { id: "a-1", role: "assistant", text: "这是上一轮的解释" },
+          { id: "u-2", role: "user", text: "你在干嘛" }
         ],
         pendingApproval: null,
-        pendingOrchestrationApproval: null
+        pendingOrchestrationApproval: null,
+        runtime: {
+          modelLabel: "qwen",
+          permissionMode: "plan",
+          providerLabel: "LM Studio",
+          fallbackProviderLabel: "OpenAI",
+          activeSkillName: null,
+          visionSupport: "unsupported",
+          visionReason: "model name matches a text-only family"
+        }
       },
       traceId: "trace-1",
       contextToken: "session-1",
@@ -301,5 +314,90 @@ describe("wechat adapter", () => {
     expect(markdown).toContain("## 最新输入\n35B-A3B 是什么");
     expect(markdown).toContain("## 最新回复\n这是上一轮的解释");
     expect(markdown).not.toContain("## 最新输入\n你在干嘛");
+  });
+
+  it("caches inbound image messages and shows a compact image input summary", async () => {
+    const cacheDir = await mkdtemp(path.join(tmpdir(), "codeclaw-wechat-media-"));
+    tempDirs.push(cacheDir);
+
+    const adapter = new WechatBotAdapter(
+      () =>
+        createQueryEngine({
+          currentProvider: null,
+          fallbackProvider: null,
+          permissionMode: "plan",
+          workspace: process.cwd()
+        }),
+      {
+        mediaCacheDir: cacheDir
+      }
+    );
+
+    const reply = await adapter.receiveMessage({
+      messageId: "msg-img-1",
+      senderId: "user-1",
+      chatId: "chat-a",
+      text: "帮我看看这张图",
+      image: {
+        dataUrl: "data:image/png;base64,aGVsbG8=",
+        fileName: "sample.png",
+        mimeType: "image/png",
+        width: 320,
+        height: 240
+      }
+    });
+
+    const files = await readFile(path.join(cacheDir, "msg-img-1.png"));
+
+    expect(files.toString("utf8")).toBe("hello");
+    expect(reply.markdown).toContain("## 最新输入");
+    expect(reply.markdown).toContain("图片消息");
+    expect(reply.markdown).toContain("附言：帮我看看这张图");
+    expect(reply.markdown).toContain("文件：sample.png");
+    expect(reply.markdown).toContain("尺寸：320x240");
+  });
+
+  it("caches inbound audio messages and shows the ASR transcript in the card", async () => {
+    const cacheDir = await mkdtemp(path.join(tmpdir(), "codeclaw-wechat-media-"));
+    tempDirs.push(cacheDir);
+
+    const adapter = new WechatBotAdapter(
+      () =>
+        createQueryEngine({
+          currentProvider: null,
+          fallbackProvider: null,
+          permissionMode: "plan",
+          workspace: process.cwd()
+        }),
+      {
+        mediaCacheDir: cacheDir,
+        transcribeAudio: async (request) => {
+          expect(request.fileName).toBe("voice.mp3");
+          return {
+            text: "帮我总结今天的会议"
+          };
+        }
+      }
+    );
+
+    const reply = await adapter.receiveMessage({
+      messageId: "msg-audio-1",
+      senderId: "user-1",
+      chatId: "chat-a",
+      text: "",
+      audio: {
+        dataUrl: "data:audio/mpeg;base64,aGVsbG8=",
+        fileName: "voice.mp3",
+        mimeType: "audio/mpeg",
+        durationMs: 3000
+      }
+    });
+
+    const files = await readFile(path.join(cacheDir, "msg-audio-1.mp3"));
+
+    expect(files.toString("utf8")).toBe("hello");
+    expect(reply.markdown).toContain("## 最新输入");
+    expect(reply.markdown).toContain("语音消息");
+    expect(reply.markdown).toContain("转写：帮我总结今天的会议");
   });
 });

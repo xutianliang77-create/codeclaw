@@ -146,6 +146,61 @@ describe("wechat handler", () => {
     expect(result.cards[0]?.contextToken).toBeDefined();
   });
 
+  it("accepts image-only iLink protocol payloads", async () => {
+    const adapter = createAdapter();
+
+    const result = await handleIlinkWebhookPayload(adapter, {
+      msgs: [
+        {
+          from_user_id: "user-1",
+          client_id: "msg-img-1",
+          message_type: 1,
+          item_list: [
+            {
+              type: 2,
+              image_item: {
+                file_name: "sample.png",
+                mime_type: "image/png",
+                width: 320,
+                height: 240
+              }
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.cards).toHaveLength(1);
+  });
+
+  it("accepts audio-only iLink protocol payloads", async () => {
+    const adapter = createAdapter();
+
+    const result = await handleIlinkWebhookPayload(adapter, {
+      msgs: [
+        {
+          from_user_id: "user-1",
+          client_id: "msg-audio-1",
+          message_type: 1,
+          item_list: [
+            {
+              type: 3,
+              audio_item: {
+                file_name: "voice.mp3",
+                mime_type: "audio/mpeg",
+                duration_ms: 2000
+              }
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.cards).toHaveLength(1);
+  });
+
   it("can sweep pending approvals into cards for outbound notify jobs", async () => {
     const adapter = createAdapter();
 

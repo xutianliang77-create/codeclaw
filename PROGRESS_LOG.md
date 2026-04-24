@@ -386,6 +386,36 @@
 29. 已修复微信卡片里“最新输入/最新回复”跨轮次错配：现在卡片会把最新 assistant 回复与其前一条 user 输入配对，不再出现截图里“输入是你在干嘛，但回复却是上一轮 35B-A3B 解释”的混搭
 30. 已新增回归测试锁定该行为：`test/wechat-adapter.test.ts` 现在覆盖“最新 assistant 回复不应和更晚的一条 user 输入错误拼接”
 31. 已按开源仓库清理要求，从当前 Git 版本中移除 `VER_0.5_DEV_TASKS.md` 与 `VER_0.5_TECH_DESIGN.md`
+32. 已开始 `T3.5.1 微信图片消息支持`，当前最小闭环已落地：iLink 协议层可识别图片消息，兼容 payload 也可识别 `image` / `image_url`
+33. 新增 `src/channels/wechat/media.ts`，支持把微信图片下载/缓存到本地 `~/.codeclaw/wechat-media`（或测试注入目录），当前支持 data URL 与可直接访问的图片 URL
+34. 微信图片消息现在会被转换成结构化文本输入接入现有 QueryEngine，会显式携带缓存路径、文件名、尺寸、大小等元数据，并要求回复时不要臆测实际画面内容
+35. 微信卡片对图片输入新增紧凑摘要：会显示“图片消息 + 附言 + 文件名 + 尺寸”，避免把内部缓存路径直接暴露为最新输入
+36. webhook 层已放开图片-only 消息，不再因为没有文本而被直接丢弃
+37. 新增回归测试：覆盖 image-only iLink payload、图片缓存落盘、图片消息卡片摘要，以及现有微信 worker / e2e 链路不回退
+38. 当前专项验证通过：`npm run typecheck`、`npm run test -- test/wechat-adapter.test.ts test/wechat-handler.test.ts test/wechat-worker.test.ts test/wechat-e2e.test.ts`、`bun run build`
+39. 已开始把图片真正接入 provider 多模态通道：新增 `EngineMessage.attachments` 与 `QuerySubmitOptions.channelSpecific`，IngressGateway 现在会把渠道元数据一路传进 QueryEngine
+40. 微信 adapter 现在会把缓存后的图片挂到 ingress `channelSpecific.image`，QueryEngine 会把它转成 `EngineImageAttachment`
+41. OpenAI-compatible provider 请求已支持真实 `image_url` part：当前 OpenAI / LM Studio 分支会把本地缓存图片编码成 data URL 并随用户消息一起发送
+42. Anthropic 分支也已支持 image base64 content block；Ollama 当前保持保守文本降级，不发送图片 part
+43. 新增 `test/provider-client.test.ts` 回归，锁定“带图片附件的 openai-compatible 请求体必须包含 image_url”
+44. 当前核心链路验证通过：`npm run typecheck`、`npm run test -- test/provider-client.test.ts`、`bun run build`
+45. 新增 `test/wechat-e2e.test.ts` 端到端图片回归：锁定“微信图片消息 -> adapter 缓存 -> QueryEngine attachment -> provider request body 中出现 image_url”
+46. `createWechatBotService()` 现支持注入 `mediaCacheDir` 与 `fetchImpl`，便于测试和未来自定义缓存目录
+47. 当前“微信图片 -> provider 真多模态请求”链路专项验证通过：`npm run test -- test/wechat-e2e.test.ts test/provider-client.test.ts`、`npm run typecheck`、`bun run build`
+48. 已新增 `src/provider/capabilities.ts`，开始提供静态 provider/model 能力探测；当前重点是视觉输入能力 `vision: supported | unsupported | unknown`
+49. QueryEngine 运行态已接入视觉能力快照，`/status` 现在会显示 `vision: ...`
+50. CLI 启动信息已接入视觉能力探测：plain 模式与 TUI 头部都会显示当前 provider 的 `vision` 状态，便于在微信图片/多模态联调前先判断当前模型是否大概率支持图像输入
+51. 当前启发式规则已覆盖 OpenAI、Anthropic、Ollama、LM Studio；其中 OpenAI/Anthropic 直接标记为 `supported`，Ollama 保持保守降级，LM Studio 按已知视觉/纯文本模型族做静态判断
+52. 已新增回归断言：`test/query-engine.test.ts` 的 `/status` 响应现在锁定包含 `vision: supported`
+53. 本轮视觉能力探测专项验证通过：`npm run typecheck`、`npm run test -- test/query-engine.test.ts test/provider-client.test.ts test/wechat-e2e.test.ts`、`bun run build`
+54. 已开始 `T3.5.2 微信语音输入 MVP`：新增 `speech.asr` 配置段，支持把 ASR 作为独立 provider lane 注入微信通道
+55. 新增 `src/provider/speech.ts`，实现 OpenAI-compatible `/audio/transcriptions` ASR 客户端，支持上传本地音频文件、模型名、语言、prompt 与 bearer token
+56. 微信协议层已支持语音消息：iLink `item_list` 中的 `audio_item` / `voice_item` 与兼容 payload 中的 `audio` / `voice` 都会被归一化为 `WechatInboundMessage.audio`
+57. `src/channels/wechat/media.ts` 已扩展为统一媒体缓存，当前支持图片与语音的 data URL / URL 下载缓存
+58. 微信 adapter 现在会缓存语音、调用可选 `transcribeAudio`，并把转写文本作为结构化用户输入送入 QueryEngine；若未配置或转写失败，会给出明确本地提示
+59. CLI 已接入 `speech.asr`：当配置启用后，会创建 OpenAI-compatible transcriber 并注入 WeChat service
+60. 新增回归测试：`test/speech-provider.test.ts`、`test/wechat-adapter.test.ts`、`test/wechat-handler.test.ts`、`test/wechat-e2e.test.ts` 覆盖 ASR 上传、语音-only payload、语音缓存、语音转写进入推理 provider
+61. 本轮语音输入 MVP 验证通过：`npm run typecheck`、`npm run lint`、`npm run test`、`bun run build`；当前全量测试为 `21` 个测试文件、`130` 个测试，全部通过
 24. 微信卡片已增强为“最新输入 + 最新回复”，并加入微信软长度限制裁剪，减少超长文本发不全的问题
 25. 微信 worker 已进一步优化：除了收到入站消息立即继续下一轮外，也会在轮询周期内主动 flush 会话同步卡片，把 CLI 侧的新消息推回微信
 26. 本轮已通过定向验证：`npm run lint`、`npm run typecheck`、`./node_modules/.bin/vitest run test/wechat-adapter.test.ts test/wechat-worker.test.ts test/wechat-e2e.test.ts test/query-engine.test.ts`、`bun run build`

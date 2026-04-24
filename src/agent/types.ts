@@ -6,11 +6,23 @@ export type EngineMessageSource = "user" | "command" | "model" | "local" | "summ
 
 export type EnginePhase = "idle" | "planning" | "compacting" | "executing" | "completed" | "halted";
 
+export interface EngineImageAttachment {
+  kind: "image";
+  localPath: string;
+  mimeType?: string;
+  fileName?: string;
+  width?: number;
+  height?: number;
+  sizeBytes?: number;
+  sourceUrl?: string;
+}
+
 export interface EngineMessage {
   id: string;
   role: EngineMessageRole;
   text: string;
   source?: EngineMessageSource;
+  attachments?: EngineImageAttachment[];
 }
 
 export interface PendingApprovalView {
@@ -42,6 +54,8 @@ export interface ChannelSessionSnapshot {
     providerLabel: string;
     fallbackProviderLabel: string;
     activeSkillName: string | null;
+    visionSupport: "supported" | "unsupported" | "unknown";
+    visionReason: string;
   };
 }
 
@@ -75,6 +89,10 @@ export interface QueryEngineOptions {
       getState(): WechatLoginStateView;
     };
   };
+}
+
+export interface QuerySubmitOptions {
+  channelSpecific?: Record<string, unknown>;
 }
 
 export type EngineEvent =
@@ -122,7 +140,7 @@ export type EngineEvent =
     };
 
 export interface QueryEngine {
-  submitMessage(prompt: string): AsyncGenerator<EngineEvent>;
+  submitMessage(prompt: string, options?: QuerySubmitOptions): AsyncGenerator<EngineEvent>;
   interrupt(): void;
   subscribe(listener: () => void): () => void;
   getMessages(): EngineMessage[];
@@ -136,6 +154,8 @@ export interface QueryEngine {
     providerLabel: string;
     fallbackProviderLabel: string;
     activeSkillName: string | null;
+    visionSupport: "supported" | "unsupported" | "unknown";
+    visionReason: string;
   };
   getReadFileState(): Record<string, never>;
 }

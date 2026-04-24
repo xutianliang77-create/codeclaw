@@ -14,6 +14,17 @@ export type PermissionMode =
 export type ProviderType = "anthropic" | "openai" | "ollama" | "lmstudio";
 
 export interface CodeClawConfig {
+  speech?: {
+    asr?: {
+      enabled?: boolean;
+      baseUrl?: string;
+      model?: string;
+      timeoutMs?: number;
+      apiKeyEnvVar?: string;
+      language?: string;
+      prompt?: string;
+    };
+  };
   gateway?: {
     enabledChannels?: Array<{
       type: "cli" | "sdk" | "wechat" | "mcp" | "http";
@@ -76,6 +87,16 @@ export function resolveConfigPaths(homeDir = homedir()): ConfigPaths {
 
 export function createDefaultConfig(cwd = process.cwd()): CodeClawConfig {
   return {
+    speech: {
+      asr: {
+        enabled: false,
+        baseUrl: "http://127.0.0.1:1234/v1",
+        model: "whisper-1",
+        timeoutMs: 60_000,
+        apiKeyEnvVar: "CODECLAW_SPEECH_API_KEY",
+        language: "zh"
+      }
+    },
     gateway: {
       enabledChannels: [{ type: "cli" }],
       bots: {

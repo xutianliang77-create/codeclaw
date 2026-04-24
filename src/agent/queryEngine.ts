@@ -27,6 +27,7 @@ import type {
 import type { ExecutionAction } from "../orchestration/types";
 import { PermissionManager } from "../permissions/manager";
 import { ProviderRequestError, streamProviderResponse } from "../provider/client";
+import { detectProviderCapabilities } from "../provider/capabilities";
 import type { ProviderStatus } from "../provider/types";
 import { createSkillRegistry } from "../skills/registry";
 import type { SkillDefinition } from "../skills/registry";
@@ -36,11 +37,13 @@ import type {
   ChannelSessionSnapshot,
   EngineEvent,
   EngineMessage,
+  EngineImageAttachment,
   EngineMessageSource,
   PendingApprovalView,
   PendingOrchestrationApprovalView,
   QueryEngine,
   QueryEngineOptions,
+  QuerySubmitOptions,
   WechatLoginStateView
 } from "./types";
 
@@ -247,6 +250,51 @@ function buildTranscriptMarkdown(messages: EngineMessage[]): string {
     .join("\n\n");
 }
 
+function extractImageAttachments(channelSpecific?: Record<string, unknown>): EngineImageAttachment[] {
+  const image = channelSpecific?.image as Record<string, unknown> | null | undefined;
+  if (!image || typeof image.localPath !== "string" || !image.localPath.trim()) {
+    return [];
+  }
+
+  return [
+    {
+      kind: "image",
+      localPath: image.localPath,
+      mimeType: typeof image.mimeType === "string" ? image.mimeType : undefined,
+      fileName: typeof image.fileName === "string" ? image.fileName : undefined,
+      width: typeof image.width === "number" ? image.width : undefined,
+      height: typeof image.height === "number" ? image.height : undefined,
+      sizeBytes: typeof image.sizeBytes === "number" ? image.sizeBytes : undefined,
+      sourceUrl: typeof image.sourceUrl === "string" ? image.sourceUrl : undefined
+    }
+  ];
+}
+
+function getAudioTranscriptionState(channelSpecific?: Record<string, unknown>): {
+  status: "completed" | "unavailable" | "failed";
+  text?: string;
+  reason?: string;
+} | null {
+  const audio = channelSpecific?.audio as Record<string, unknown> | null | undefined;
+  if (!audio || typeof audio.transcriptionStatus !== "string") {
+    return null;
+  }
+
+  if (
+    audio.transcriptionStatus !== "completed" &&
+    audio.transcriptionStatus !== "unavailable" &&
+    audio.transcriptionStatus !== "failed"
+  ) {
+    return null;
+  }
+
+  return {
+    status: audio.transcriptionStatus,
+    text: typeof audio.transcriptionText === "string" ? audio.transcriptionText : undefined,
+    reason: typeof audio.transcriptionReason === "string" ? audio.transcriptionReason : undefined
+  };
+}
+
 function actionToRequiredTool(action: ExecutionAction): LocalToolName {
   switch (action.type) {
     case "inspect-file":
@@ -350,19 +398,22 @@ class LocalQueryEngine implements QueryEngine {
     this.lastEstimatedTokens = estimateMessageTokens(this.messages);
   }
 
-  async *submitMessage(prompt: string): AsyncGenerator<EngineEvent> {
+  async *submitMessage(prompt: string, options?: QuerySubmitOptions): AsyncGenerator<EngineEvent> {
     const trimmed = prompt.trim();
     if (!trimmed) {
       return;
     }
 
     this.interrupted = false;
+    const imageAttachments = extractImageAttachments(options?.channelSpecific);
+    const audioTranscription = getAudioTranscriptionState(options?.channelSpecific);
 
     this.messages.push({
       id: createId("msg"),
       role: "user",
       text: trimmed,
-      source: trimmed.startsWith("/") ? "command" : "user"
+      source: trimmed.startsWith("/") ? "command" : "user",
+      attachments: imageAttachments
     });
     this.lastEstimatedTokens = estimateMessageTokens(this.messages);
     this.notifyListeners();
@@ -686,6 +737,22 @@ class LocalQueryEngine implements QueryEngine {
       }
     } else if (!this.options.currentProvider) {
       output = 'No available provider. Run `codeclaw setup` or `codeclaw config` to configure one.';
+      yield {
+        type: "message-delta",
+        messageId,
+        delta: output
+      };
+    } else if (audioTranscription && audioTranscription.status !== "completed") {
+      output = this.buildUnavailableAudioTranscriptionReply(audioTranscription);
+      assistantMessageSource = "local";
+      yield {
+        type: "message-delta",
+        messageId,
+        delta: output
+      };
+    } else if (imageAttachments.length > 0 && detectProviderCapabilities(this.currentProvider).vision === "unsupported") {
+      output = this.buildUnsupportedImageInputReply();
+      assistantMessageSource = "local";
       yield {
         type: "message-delta",
         messageId,
@@ -1032,6 +1099,7 @@ class LocalQueryEngine implements QueryEngine {
       `provider: ${this.currentProvider?.displayName ?? "not-configured"}`,
       `fallback: ${this.fallbackProvider?.displayName ?? "none"}`,
       `model: ${this.modelLabel}`,
+      `vision: ${this.getRuntimeState().visionSupport}`,
       `mode: ${this.permissionMode}`,
       `workspace: ${this.options.workspace}`,
       `skill: ${this.activeSkill?.name ?? "none"}`,
@@ -1040,6 +1108,28 @@ class LocalQueryEngine implements QueryEngine {
       `reactive-compacts: ${this.reactiveCompactCount}`,
       `pending-approval: ${pending}`,
       `pending-orchestration-approval: ${orchestrationPending ? `${orchestrationPending.operation} ${orchestrationPending.target} (${this.pendingOrchestrationApprovals.length} queued)` : "none"}`
+    ].join("\n");
+  }
+
+  private buildUnsupportedImageInputReply(): string {
+    return [
+      `当前模型不支持图像理解。`,
+      `provider: ${this.currentProvider?.displayName ?? "not-configured"}`,
+      `model: ${this.modelLabel}`,
+      `vision: ${this.getRuntimeState().visionSupport}`,
+      `请切换到支持视觉的模型后再发送图片，例如 Qwen2.5-VL、LLaVA、MiniCPM-V、GLM-4V。`
+    ].join("\n");
+  }
+
+  private buildUnavailableAudioTranscriptionReply(audio: {
+    status: "completed" | "unavailable" | "failed";
+    text?: string;
+    reason?: string;
+  }): string {
+    return [
+      audio.status === "failed" ? "语音转写失败。" : "当前未配置语音转写服务。",
+      ...(audio.reason ? [`reason: ${audio.reason}`] : []),
+      "请先配置 speech.asr，或直接发送文字消息。"
     ].join("\n");
   }
 
@@ -1839,13 +1929,18 @@ class LocalQueryEngine implements QueryEngine {
     providerLabel: string;
     fallbackProviderLabel: string;
     activeSkillName: string | null;
+    visionSupport: "supported" | "unsupported" | "unknown";
+    visionReason: string;
   } {
+    const capabilities = detectProviderCapabilities(this.currentProvider);
     return {
       modelLabel: this.modelLabel,
       permissionMode: this.permissionMode,
       providerLabel: this.currentProvider?.displayName ?? "not-configured",
       fallbackProviderLabel: this.fallbackProvider?.displayName ?? "none",
-      activeSkillName: this.activeSkill?.name ?? null
+      activeSkillName: this.activeSkill?.name ?? null,
+      visionSupport: capabilities.vision,
+      visionReason: capabilities.reason
     };
   }
 

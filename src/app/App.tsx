@@ -12,6 +12,7 @@ type AppBootInfo = {
   providerReason: string;
   permissionMode: string;
   workspace: string;
+  visionSupport: "supported" | "unsupported" | "unknown";
 };
 
 type PendingApprovalState = PendingApprovalView | null;
@@ -38,7 +39,7 @@ function Header({
         {bootInfo.workspace}
       </Text>
       <Text color="gray">
-        provider: {bootInfo.providerLabel}  token-budget: {feature("TOKEN_BUDGET") ? "enabled" : "disabled"}
+        provider: {bootInfo.providerLabel}  vision: {bootInfo.visionSupport}  token-budget: {feature("TOKEN_BUDGET") ? "enabled" : "disabled"}
       </Text>
     </Box>
   );

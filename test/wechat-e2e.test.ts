@@ -118,4 +118,143 @@ describe("wechat end-to-end", () => {
     expect(approved.cards[0]?.markdown).toContain("Approved orchestration write");
     expect(created).toContain("Generated scaffold for approved orchestration goal: create src/wechat-feature.ts");
   });
+
+  it("forwards inbound wechat images into the provider multimodal request", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-wechat-image-e2e-"));
+    tempDirs.push(workspace);
+    const mediaCacheDir = path.join(workspace, "wechat-media");
+    let requestBody = "";
+    const visionProvider: ProviderStatus = {
+      ...provider,
+      model: "Qwen2.5-VL-7B-Instruct"
+    };
+
+    const fetchImpl = async (_input: string | URL | Request, init?: RequestInit) => {
+      requestBody = String(init?.body ?? "");
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('data: {"choices":[{"delta":{"content":"我看到了图片。"}}]}\n')
+            );
+            controller.close();
+          }
+        })
+      );
+    };
+
+    const service = createWechatBotService({
+      mediaCacheDir,
+      createQueryEngine() {
+        return createQueryEngine({
+          currentProvider: visionProvider,
+          fallbackProvider: null,
+          permissionMode: "plan",
+          workspace,
+          fetchImpl: fetchImpl as typeof fetch
+        });
+      }
+    });
+
+    const result = await handleIlinkWebhookPayload(service.adapter, {
+      events: [
+        {
+          event: "message",
+          message: {
+            id: "img-1",
+            content: {
+              text: "帮我看这张图",
+              image: {
+                dataUrl: "data:image/png;base64,aGVsbG8=",
+                fileName: "sample.png",
+                mimeType: "image/png",
+                width: 320,
+                height: 240
+              }
+            }
+          },
+          sender: {
+            id: "user-1",
+            name: "Alice"
+          },
+          chat: {
+            id: "room-1",
+            type: "group"
+          }
+        }
+      ]
+    });
+
+    expect(result.cards[0]?.markdown).toContain("我看到了图片");
+    expect(requestBody).toContain("\"type\":\"image_url\"");
+    expect(requestBody).toContain("\"url\":\"data:image/png;base64,");
+    expect(requestBody).toContain("\"text\":\"[微信图片消息]");
+  });
+
+  it("transcribes inbound wechat audio before sending it to the reasoning provider", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-wechat-audio-e2e-"));
+    tempDirs.push(workspace);
+    const mediaCacheDir = path.join(workspace, "wechat-media");
+    let requestBody = "";
+
+    const fetchImpl = async (_input: string | URL | Request, init?: RequestInit) => {
+      requestBody = String(init?.body ?? "");
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('data: {"choices":[{"delta":{"content":"已收到语音转写。"}}]}\n')
+            );
+            controller.close();
+          }
+        })
+      );
+    };
+
+    const service = createWechatBotService({
+      mediaCacheDir,
+      transcribeAudio: async () => ({
+        text: "帮我安排明天上午十点开会"
+      }),
+      createQueryEngine() {
+        return createQueryEngine({
+          currentProvider: provider,
+          fallbackProvider: null,
+          permissionMode: "plan",
+          workspace,
+          fetchImpl: fetchImpl as typeof fetch
+        });
+      }
+    });
+
+    const result = await handleIlinkWebhookPayload(service.adapter, {
+      events: [
+        {
+          event: "message",
+          message: {
+            id: "audio-1",
+            content: {
+              audio: {
+                dataUrl: "data:audio/mpeg;base64,aGVsbG8=",
+                fileName: "voice.mp3",
+                mimeType: "audio/mpeg"
+              }
+            }
+          },
+          sender: {
+            id: "user-1",
+            name: "Alice"
+          },
+          chat: {
+            id: "room-1",
+            type: "group"
+          }
+        }
+      ]
+    });
+
+    expect(result.cards[0]?.markdown).toContain("已收到语音转写");
+    expect(result.cards[0]?.markdown).toContain("转写：帮我安排明天上午十点开会");
+    expect(requestBody).toContain("语音转写: 帮我安排明天上午十点开会");
+  });
 });

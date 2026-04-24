@@ -34,7 +34,7 @@ async function resolveWebhookEvent(
 ): Promise<WechatDeliveryCard | null> {
   switch (event.type) {
     case "message":
-      if (!event.message.text.trim()) {
+      if (!event.message.text.trim() && !event.message.image && !event.message.audio) {
         return null;
       }
       return adapter.receiveMessage(event.message);

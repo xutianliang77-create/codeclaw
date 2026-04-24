@@ -51,7 +51,7 @@ function trimCardToWechatLimit(sections: string[]): string {
 
 export function buildWechatMarkdownCard(input: WechatCardRenderInput): string {
   const latestTurn = findLatestTurn(input.snapshot.messages);
-  const latestInput = clip(latestTurn.latestInput, 180);
+  const latestInput = clip(input.latestInputOverride ?? latestTurn.latestInput, 180);
   const latestReply = clip(latestTurn.latestReply, 700);
   const approval = input.snapshot.pendingApproval;
   const orchestrationApproval = input.snapshot.pendingOrchestrationApproval;

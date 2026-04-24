@@ -36,7 +36,9 @@ export class IngressGateway {
       return;
     }
 
-    for await (const event of this.queryEngine.submitMessage(resolved.input)) {
+    for await (const event of this.queryEngine.submitMessage(resolved.input, {
+      channelSpecific: resolved.metadata.channelSpecific
+    })) {
       yield {
         sessionId: resolved.sessionId,
         traceId: resolved.traceId,

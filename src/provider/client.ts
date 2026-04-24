@@ -1,5 +1,6 @@
 import type { EngineMessage } from "../agent/types";
 import type { ProviderStatus } from "./types";
+import { readFile } from "node:fs/promises";
 
 type FetchLike = typeof fetch;
 
@@ -22,7 +23,29 @@ function getConnectTimeoutMs(provider: ProviderStatus): number {
   return provider.kind === "local" ? Math.max(provider.timeoutMs, 30_000) : provider.timeoutMs;
 }
 
-function toOpenAiMessages(messages: EngineMessage[]): Array<{ role: string; content: string }> {
+async function toOpenAiMessages(messages: EngineMessage[]): Promise<Array<{ role: string; content: string | Array<Record<string, unknown>> }>> {
+  return Promise.all(
+    messages
+      .filter((message) => message.role !== "system")
+      .map(async (message) => ({
+        role: message.role,
+        content: await toOpenAiContent(message)
+      }))
+  );
+}
+
+async function toAnthropicMessages(messages: EngineMessage[]): Promise<Array<{ role: "user" | "assistant"; content: string | Array<Record<string, unknown>> }>> {
+  return Promise.all(
+    messages
+      .filter((message) => message.role !== "system")
+      .map(async (message) => ({
+        role: message.role === "assistant" ? "assistant" : "user",
+        content: await toAnthropicContent(message)
+      }))
+  );
+}
+
+function toOllamaMessages(messages: EngineMessage[]): Array<{ role: string; content: string }> {
   return messages
     .filter((message) => message.role !== "system")
     .map((message) => ({
@@ -31,13 +54,70 @@ function toOpenAiMessages(messages: EngineMessage[]): Array<{ role: string; cont
     }));
 }
 
-function toAnthropicMessages(messages: EngineMessage[]): Array<{ role: "user" | "assistant"; content: string }> {
-  return messages
-    .filter((message) => message.role !== "system")
-    .map((message) => ({
-      role: message.role === "assistant" ? "assistant" : "user",
-      content: message.text
-    }));
+async function toOpenAiContent(message: EngineMessage): Promise<string | Array<Record<string, unknown>>> {
+  if (!message.attachments?.length) {
+    return message.text;
+  }
+
+  const imageParts = await Promise.all(
+    message.attachments.map(async (attachment) => ({
+      type: "image_url",
+      image_url: {
+        url: await toImageDataUrl(attachment.localPath, attachment.mimeType)
+      }
+    }))
+  );
+
+  return [
+    {
+      type: "text",
+      text: message.text
+    },
+    ...imageParts
+  ];
+}
+
+async function toAnthropicContent(message: EngineMessage): Promise<string | Array<Record<string, unknown>>> {
+  if (!message.attachments?.length) {
+    return message.text;
+  }
+
+  const imageParts = await Promise.all(
+    message.attachments.map(async (attachment) => {
+      const dataUrl = await toImageDataUrl(attachment.localPath, attachment.mimeType);
+      const [mediaType, base64] = parseDataUrl(dataUrl);
+      return {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: mediaType,
+          data: base64
+        }
+      };
+    })
+  );
+
+  return [
+    {
+      type: "text",
+      text: message.text
+    },
+    ...imageParts
+  ];
+}
+
+async function toImageDataUrl(localPath: string, mimeType = "image/jpeg"): Promise<string> {
+  const buffer = await readFile(localPath);
+  return `data:${mimeType};base64,${buffer.toString("base64")}`;
+}
+
+function parseDataUrl(dataUrl: string): [string, string] {
+  const match = dataUrl.match(/^data:([^;,]+);base64,(.+)$/i);
+  if (!match) {
+    throw new Error("Unsupported image data URL");
+  }
+
+  return [match[1], match[2]];
 }
 
 async function fetchWithConnectTimeout(
@@ -217,7 +297,7 @@ async function* streamOpenAiCompatible(
       body: JSON.stringify({
         model: provider.model,
         stream: true,
-        messages: toOpenAiMessages(messages)
+        messages: await toOpenAiMessages(messages)
       })
     },
     getConnectTimeoutMs(provider),
@@ -259,7 +339,7 @@ async function* streamAnthropic(
         model: provider.model,
         max_tokens: 1024,
         stream: true,
-        messages: toAnthropicMessages(messages)
+        messages: await toAnthropicMessages(messages)
       })
     },
     getConnectTimeoutMs(provider),
@@ -302,7 +382,7 @@ async function* streamOllama(
       body: JSON.stringify({
         model: provider.model,
         stream: true,
-        messages: toOpenAiMessages(messages)
+        messages: toOllamaMessages(messages)
       })
     },
     getConnectTimeoutMs(provider),
