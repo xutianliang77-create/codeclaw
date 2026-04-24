@@ -5,6 +5,7 @@ import type { StoredPendingApproval } from "../approvals/store";
 import { runDoctor } from "../commands/doctor";
 import type { PermissionMode } from "../lib/config";
 import { callMcpTool, listMcpResources, listMcpServers, listMcpTools, readMcpResource } from "../mcp/service";
+import { SlashRegistry, loadBuiltins } from "../commands/slash";
 import QRCode from "qrcode";
 import {
   buildApprovedExecutionPlan,
@@ -363,6 +364,7 @@ class LocalQueryEngine implements QueryEngine {
   private readonly recentGapSignatures: string[] = [];
   private pendingOrchestrationApprovals: PendingOrchestrationApproval[] = [];
   private activeSkill: SkillDefinition | null = null;
+  private readonly slashRegistry = new SlashRegistry();
 
   constructor(private readonly options: QueryEngineOptions) {
     this.currentProvider = options.currentProvider;
@@ -371,6 +373,7 @@ class LocalQueryEngine implements QueryEngine {
     this.modelLabel = this.currentProvider?.model ?? "scaffold";
     this.permissions = new PermissionManager(this.permissionMode);
     this.pendingApprovals = loadPendingApprovals(options.approvalsDir);
+    loadBuiltins(this.slashRegistry);
     this.messages = [
       {
         id: createId("msg"),
@@ -434,7 +437,14 @@ class LocalQueryEngine implements QueryEngine {
     let assistantMessageSource: EngineMessageSource = "local";
     const approveTargetId = parseApprovalCommand(trimmed, "/approve");
     const denyTargetId = parseApprovalCommand(trimmed, "/deny");
-    const builtinReply = this.resolveBuiltinReply(trimmed);
+    // P0 W2 · ADR-003：新注册表前置于旧 resolveBuiltinReply。
+    //   - 命中且返回 reply → 走 builtinReply 分支（老下游无感知）
+    //   - 命中 noop/passthrough 或未命中 → 继续走旧路径
+    const slashDispatch = await this.slashRegistry.dispatch(trimmed, this);
+    const slashReply = slashDispatch?.result.kind === "reply"
+      ? slashDispatch.result.text
+      : null;
+    const builtinReply = slashReply !== null ? slashReply : this.resolveBuiltinReply(trimmed);
     const commandReply = builtinReply === null ? await this.resolveCommandReply(trimmed) : undefined;
     const localToolName = builtinReply === null ? detectLocalTool(trimmed) : null;
 
