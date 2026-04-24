@@ -41,6 +41,7 @@ import planCommand from "./builtins/plan";
 import reviewCommand from "./builtins/review";
 import orchestrateCommand from "./builtins/orchestrate";
 import costCommand from "./builtins/cost";
+import commitCommand from "./builtins/commit";
 
 const BUILTINS: Array<SlashCommand | SlashCommand[]> = [
   helpCommand,
@@ -48,6 +49,7 @@ const BUILTINS: Array<SlashCommand | SlashCommand[]> = [
   reviewCommand,
   orchestrateCommand,
   costCommand,
+  commitCommand,
   modeCommand,
   doctorCommand,
   statusCommand,

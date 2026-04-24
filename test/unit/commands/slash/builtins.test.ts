@@ -141,6 +141,7 @@ describe("loadBuiltins", () => {
       "/review",
       "/orchestrate",
       "/cost",
+      "/commit",
     ]) {
       expect(reg.has(name)).toBe(true);
     }
