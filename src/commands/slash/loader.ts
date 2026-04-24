@@ -37,9 +37,11 @@ import debugToolCallCommand from "./builtins/debugToolCall";
 import mcpCommand from "./builtins/mcp";
 import wechatCommand from "./builtins/wechat";
 import helpCommand from "./builtins/help";
+import planCommand from "./builtins/plan";
 
 const BUILTINS: Array<SlashCommand | SlashCommand[]> = [
   helpCommand,
+  planCommand,
   modeCommand,
   doctorCommand,
   statusCommand,

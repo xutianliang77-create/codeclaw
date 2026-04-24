@@ -981,15 +981,7 @@ class LocalQueryEngine implements QueryEngine {
       return this.buildReviewReply(plan, execution, reflector);
     }
 
-    if (matchesCommand(prompt, "/plan")) {
-      const userGoal = prompt.replace("/plan", "").trim();
-      if (!userGoal) {
-        return "Usage: /plan <goal>";
-      }
-
-      const plan = buildOrchestrationPlan(userGoal, this.buildOrchestrationContext());
-      return this.buildPlanReply(plan);
-    }
+    // /plan 已迁移到 SlashRegistry（W2-02 batch6），实际逻辑在 runPlanCommand。
 
     if (matchesCommand(prompt, "/orchestrate")) {
       const userGoal = prompt.replace("/orchestrate", "").trim();
@@ -1458,6 +1450,16 @@ class LocalQueryEngine implements QueryEngine {
       currentProvider: this.currentProvider,
       permissionMode: this.permissionMode
     };
+  }
+
+  /** 给 /plan slash builtin 用：解析 prompt → 构造 plan → 渲染 */
+  public runPlanCommand(prompt: string): string {
+    const userGoal = prompt.replace("/plan", "").trim();
+    if (!userGoal) {
+      return "Usage: /plan <goal>";
+    }
+    const plan = buildOrchestrationPlan(userGoal, this.buildOrchestrationContext());
+    return this.buildPlanReply(plan);
   }
 
   private buildPlanReply(plan: OrchestrationPlan): string {

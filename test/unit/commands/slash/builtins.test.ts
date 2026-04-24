@@ -135,8 +135,9 @@ describe("loadBuiltins", () => {
       "/debug-tool-call",
       "/mcp",
       "/wechat",
-      // help
+      // help / plan
       "/help",
+      "/plan",
     ]) {
       expect(reg.has(name)).toBe(true);
     }
@@ -206,6 +207,27 @@ describe("delegating builtins · duck-type pattern", () => {
     expect(c?.result).toEqual({ kind: "reply", text: "COMPACT:/compact 50" });
     const m = await reg.dispatch("/model gpt-4.1", compactHolder);
     expect(m?.result).toEqual({ kind: "reply", text: "MODEL:/model gpt-4.1" });
+  });
+
+  it("/plan delegates to runPlanCommand and forwards rawPrompt", async () => {
+    const reg = new SlashRegistry();
+    loadBuiltins(reg);
+    const planHolder = {
+      runPlanCommand: (p: string) => `PLAN_OUT:${p}`,
+    };
+    const out = await reg.dispatch("/plan refactor auth", planHolder);
+    expect(out?.result).toEqual({
+      kind: "reply",
+      text: "PLAN_OUT:/plan refactor auth",
+    });
+  });
+
+  it("/plan degrades when runPlanCommand missing", async () => {
+    const reg = new SlashRegistry();
+    loadBuiltins(reg);
+    const out = await reg.dispatch("/plan goal", {});
+    if (out?.result.kind !== "reply") throw new Error("expected reply");
+    expect(out.result.text).toContain("unavailable");
   });
 
   it("/help dispatches to registry.generateHelp via getSlashRegistry()", async () => {
