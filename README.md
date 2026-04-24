@@ -7,7 +7,7 @@ It currently includes:
 - provider selection and fallback
 - a local REPL with approvals and compacting
 - file / shell / edit tools
-- LSP-backed symbol / definition / references queries
+- LSP-backed symbol / definition / references queries (defaults to a zero-dependency regex index; the real `multilspy` backend is opt-in — see **LSP Setup** below)
 - HTTP SDK / gateway entrypoints
 - a minimal planner / executor / reflector lane
 - WeChat bot integration with iLink login and worker polling
@@ -35,7 +35,7 @@ What is still intentionally limited:
 - Node.js `22+`
 - npm `10+`
 - Bun `1.x` for builds
-- optional: Python `3.x` for real LSP (`multilspy`)
+- **optional**: Python `3.x` + `venv` **only if** you want the real `multilspy`-backed LSP lane. Without it, CodeClaw silently falls back to a regex-based index for `/symbol`, `/definition`, `/references` — all commands still work, cross-file semantic precision is reduced.
 
 ## Quick Start
 
@@ -101,19 +101,32 @@ Core REPL commands:
 
 ## LSP Setup
 
-To enable the real multilspy-backed lane:
+CodeClaw ships with **two LSP backends**:
+
+| Backend | Requires | When used |
+|---------|----------|-----------|
+| `fallback-regex-index` | nothing | **Default** if you skip LSP setup; regex-based `/symbol /definition /references` |
+| `multilspy` | Python `3.x` + venv + `npm run setup:lsp` | Real cross-file semantic LSP via Python bridge |
+
+**Out of the box (no setup)** — `/symbol`, `/definition`, `/references` work via the regex index. Good enough for most single-file navigation.
+
+**Opt-in real LSP** (needed for cross-file references, type-aware queries):
 
 ```bash
-npm run setup:lsp
+npm run setup:lsp   # creates .venv-lsp, installs multilspy + typescript-language-server
 ```
 
-Then use:
+Once `.venv-lsp` exists, CodeClaw auto-detects and prefers the real backend. You can force either lane:
 
-- `/symbol <name>`
-- `/definition <name>`
-- `/references <name>`
+```bash
+CODECLAW_ENABLE_REAL_LSP=1 codeclaw   # force real LSP (errors out if venv missing)
+CODECLAW_ENABLE_REAL_LSP=0 codeclaw   # force regex fallback, ignore venv
+# unset = auto (default): prefer real LSP if available, else silent fallback
+```
 
-See [docs/LSP_SETUP.md](./docs/LSP_SETUP.md).
+See [docs/LSP_SETUP.md](./docs/LSP_SETUP.md) for full install flow and troubleshooting.
+
+> **Why Python for LSP?** The real lane currently uses `multilspy` (Python) to manage LSP servers across multiple languages. A Node-native LSP client is on the roadmap (P1+) and will remove the Python dependency; until then, `multilspy` stays opt-in and the regex lane is the zero-dependency default.
 
 ## WeChat Bot
 

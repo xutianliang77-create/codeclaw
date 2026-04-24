@@ -33,10 +33,12 @@ describe("ingress gateway", () => {
       )
     );
 
+    // P0-W1-06：traceId 升级为 ULID（26 char Crockford Base32，无 I/L/O/U）
+    const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
     expect(envelopes.length).toBeGreaterThan(0);
     expect(envelopes.every((envelope) => envelope.sessionId === queryEngine.getSessionId())).toBe(true);
     expect(envelopes.every((envelope) => envelope.channel === "cli")).toBe(true);
-    expect(envelopes.every((envelope) => envelope.traceId.startsWith("trace-"))).toBe(true);
+    expect(envelopes.every((envelope) => ULID_RE.test(envelope.traceId))).toBe(true);
     expect(envelopes.some((envelope) => (envelope.payload as EngineEvent).type === "message-complete")).toBe(true);
   });
 

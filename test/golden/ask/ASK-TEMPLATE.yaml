@@ -1,0 +1,33 @@
+# Golden Set · /ask 题目模板
+# 文件名规则：ASK-{3 位以上数字}.yaml，如 ASK-042.yaml
+#
+# 新增题目后请：
+#   1. 补一份 reference/ASK-{id}.md（人工参考答案）
+#   2. 在团队内跑一次人工评审（目标 2/2 分）
+#   3. 先跑 `npm run golden:ask -- --id ASK-{id} --mock` 确保 schema 通过
+#   4. PR 打 `golden-set` 标签
+
+id: ASK-XXX
+version: 1
+category: code-understanding   # code-understanding | debug | architecture | tool-choice | cli-usage | snippet | refusal
+difficulty: medium              # easy | medium | hard
+requires:
+  workspace: tiny-repo-XX       # 可选：用到 test/golden/workspaces/tiny-repo-XX.tar.gz
+  tools:                        # 可选：题目需要用到的工具（声明，不做强制校验）
+    - read
+    - symbol
+prompt: |
+  （此处写给 LLM 的 prompt，可多行）
+
+expected:
+  must_mention:                 # 必提及的事实关键词；每条支持 "A 或 B" 多选一
+    - 关键词 1
+    - 关键词 2 或 同义表达
+  must_not_mention:             # 禁提及（常见幻觉 / 不存在的东西 / 密钥头部）
+    - 不该出现的 1
+    - 不该出现的 2
+  rubric: |
+    人工评分说明。
+  answer_key: ASK-XXX.md
+
+# deprecated: true              # 可选：标 true 后 runner 跳过此题

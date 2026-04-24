@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createQueryEngine } from "../src/agent/queryEngine";
 import type { EngineEvent } from "../src/agent/types";
 import type { ProviderStatus } from "../src/provider/types";
+import { loadPendingApprovals } from "../src/approvals/store";
 
 const tempDirs: string[] = [];
 
@@ -1097,9 +1098,8 @@ describe("query engine", () => {
     await collect(engine.submitMessage("/write first.txt :: one"));
     await collect(engine.submitMessage("/write second.txt :: two"));
     await collect(engine.submitMessage("/write third.txt :: three"));
-    const storedApprovals = JSON.parse(
-      await readFile(path.join(approvalsDir, "pending-approval.json"), "utf8")
-    ) as Array<{ id: string; detail: string }>;
+    // P0-W1-07：approvals 已迁到 SQLite，不再读 pending-approval.json
+    const storedApprovals = loadPendingApprovals(approvalsDir);
     const thirdApprovalId = storedApprovals.find((approval) => approval.detail === "third.txt")?.id;
 
     expect(engine.getPendingApproval()?.detail).toBe("first.txt");

@@ -20,7 +20,7 @@ gateway:
   bots:
     ilinkWechat:
       enabled: true
-      tokenFile: "~/.claude/wechat-ibot/default.json"
+      tokenFile: "~/.codeclaw/wechat-ibot/default.json"
       baseUrl: "https://ilinkai.weixin.qq.com"
       pollIntervalMs: 1000
 ```
@@ -28,7 +28,7 @@ gateway:
 环境变量可覆盖：
 
 ```bash
-CODECLAW_ILINK_WECHAT_TOKEN_FILE=~/.claude/wechat-ibot/default.json
+CODECLAW_ILINK_WECHAT_TOKEN_FILE=~/.codeclaw/wechat-ibot/default.json
 CODECLAW_ILINK_WECHAT_BASE_URL=https://ilinkai.weixin.qq.com
 ```
 

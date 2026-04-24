@@ -8,3 +8,14 @@ coverage/
 __pycache__/
 *.pyc
 tmp-phase1.txt
+
+# 本地专用文档，严禁提交（用户 2026-04-24 指定）
+/doc/
+/doc.zip
+/__MACOSX/
+
+# Claude Code 本地设置，不入库
+.claude/
+
+# Golden Set runtime 报告（每次运行生成）
+/test/golden/reports/

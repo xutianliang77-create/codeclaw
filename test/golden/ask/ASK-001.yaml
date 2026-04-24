@@ -1,0 +1,23 @@
+id: ASK-001
+version: 1
+category: cli-usage
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 /mode 命令支持哪些权限模式？请全部列出。
+expected:
+  must_mention:
+    - default
+    - plan
+    - auto
+    - acceptEdits
+    - bypassPermissions
+    - dontAsk
+  must_not_mention:
+    - admin
+    - sudo
+  rubric: |
+    应完整列出 6 种 PermissionMode：default / plan / auto / acceptEdits / bypassPermissions / dontAsk。
+    多一个或少一个都扣分。不得杜撰 "admin" / "sudo" 等不存在的模式。
+  answer_key: ASK-001.md

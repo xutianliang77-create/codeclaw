@@ -102,7 +102,7 @@ export function createDefaultConfig(cwd = process.cwd()): CodeClawConfig {
       bots: {
         ilinkWechat: {
           enabled: false,
-          tokenFile: "~/.claude/wechat-ibot/default.json",
+          tokenFile: "~/.codeclaw/wechat-ibot/default.json",
           baseUrl: "https://ilinkai.weixin.qq.com",
           pollIntervalMs: 100
         }

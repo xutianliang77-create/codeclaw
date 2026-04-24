@@ -1,10 +1,7 @@
 import type { EngineEvent, QueryEngine } from "../agent/types";
 import type { DeliveryEnvelope, IngressMessage, ResolvedIngressMessage } from "../channels/channelAdapter";
+import { createTraceId } from "../lib/traceId";
 import { SessionManager, type SessionInfo } from "./sessionManager";
-
-function createTraceId(): string {
-  return `trace-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
 
 export class IngressGateway {
   private readonly sessionManager: SessionManager;

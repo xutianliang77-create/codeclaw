@@ -12,7 +12,10 @@
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "types": ["node", "vitest/globals"],
-    "baseUrl": "."
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
   },
   "include": ["src", "test", "scripts", "eslint.config.js", "stubs"]
 }
