@@ -1,0 +1,32 @@
+/**
+ * `/compact` · 主动触发 context 压缩
+ *
+ * 可选参数：保留最近多少条消息（数值），不传走默认。
+ */
+
+import { defineCommand, reply } from "../registry";
+
+interface CompactHolder {
+  handleCompactCommand(prompt: string): string;
+}
+
+function isHolder(x: unknown): x is CompactHolder {
+  return !!x && typeof (x as CompactHolder).handleCompactCommand === "function";
+}
+
+export default defineCommand({
+  name: "/compact",
+  category: "memory",
+  risk: "low",
+  summary: "Compact older messages into a summary, keep recent ones.",
+  helpDetail:
+    "Usage:\n" +
+    "  /compact            use default keep-recent\n" +
+    "  /compact <N>        keep the most recent N messages",
+  handler(ctx) {
+    if (!isHolder(ctx.queryEngine)) {
+      return reply("compact command unavailable: runtime missing handleCompactCommand");
+    }
+    return reply(ctx.queryEngine.handleCompactCommand(ctx.rawPrompt));
+  },
+});

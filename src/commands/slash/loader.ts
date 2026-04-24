@@ -17,10 +17,36 @@ import type { SlashRegistry } from "./registry";
 
 import modeCommand from "./builtins/mode";
 import doctorCommand from "./builtins/doctor";
+import statusCommand from "./builtins/status";
+import resumeCommand from "./builtins/resume";
+import sessionCommand from "./builtins/session";
+import providersCommand from "./builtins/providers";
+import approvalsCommand from "./builtins/approvals";
+import contextCommand from "./builtins/context";
+import memoryCommand from "./builtins/memory";
+import diffCommand from "./builtins/diff";
+import skillsCommand from "./builtins/skills";
+import hooksCommand from "./builtins/hooks";
+import initCommand from "./builtins/init";
+import compactCommand from "./builtins/compact";
+import modelCommand from "./builtins/model";
 
 const BUILTINS: Array<SlashCommand | SlashCommand[]> = [
   modeCommand,
   doctorCommand,
+  statusCommand,
+  resumeCommand,
+  sessionCommand,
+  providersCommand,
+  approvalsCommand,
+  contextCommand,
+  memoryCommand,
+  diffCommand,
+  skillsCommand,
+  hooksCommand,
+  initCommand,
+  compactCommand,
+  modelCommand,
 ];
 
 export function loadBuiltins(registry: SlashRegistry): number {

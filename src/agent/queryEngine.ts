@@ -915,61 +915,11 @@ class LocalQueryEngine implements QueryEngine {
         : "No pending approval.";
     }
 
-    if (matchesCommand(prompt, "/status")) {
-      return this.buildStatusReply();
-    }
-
-    if (matchesCommand(prompt, "/resume")) {
-      return this.buildResumeReply();
-    }
-
-    if (matchesCommand(prompt, "/session")) {
-      return this.buildSessionReply();
-    }
-
-    if (matchesCommand(prompt, "/providers")) {
-      return this.buildProvidersReply();
-    }
-
-    if (matchesCommand(prompt, "/approvals")) {
-      return this.buildApprovalsReply();
-    }
-
-    if (matchesCommand(prompt, "/context")) {
-      return this.buildContextReply();
-    }
-
-    if (matchesCommand(prompt, "/memory")) {
-      return this.buildMemoryReply();
-    }
-
-    if (matchesCommand(prompt, "/diff")) {
-      return this.buildDiffReply();
-    }
-
-    if (matchesCommand(prompt, "/skills")) {
-      return this.buildSkillsReply(prompt);
-    }
-
-    if (matchesCommand(prompt, "/hooks")) {
-      return this.buildHooksReply();
-    }
-
-    if (matchesCommand(prompt, "/init")) {
-      return this.buildInitReply();
-    }
-
-    if (matchesCommand(prompt, "/compact")) {
-      return this.handleCompactCommand(prompt);
-    }
-
-    if (matchesCommand(prompt, "/model")) {
-      return this.handleModelCommand(prompt);
-    }
-
-    if (matchesCommand(prompt, "/mode")) {
-      return this.handleModeCommand(prompt);
-    }
+    // 已迁移到 SlashRegistry（W2-02/03）：
+    //   /status /resume /session /providers /approvals
+    //   /context /memory /diff /skills /hooks /init
+    //   /compact /model /mode /doctor
+    // 老的 handle*/build* 私有方法保留供 registry 通过 duck-type 调用。
 
     return buildBuiltinReply(prompt);
   }
