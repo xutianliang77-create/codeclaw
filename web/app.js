@@ -44,6 +44,26 @@ function setStatus(text, connected) {
   els.status.className = "status " + (connected ? "connected" : "disconnected");
 }
 
+/**
+ * 设置气泡内容。assistant 走 markdown 渲染（marked + DOMPurify + highlight.js）；
+ * 其他角色（user/tool/error/approval）继续用 textContent 防 XSS——它们的内容来源
+ * 信任度更低（user 输入 / 系统拼接）或者格式是固定的纯文本提示。
+ */
+function setBubbleContent(bubble, kind, text) {
+  if (kind === "assistant" && typeof window.marked !== "undefined" && typeof window.DOMPurify !== "undefined") {
+    const html = window.marked.parse(text, { breaks: true, gfm: true });
+    bubble.innerHTML = window.DOMPurify.sanitize(html);
+    // 给所有 <pre><code> 跑高亮
+    if (typeof window.hljs !== "undefined") {
+      bubble.querySelectorAll("pre code").forEach((el) => {
+        try { window.hljs.highlightElement(el); } catch { /* noop */ }
+      });
+    }
+  } else {
+    bubble.textContent = text; // 防 XSS 兜底
+  }
+}
+
 function appendMessage(kind, text, meta = "") {
   const wrap = document.createElement("div");
   wrap.className = "msg " + kind;
@@ -55,7 +75,7 @@ function appendMessage(kind, text, meta = "") {
   }
   const bubble = document.createElement("div");
   bubble.className = "bubble";
-  bubble.textContent = text; // 防 XSS：永远 textContent
+  setBubbleContent(bubble, kind, text);
   wrap.appendChild(bubble);
   els.messages.appendChild(wrap);
   els.messages.scrollTop = els.messages.scrollHeight;
@@ -159,16 +179,22 @@ function renderEvent(ev) {
       break;
     case "message-start":
       state.currentStreamMsg = appendMessage("assistant", "", "assistant");
+      // 流式阶段累积 raw 文本到气泡 dataset，complete 时一次性 markdown 渲染
+      state.currentStreamMsg.dataset.raw = "";
       break;
     case "message-delta":
       if (state.currentStreamMsg) {
-        state.currentStreamMsg.textContent += ev.delta;
+        // delta 阶段用 textContent 显示纯文本，避免不完整 markdown 闪烁
+        const raw = (state.currentStreamMsg.dataset.raw || "") + ev.delta;
+        state.currentStreamMsg.dataset.raw = raw;
+        state.currentStreamMsg.textContent = raw;
         els.messages.scrollTop = els.messages.scrollHeight;
       }
       break;
     case "message-complete":
+      // complete 时拿完整文本走 markdown 渲染（marked + DOMPurify + highlight.js）
       if (state.currentStreamMsg) {
-        state.currentStreamMsg.textContent = ev.text;
+        setBubbleContent(state.currentStreamMsg, "assistant", ev.text);
       } else {
         appendMessage("assistant", ev.text, "assistant");
       }

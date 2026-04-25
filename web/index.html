@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CodeClaw</title>
   <link rel="stylesheet" href="/static/styles.css" />
+  <!-- highlight.js 主题：浅色 / 深色根据 prefers-color-scheme 自动切换 -->
+  <link rel="stylesheet" href="/static/vendor/highlight-light.min.css"
+        media="(prefers-color-scheme: light)" />
+  <link rel="stylesheet" href="/static/vendor/highlight-dark.min.css"
+        media="(prefers-color-scheme: dark)" />
 </head>
 <body>
   <header>
@@ -30,6 +35,10 @@
     <span>本地 only · token 仅存浏览器 localStorage · 后端 SSE 推流</span>
   </footer>
 
+  <!-- 第三方依赖：本地拷贝离线可用（vendor/）。defer 保证 DOMContentLoaded 后执行 -->
+  <script src="/static/vendor/marked.min.js" defer></script>
+  <script src="/static/vendor/purify.min.js" defer></script>
+  <script src="/static/vendor/highlight.min.js" defer></script>
   <script src="/static/app.js" defer></script>
 </body>
 </html>

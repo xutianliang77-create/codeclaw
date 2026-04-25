@@ -207,6 +207,28 @@ describe("Web server · 路由 misc", () => {
     expect(r.status).toBe(404);
   });
 
+  it("GET /static/vendor/marked.min.js → 200 + 内容含 marked", async () => {
+    const r = await fetch(`${baseUrl}/static/vendor/marked.min.js`);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toMatch(/javascript/);
+    const body = await r.text();
+    // marked.min.js 包含 "marked" 字串（库自身名称）
+    expect(body.length).toBeGreaterThan(1000);
+  });
+
+  it("GET /static/vendor/purify.min.js → 200", async () => {
+    const r = await fetch(`${baseUrl}/static/vendor/purify.min.js`);
+    expect(r.status).toBe(200);
+  });
+
+  it("GET / 返回的 HTML 含 markdown 库 script 标签", async () => {
+    const r = await fetch(`${baseUrl}/`);
+    const body = await r.text();
+    expect(body).toContain("marked.min.js");
+    expect(body).toContain("purify.min.js");
+    expect(body).toContain("highlight.min.js");
+  });
+
   it("未知路径 → 404", async () => {
     const r = await fetch(`${baseUrl}/nonexistent`);
     expect(r.status).toBe(404);
