@@ -8,6 +8,8 @@ import Database from "better-sqlite3";
 
 import { readConfig, resolveConfigPaths } from "../lib/config";
 import { ProviderRegistry } from "../provider/registry";
+import { openAuditDb } from "../storage/audit";
+import { AuditLog } from "../storage/auditLog";
 import { VERSION } from "../version";
 
 export async function runDoctor(): Promise<string> {
@@ -29,7 +31,14 @@ export async function runDoctor(): Promise<string> {
     "providers:",
   ];
 
-  for (const provider of providers) {
+  // 并行探测所有 configured provider 的 baseUrl 联通性
+  const probes = await Promise.all(
+    providers.map(async (p) =>
+      p.configured && p.baseUrl ? probeBaseUrl(p.baseUrl) : null
+    )
+  );
+
+  for (const [idx, provider] of providers.entries()) {
     lines.push(
       `- ${provider.type} (${provider.displayName})`,
       `  configured: ${provider.configured}`,
@@ -38,14 +47,24 @@ export async function runDoctor(): Promise<string> {
       `  baseUrl: ${provider.baseUrl}`,
       `  reason: ${provider.reason}`
     );
+    const probe = probes[idx];
+    if (probe) {
+      lines.push(
+        probe.ok
+          ? `  reachable: yes (${probe.status} in ${probe.durationMs}ms)`
+          : `  reachable: no (${probe.error ?? "unknown"} after ${probe.durationMs}ms)`
+      );
+    }
   }
 
   // —— P0-W1-13：新增 storage / tokenFile / runtime / libs 诊断块 ————————————
 
   lines.push("", "storage:");
+  const dataDbPath = path.join(paths.configDir, "data.db");
+  const auditDbPath = path.join(paths.configDir, "audit.db");
   for (const { label, filePath } of [
-    { label: "data.db", filePath: path.join(paths.configDir, "data.db") },
-    { label: "audit.db", filePath: path.join(paths.configDir, "audit.db") },
+    { label: "data.db", filePath: dataDbPath },
+    { label: "audit.db", filePath: auditDbPath },
   ]) {
     const info = inspectDb(filePath);
     if (!info.exists) {
@@ -60,6 +79,26 @@ export async function runDoctor(): Promise<string> {
       `- ${label}: ${filePath}`,
       `  size: ${formatBytes(info.size ?? 0)}  mode: ${info.mode}  journal: ${info.journal}`
     );
+
+    if (label === "data.db") {
+      const pending = inspectApprovalsPending(filePath);
+      if (pending !== null) {
+        lines.push(`  pending approvals: ${pending}`);
+      }
+    }
+
+    if (label === "audit.db") {
+      const chain = inspectAuditChain(filePath);
+      if ("ok" in chain) {
+        lines.push(
+          chain.ok
+            ? `  chain: ok (${chain.checked} events verified in ${chain.durationMs}ms)`
+            : chain.brokenAt
+            ? `  chain: BROKEN at ${chain.brokenAt} after ${chain.checked ?? 0} events: ${chain.reason ?? "unknown"}`
+            : `  chain: error (${chain.error ?? "unknown"})`
+        );
+      }
+    }
   }
 
   const tokenFilePath = resolveTokenFilePath(config?.gateway?.bots?.ilinkWechat?.tokenFile);
@@ -97,6 +136,77 @@ export async function runDoctor(): Promise<string> {
 }
 
 // —— 辅助函数（与上方函数作用范围一致；保持纯函数 + 零副作用） ————————————
+
+/**
+ * 跑一遍 audit.db 的 hash 链 verify，确认未被篡改/断链。
+ * audit.db 不存在时返回 { skipped: true }。失败会捕获，doctor 继续跑。
+ */
+export function inspectAuditChain(auditDbPath: string):
+  | { skipped: true }
+  | { ok: true; checked: number; durationMs: number }
+  | { ok: false; checked?: number; brokenAt?: string; reason?: string; error?: string } {
+  if (!existsSync(auditDbPath)) return { skipped: true };
+  let handle: ReturnType<typeof openAuditDb> | null = null;
+  try {
+    handle = openAuditDb({
+      path: auditDbPath,
+      singleton: false,
+      readonly: true,
+      runMigrations: false,
+    });
+    const r = new AuditLog(handle.db).verify();
+    if (r.ok) return { ok: true, checked: r.checkedCount, durationMs: r.durationMs };
+    return {
+      ok: false,
+      checked: r.checkedCount,
+      brokenAt: r.brokenAt,
+      reason: r.reason,
+    };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  } finally {
+    handle?.close();
+  }
+}
+
+/** 数 approvals 表里 status='pending' 的条数。data.db 不存在或表缺失返回 null。 */
+export function inspectApprovalsPending(dataDbPath: string): number | null {
+  if (!existsSync(dataDbPath)) return null;
+  try {
+    const db = new Database(dataDbPath, { readonly: true });
+    try {
+      const row = db
+        .prepare("SELECT COUNT(*) as count FROM approvals WHERE status = 'pending'")
+        .get() as { count: number } | undefined;
+      return row?.count ?? 0;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 探测 provider baseUrl 联通性：HEAD 请求 + 3s timeout。
+ * 返回 ok:true 表示能拿到响应（任意状态码均算可达，业务错误不在此判）。
+ */
+export async function probeBaseUrl(
+  url: string,
+  timeoutMs = 3000
+): Promise<{ ok: boolean; status?: number; durationMs: number; error?: string }> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  const start = Date.now();
+  try {
+    const res = await fetch(url, { method: "HEAD", signal: ac.signal });
+    return { ok: true, status: res.status, durationMs: Date.now() - start };
+  } catch (err) {
+    return { ok: false, durationMs: Date.now() - start, error: (err as Error).message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function inspectDb(dbPath: string): {
   exists: boolean;
