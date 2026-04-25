@@ -442,6 +442,11 @@ class LocalQueryEngine implements QueryEngine {
   private askModePending: { restore: PermissionMode } | null = null;
   private askModeShouldRestoreAtEnd = false;
 
+  // W3-05：真实 provider token 用量（自 session 起累加；reset 不在 compact 时触发）
+  private sessionInputTokens = 0;
+  private sessionOutputTokens = 0;
+  private lastProviderModelId: string | null = null;
+
   /** 给 SlashCommand handler 通过 ctx.queryEngine 拿到 registry（供 /help 用） */
   public getSlashRegistry(): SlashRegistry {
     return this.slashRegistry;
@@ -1052,7 +1057,13 @@ class LocalQueryEngine implements QueryEngine {
           try {
             for await (const chunk of streamProviderResponse(provider, this.getProviderMessages(), {
               fetchImpl: this.options.fetchImpl,
-              abortSignal: this.abortController.signal
+              abortSignal: this.abortController.signal,
+              onUsage: (usage) => {
+                // W3-05：累加真实 token 用量到 session
+                this.sessionInputTokens += usage.inputTokens ?? 0;
+                this.sessionOutputTokens += usage.outputTokens ?? 0;
+                this.lastProviderModelId = usage.modelId ?? this.lastProviderModelId;
+              },
             })) {
               providerProducedOutput = true;
               output += chunk;
@@ -1884,6 +1895,13 @@ class LocalQueryEngine implements QueryEngine {
         (fsm.lastHalt.message ? ` message="${fsm.lastHalt.message}"` : "")
       : "last-halt: none";
 
+    // W3-05：provider 真实 token 用量
+    const totalTokens = this.sessionInputTokens + this.sessionOutputTokens;
+    const usageLine = totalTokens > 0
+      ? `provider-tokens: input=${this.sessionInputTokens} output=${this.sessionOutputTokens} total=${totalTokens}` +
+        (this.lastProviderModelId ? ` (last-model=${this.lastProviderModelId})` : "")
+      : "provider-tokens: 0 (no LLM call yet, or provider not surfacing usage)";
+
     return [
       "Cost & Activity Snapshot",
       `session: ${session}`,
@@ -1892,15 +1910,13 @@ class LocalQueryEngine implements QueryEngine {
       `fsm-phase: ${fsm.phase}  (turn=${fsm.turn})`,
       haltLine,
       `messages: ${messages}  (user=${userMessages}, assistant=${assistantMessages})`,
+      usageLine,
       `estimated-tokens (local heuristic, char/4): ${estimatedTokens}`,
       `compacts: ${compacts}  (reactive=${reactiveCompacts})`,
       `files-read: ${filesRead}`,
       `files-changed: ${filesChanged}`,
       `pending-tool-approvals: ${pendingTool}`,
       `pending-orchestration-approvals: ${pendingOrch}`,
-      "",
-      "note: real provider usage (input/output tokens, USD) will be tracked once the",
-      "      provider client surfaces usage; tracked in P0 W3.",
     ].join("\n");
   }
 

@@ -4,6 +4,21 @@ import { readFile } from "node:fs/promises";
 
 type FetchLike = typeof fetch;
 
+/**
+ * Provider 真实 token 用量（W3-05）。三家提供商语义略有差异，统一抽象：
+ *   - inputTokens：prompt / input
+ *   - outputTokens：completion / output
+ *   - modelId：实际响应里看到的模型 id（可能与 request 不同，比如 anthropic 路由）
+ *   - costUsd：可选；若 caller 知道 provider 价位可在外面算
+ */
+export interface ProviderUsage {
+  provider: string;
+  modelId?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+}
+
 export class ProviderRequestError extends Error {
   constructor(
     message: string,
@@ -283,7 +298,8 @@ async function* streamOpenAiCompatible(
   provider: ProviderStatus,
   messages: EngineMessage[],
   fetchImpl: FetchLike,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  onUsage?: (usage: ProviderUsage) => void
 ): AsyncGenerator<string> {
   const response = await fetchWithConnectTimeout(
     fetchImpl,
@@ -297,6 +313,8 @@ async function* streamOpenAiCompatible(
       body: JSON.stringify({
         model: provider.model,
         stream: true,
+        // W3-05：要求 OpenAI 在最后一帧返回 usage（默认 stream 不返回）
+        stream_options: { include_usage: true },
         messages: await toOpenAiMessages(messages)
       })
     },
@@ -315,6 +333,19 @@ async function* streamOpenAiCompatible(
 
   yield* streamSseLines(response, (payload) => {
     const parsed = JSON.parse(payload) as unknown;
+    // W3-05：最后一帧通常带 usage（OpenAI 协议）
+    if (onUsage && parsed && typeof parsed === "object") {
+      const obj = parsed as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }; model?: string };
+      if (obj.usage) {
+        onUsage({
+          provider: provider.type,
+          modelId: obj.model ?? provider.model,
+          inputTokens: obj.usage.prompt_tokens,
+          outputTokens: obj.usage.completion_tokens,
+          totalTokens: obj.usage.total_tokens,
+        });
+      }
+    }
     return getDeltaTextFromOpenAiPayload(parsed);
   });
 }
@@ -323,7 +354,8 @@ async function* streamAnthropic(
   provider: ProviderStatus,
   messages: EngineMessage[],
   fetchImpl: FetchLike,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  onUsage?: (usage: ProviderUsage) => void
 ): AsyncGenerator<string> {
   const response = await fetchWithConnectTimeout(
     fetchImpl,
@@ -355,11 +387,33 @@ async function* streamAnthropic(
     );
   }
 
+  // W3-05：Anthropic 用 message_start (input_tokens) + message_delta (output_tokens) 累加
+  let anthropicInput = 0;
+  let anthropicOutput = 0;
+  let anthropicModel: string | undefined;
   yield* streamSseLines(response, (payload) => {
     const parsed = JSON.parse(payload) as {
       type?: string;
       delta?: { text?: string };
+      message?: { model?: string; usage?: { input_tokens?: number; output_tokens?: number } };
+      usage?: { input_tokens?: number; output_tokens?: number };
     };
+    if (onUsage && parsed.type === "message_start") {
+      anthropicInput = parsed.message?.usage?.input_tokens ?? 0;
+      anthropicModel = parsed.message?.model;
+    }
+    if (onUsage && parsed.type === "message_delta" && parsed.usage) {
+      anthropicOutput = parsed.usage.output_tokens ?? anthropicOutput;
+    }
+    if (onUsage && parsed.type === "message_stop") {
+      onUsage({
+        provider: provider.type,
+        modelId: anthropicModel ?? provider.model,
+        inputTokens: anthropicInput,
+        outputTokens: anthropicOutput,
+        totalTokens: anthropicInput + anthropicOutput,
+      });
+    }
     return parsed.type === "content_block_delta" ? parsed.delta?.text ?? "" : "";
   });
 }
@@ -368,7 +422,8 @@ async function* streamOllama(
   provider: ProviderStatus,
   messages: EngineMessage[],
   fetchImpl: FetchLike,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  onUsage?: (usage: ProviderUsage) => void
 ): AsyncGenerator<string> {
   const response = await fetchWithConnectTimeout(
     fetchImpl,
@@ -399,7 +454,24 @@ async function* streamOllama(
   }
 
   yield* streamNdjson(response, (payload) => {
-    const parsed = JSON.parse(payload) as { message?: { content?: string } };
+    const parsed = JSON.parse(payload) as {
+      message?: { content?: string };
+      done?: boolean;
+      prompt_eval_count?: number;
+      eval_count?: number;
+      model?: string;
+    };
+    // W3-05：Ollama 在最后一行 done=true 时附 prompt_eval_count / eval_count
+    if (onUsage && parsed.done === true) {
+      onUsage({
+        provider: provider.type,
+        modelId: parsed.model ?? provider.model,
+        inputTokens: parsed.prompt_eval_count,
+        outputTokens: parsed.eval_count,
+        totalTokens:
+          (parsed.prompt_eval_count ?? 0) + (parsed.eval_count ?? 0) || undefined,
+      });
+    }
     return parsed.message?.content ?? "";
   });
 }
@@ -410,19 +482,21 @@ export async function* streamProviderResponse(
   options?: {
     fetchImpl?: FetchLike;
     abortSignal?: AbortSignal;
+    /** W3-05：每流末尾收到 provider 的 token usage 时回调（best-effort，可选） */
+    onUsage?: (usage: ProviderUsage) => void;
   }
 ): AsyncGenerator<string> {
   const fetchImpl = options?.fetchImpl ?? fetch;
 
   if (provider.type === "anthropic") {
-    yield* streamAnthropic(provider, messages, fetchImpl, options?.abortSignal);
+    yield* streamAnthropic(provider, messages, fetchImpl, options?.abortSignal, options?.onUsage);
     return;
   }
 
   if (provider.type === "ollama") {
-    yield* streamOllama(provider, messages, fetchImpl, options?.abortSignal);
+    yield* streamOllama(provider, messages, fetchImpl, options?.abortSignal, options?.onUsage);
     return;
   }
 
-  yield* streamOpenAiCompatible(provider, messages, fetchImpl, options?.abortSignal);
+  yield* streamOpenAiCompatible(provider, messages, fetchImpl, options?.abortSignal, options?.onUsage);
 }

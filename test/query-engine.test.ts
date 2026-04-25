@@ -297,6 +297,59 @@ describe("query engine", () => {
     expect(auditLog.verify().ok).toBe(true);
   });
 
+  it("W3-05: provider 返回 usage 时累加到 session 并在 /cost 输出真实 tokens", async () => {
+    // mock OpenAI compatible stream，最后一帧含 usage
+    const fetchImpl = async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            const enc = new TextEncoder();
+            controller.enqueue(
+              enc.encode('data: {"choices":[{"delta":{"content":"hi"}}]}\n')
+            );
+            // 最后一帧 with usage
+            controller.enqueue(
+              enc.encode(
+                'data: {"choices":[{"delta":{}}],"model":"gpt-4.1-mini","usage":{"prompt_tokens":42,"completion_tokens":7,"total_tokens":49}}\n'
+              )
+            );
+            controller.enqueue(enc.encode("data: [DONE]\n"));
+            controller.close();
+          },
+        })
+      );
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "auto",
+      workspace: process.cwd(),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await collect(engine.submitMessage("hello"));
+
+    // /cost 输出
+    await collect(engine.submitMessage("/cost"));
+    const lastText = engine.getMessages().at(-1)?.text ?? "";
+    expect(lastText).toContain("provider-tokens: input=42 output=7 total=49");
+    expect(lastText).toContain("last-model=gpt-4.1-mini");
+  });
+
+  it("W3-05: 没 onUsage 触发时 /cost 退回 0 占位", async () => {
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "default",
+      workspace: process.cwd(),
+    });
+
+    await collect(engine.submitMessage("/cost"));
+    const lastText = engine.getMessages().at(-1)?.text ?? "";
+    expect(lastText).toContain("provider-tokens: 0");
+    expect(lastText).toContain("no LLM call yet");
+  });
+
   it("W3-01: auditDbPath=null 显式禁用，引擎仍正常工作", async () => {
     const engine = createQueryEngine({
       currentProvider: provider,
