@@ -59,6 +59,64 @@ function createId(prefix: string): string {
  * 这些非 slash 字面量留路径）。`/help` / `/exit` 在 queryEngine 里另外用 registry
  * + 实例方法处理。
  */
+/**
+ * /fix v2 的参数解析：
+ *   /fix some bug                    → { goal: "some bug", verifyCmd: undefined }
+ *   /fix bug -- verify "npm test"    → { goal: "bug", verifyCmd: "npm test" }
+ *   /fix -- verify "npm test"        → { goal: "", verifyCmd: "npm test" }（caller 应当报 usage）
+ */
+function parseFixArgs(stripped: string): { goal: string; verifyCmd?: string } {
+  // 先尝试匹配 "-- verify <quoted-or-bare>" 段
+  const verifyRe = /\s+--\s+verify\s+(?:"([^"]*)"|'([^']*)'|(\S+))\s*$/;
+  const match = stripped.match(verifyRe);
+  if (!match) {
+    return { goal: stripped };
+  }
+  const verifyCmd = (match[1] ?? match[2] ?? match[3] ?? "").trim();
+  const goal = stripped.slice(0, match.index).trim();
+  return { goal, verifyCmd: verifyCmd || undefined };
+}
+
+/**
+ * 用 shell 跑一条命令，捕获 stdout / stderr / exit code。
+ * 不抛异常；timeout 后返回 ok=false。
+ */
+async function runShellCommand(
+  cmd: string,
+  cwd: string,
+  timeoutMs: number
+): Promise<{ ok: boolean; stdout: string; stderr: string; code: number | null }> {
+  const { spawn } = await import("node:child_process");
+  return new Promise((resolve) => {
+    const child = spawn(process.env.SHELL ?? "bash", ["-lc", cmd], {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, timeoutMs);
+    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({
+        ok: !timedOut && code === 0,
+        stdout,
+        stderr: timedOut ? `${stderr}\n[killed: timeout ${timeoutMs}ms]` : stderr,
+        code,
+      });
+    });
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      resolve({ ok: false, stdout, stderr: `${stderr}\n[spawn error] ${err.message}`, code: null });
+    });
+  });
+}
+
 function buildBuiltinReply(prompt: string): string | null {
   if (prompt === "doctor") {
     return "Run `npm run dev -- doctor` or `node dist/cli.js doctor` for environment diagnostics.";
@@ -1115,24 +1173,31 @@ class LocalQueryEngine implements QueryEngine {
 
   /** 给 /review slash builtin 用 */
   /**
-   * 给 /fix slash builtin 用：以"修 bug"为意图跑一轮编排（task #58 v1）。
+   * 给 /fix slash builtin 用（task #58 v2）：fix-intent 编排 + 可选 verify 闭环。
    *
-   * v1 设计（最小可用）：
-   *   - 把 user goal 前缀加 "fix "，让 planner 走 fix 意图
-   *   - 若 skillRegistry 注册了 "fix" skill，会按其 allowedTools 限制工具集；
-   *     未注册则走默认 (与 /orchestrate 等价但意图不同)
-   *   - 复用 buildOrchestrationReply 渲染（暂不单独做 buildFixReply）
-   *   - 复用 executePlanWithSideEffects（execute → reflect → gap → pendingApproval）
+   * 输入形态：
+   *   /fix <goal>                          v1 行为：plan/execute/reflect 后返回
+   *   /fix <goal> -- verify "<cmd>"        v2：跑前/跑后跑 cmd 自动判定 broken→fixed
    *
-   * v1 不做（v2 起逐步加）：
-   *   - 接入 Golden FIX runner 的 verify_broken / post_verify 自动判定
-   *   - diff_scope 的 max_files / max_lines 强制
-   *   - reflector "replan" 时多轮重试（依赖 task #59 落地）
+   * v2 verify 行为：
+   *   - 跑前：执行 cmd（exit 0 = 已修，abort）
+   *   - 跑后：再执行 cmd（exit 0 = 修好，否则附 stderr）
+   *   - 末尾附 git diff --stat 信息（不强制 abort，仅展示）
+   *
+   * 仍未做（v3+）：
+   *   - diff_scope 的 max_files / max_lines 强制 abort
+   *   - 自动从 package.json 嗅探 verify cmd
    */
   public async runFixCommand(prompt: string): Promise<string> {
-    const fixGoal = prompt.replace("/fix", "").trim();
+    const stripped = prompt.replace("/fix", "").trim();
+    if (!stripped) {
+      return "Usage: /fix <bug description> [-- verify \"<test cmd>\"]";
+    }
+
+    // 解析 -- verify "<cmd>"（v2）
+    const { goal: fixGoal, verifyCmd } = parseFixArgs(stripped);
     if (!fixGoal) {
-      return "Usage: /fix <bug description or failing test name>";
+      return "Usage: /fix <bug description> [-- verify \"<test cmd>\"]";
     }
 
     const fixSkill = this.skillRegistry.get("fix");
@@ -1149,8 +1214,45 @@ class LocalQueryEngine implements QueryEngine {
       ].join("\n");
     }
 
+    const cwd = this.options.workspace;
+
+    // v2 跑前 verify_broken
+    let preVerify: { ok: boolean; stdout: string; stderr: string; code: number | null } | null = null;
+    if (verifyCmd) {
+      preVerify = await runShellCommand(verifyCmd, cwd, 60_000);
+      if (preVerify.ok) {
+        return [
+          "Fix",
+          `goal: ${fixGoal}`,
+          `verify-cmd: ${verifyCmd}`,
+          "verify-broken: no (already passing)",
+          "skipping fix attempt — nothing to fix.",
+        ].join("\n");
+      }
+    }
+
     const { execution, reflector, rounds } = await this.executePlanWithSideEffects(plan);
-    return this.buildOrchestrationReply(plan, execution, reflector, { rounds, maxRounds: 3 });
+    let reply = this.buildOrchestrationReply(plan, execution, reflector, { rounds, maxRounds: 3 });
+
+    // v2 跑后 post_verify + git diff --stat
+    if (verifyCmd) {
+      const postVerify = await runShellCommand(verifyCmd, cwd, 60_000);
+      const diffStat = await runShellCommand("git diff --stat HEAD", cwd, 10_000);
+      reply += "\n\n" + [
+        "--- verify ---",
+        `verify-cmd: ${verifyCmd}`,
+        `verify-broken (pre): yes`,
+        `verify-fixed (post): ${postVerify.ok ? "yes" : "no"}`,
+        ...(!postVerify.ok && postVerify.stderr.trim()
+          ? [`stderr (last 200 chars): ${postVerify.stderr.trim().slice(-200)}`]
+          : []),
+        diffStat.ok && diffStat.stdout.trim()
+          ? `diff-stat:\n${diffStat.stdout.trim()}`
+          : "diff-stat: (no changes or git unavailable)",
+      ].join("\n");
+    }
+
+    return reply;
   }
 
   public async runReviewCommand(prompt: string): Promise<string> {

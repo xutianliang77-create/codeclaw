@@ -813,6 +813,50 @@ describe("query engine", () => {
     expect(lastText).toContain("reflector-decision:");
   });
 
+  it("/fix v2: -- verify <cmd> with already-passing cmd skips fix attempt", { timeout: 15000 }, async () => {
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd()
+    });
+
+    // node -e "process.exit(0)" 立刻 pass → 视为 already passing
+    await collect(engine.submitMessage(
+      "/fix dummy goal -- verify \"node -e 'process.exit(0)'\""
+    ));
+
+    const lastText = engine.getMessages().at(-1)?.text ?? "";
+    expect(lastText).toContain("Fix");
+    expect(lastText).toContain("verify-broken: no");
+    expect(lastText).toContain("already passing");
+    expect(lastText).toContain("skipping fix attempt");
+    // 不应跑 plan/execute（输出不会含 "checks-run:"）
+    expect(lastText).not.toContain("checks-run:");
+  });
+
+  it("/fix v2: -- verify <cmd> failing cmd runs plan then post-verify", { timeout: 20000 }, async () => {
+    process.env.CODECLAW_ENABLE_REAL_LSP = "0";
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd()
+    });
+
+    // pre-verify exit 1 → broken；post-verify 还是 exit 1 → not fixed
+    await collect(engine.submitMessage(
+      "/fix wrong type -- verify \"node -e 'process.exit(1)'\""
+    ));
+
+    const lastText = engine.getMessages().at(-1)?.text ?? "";
+    expect(lastText).toContain("Orchestration"); // 跑了 plan/execute
+    expect(lastText).toContain("checks-run:");
+    expect(lastText).toContain("--- verify ---");
+    expect(lastText).toContain("verify-broken (pre): yes");
+    expect(lastText).toContain("verify-fixed (post): no");
+  });
+
   it("/fix without args returns usage hint", async () => {
     const engine = createQueryEngine({
       currentProvider: provider,
