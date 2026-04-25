@@ -76,6 +76,11 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "skill") {
+    const { runSkillSubcommand } = await import("./cli/skill-cli");
+    process.exit(runSkillSubcommand(restArgs));
+  }
+
   if (command === "web") {
     const { startWebServer } = await import("./channels/web/server");
     const { readWebAuthConfig } = await import("./channels/web/auth");
