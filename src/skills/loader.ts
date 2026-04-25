@@ -32,6 +32,13 @@ const VALID_TOOLS = new Set([
   "replace",
 ]);
 
+// T6 防御：限制 user skill 的 prompt / description 长度，防 mega-prompt 注入
+const MAX_PROMPT_LEN = 8000;
+const MAX_DESCRIPTION_LEN = 500;
+// 控制字符（ANSI / NULL / 其他不可见）—— 阻止显示层欺骗
+// eslint-disable-next-line no-control-regex
+const FORBIDDEN_CONTROL_CHARS = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
+
 export interface LoadResult {
   skills: SkillDefinition[];
   errors: Array<{ path: string; reason: string }>;
@@ -166,10 +173,22 @@ export function validateManifest(
   if (typeof description !== "string" || description.trim().length === 0) {
     return { ok: false, reason: "description required (string, non-empty)" };
   }
+  if (description.length > MAX_DESCRIPTION_LEN) {
+    return { ok: false, reason: `description too long (>${MAX_DESCRIPTION_LEN} chars)` };
+  }
+  if (FORBIDDEN_CONTROL_CHARS.test(description)) {
+    return { ok: false, reason: "description contains forbidden control characters (T6 defense)" };
+  }
 
   const prompt = obj.prompt;
   if (typeof prompt !== "string" || prompt.trim().length === 0) {
     return { ok: false, reason: "prompt required (string, non-empty)" };
+  }
+  if (prompt.length > MAX_PROMPT_LEN) {
+    return { ok: false, reason: `prompt too long (>${MAX_PROMPT_LEN} chars)` };
+  }
+  if (FORBIDDEN_CONTROL_CHARS.test(prompt)) {
+    return { ok: false, reason: "prompt contains forbidden control characters (T6 defense)" };
   }
 
   const allowedTools = obj.allowedTools;
