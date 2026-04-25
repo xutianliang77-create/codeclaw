@@ -257,6 +257,107 @@ export async function handleProviders(
   });
 }
 
+// PATCH /v1/web/providers/<type>   #94 写操作
+//   body: { enabled?, baseUrl?, model?, timeoutMs?, apiKeyEnvVar? }
+//   apiKey 不通过 web 设（避免明文落盘 / 表单泄漏）；用户必须自设 env
+export async function handlePatchProvider(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  providerType: string
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+
+  const ALLOWED_TYPES = ["openai", "anthropic", "ollama", "lmstudio"];
+  if (!ALLOWED_TYPES.includes(providerType)) {
+    jsonResponse(res, 400, { error: `unknown provider type: ${providerType}` });
+    return;
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = await readJsonBody<Record<string, unknown>>(req);
+  } catch (err) {
+    jsonResponse(res, 400, { error: "bad request", detail: String(err) });
+    return;
+  }
+
+  if ("apiKey" in body) {
+    jsonResponse(res, 400, {
+      error: "apiKey must be set via env var (CODECLAW_*_API_KEY), not via web settings",
+    });
+    return;
+  }
+
+  // 类型校验 + 白名单字段
+  const filtered: Record<string, unknown> = {};
+  if ("enabled" in body) {
+    if (typeof body.enabled !== "boolean") {
+      jsonResponse(res, 400, { error: "enabled must be boolean" });
+      return;
+    }
+    filtered.enabled = body.enabled;
+  }
+  if ("baseUrl" in body) {
+    if (typeof body.baseUrl !== "string" || !/^https?:\/\//i.test(body.baseUrl)) {
+      jsonResponse(res, 400, { error: "baseUrl must be http(s):// URL" });
+      return;
+    }
+    filtered.baseUrl = body.baseUrl;
+  }
+  if ("model" in body) {
+    if (typeof body.model !== "string" || !body.model.trim()) {
+      jsonResponse(res, 400, { error: "model must be non-empty string" });
+      return;
+    }
+    filtered.model = body.model;
+  }
+  if ("timeoutMs" in body) {
+    if (typeof body.timeoutMs !== "number" || body.timeoutMs <= 0) {
+      jsonResponse(res, 400, { error: "timeoutMs must be positive number" });
+      return;
+    }
+    filtered.timeoutMs = body.timeoutMs;
+  }
+  if ("apiKeyEnvVar" in body) {
+    if (typeof body.apiKeyEnvVar !== "string" || !/^[A-Z][A-Z0-9_]*$/.test(body.apiKeyEnvVar)) {
+      jsonResponse(res, 400, {
+        error: "apiKeyEnvVar must match /^[A-Z][A-Z0-9_]*$/ (env var name)",
+      });
+      return;
+    }
+    filtered.apiKeyEnvVar = body.apiKeyEnvVar;
+  }
+
+  if (Object.keys(filtered).length === 0) {
+    jsonResponse(res, 400, { error: "no valid fields to update" });
+    return;
+  }
+
+  // 复用 src/lib/config 的 read/write
+  const { readProvidersFile, writeProvidersFile, resolveConfigPaths } = await import("../../lib/config");
+  const paths = resolveConfigPaths();
+  const existing = (await readProvidersFile(paths)) ?? {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (existing as any)[providerType] = {
+    ...((existing as Record<string, unknown>)[providerType] ?? {}),
+    ...filtered,
+  };
+  try {
+    await writeProvidersFile(existing, paths);
+  } catch (err) {
+    jsonResponse(res, 500, { error: "write failed", detail: String(err) });
+    return;
+  }
+
+  jsonResponse(res, 200, {
+    ok: true,
+    message: "Saved. Restart codeclaw web for changes to take effect.",
+    path: paths.providersFile,
+  });
+}
+
 // GET /v1/web/cost?sessionId=<id>   #70-A
 export async function handleCost(
   req: IncomingMessage,

@@ -32,6 +32,7 @@ import {
   handleDeleteSession,
   handleListSessions,
   handleMessage,
+  handlePatchProvider,
   handleProviders,
   handleStream,
   type HandlerDeps,
@@ -141,6 +142,11 @@ async function dispatch(
   if (url.pathname === "/v1/web/providers" && method === "GET") {
     return handleProviders(req, res, deps);
   }
+  // PATCH /v1/web/providers/<type>  #94
+  const providerMatch = /^\/v1\/web\/providers\/([a-z0-9-]+)$/i.exec(url.pathname);
+  if (providerMatch && method === "PATCH") {
+    return handlePatchProvider(req, res, deps, providerMatch[1].toLowerCase());
+  }
   // GET /v1/web/cost?sessionId=<id>  #70-A
   if (url.pathname === "/v1/web/cost" && method === "GET") {
     const sessionId = url.searchParams.get("sessionId") ?? "";
@@ -179,7 +185,7 @@ async function dispatch(
     return;
   }
 
-  if (method !== "GET" && method !== "POST" && method !== "DELETE") {
+  if (method !== "GET" && method !== "POST" && method !== "DELETE" && method !== "PATCH") {
     return methodNotAllowed(res);
   }
   notFound(res);

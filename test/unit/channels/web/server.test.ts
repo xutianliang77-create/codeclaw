@@ -278,6 +278,63 @@ describe("Web server · 路由 misc", () => {
     expect(r.status).toBe(202);
   });
 
+  // ───────── #94 设置中心写操作 PATCH /v1/web/providers/<type> ─────────
+  it("PATCH /v1/web/providers/<unknown> → 400", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/providers/evil`, {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it("PATCH /v1/web/providers/openai 含 apiKey 字段 → 400 拒绝（避免明文落盘）", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/providers/openai`, {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify({ apiKey: "sk-secret-via-web" }),
+    });
+    expect(r.status).toBe(400);
+    const body = await r.json() as { error: string };
+    expect(body.error).toMatch(/apiKey/i);
+  });
+
+  it("PATCH baseUrl 非 http(s) → 400", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/providers/openai`, {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify({ baseUrl: "javascript:alert(1)" }),
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it("PATCH timeoutMs 负数 → 400", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/providers/openai`, {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify({ timeoutMs: -1 }),
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it("PATCH 错 token → 401", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/providers/openai`, {
+      method: "PATCH",
+      headers: { Authorization: "Bearer wrong" },
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(r.status).toBe(401);
+  });
+
+  it("PATCH 全空 body → 400 'no valid fields'", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/providers/openai`, {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify({ randomNoise: 123 }),
+    });
+    expect(r.status).toBe(400);
+  });
+
   // ───────── #70-B 设置中心 ─────────
   it("GET /v1/web/providers · 默认无 provider 注入 → current/fallback 都为 null", async () => {
     const r = await fetch(`${baseUrl}/v1/web/providers`, { headers: authHeaders() });
