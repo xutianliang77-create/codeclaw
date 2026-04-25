@@ -132,7 +132,61 @@ export async function runDoctor(): Promise<string> {
     lines.push(`- ${pkg}: ${v ?? "not installed"}`);
   }
 
+  // #91：根据上面发现的状态拼"Next steps"建议（首次新用户 + 配置/链路问题快速引导）
+  const suggestions = buildSuggestions({
+    hasConfig: !!config,
+    defaultProvider: config?.provider.default ?? null,
+    providersAvailable: providers.filter((p) => p.available).length,
+    providersConfigured: providers.filter((p) => p.configured).length,
+    hasPython: !!pyV,
+    auditChainOk: existsSync(auditDbPath) ? inspectAuditChain(auditDbPath) : { skipped: true },
+  });
+  if (suggestions.length > 0) {
+    lines.push("", "next steps:");
+    for (const s of suggestions) lines.push(`- ${s}`);
+  }
+
   return lines.join("\n");
+}
+
+/** #91 doctor 引导：根据状态拼建议清单（纯函数，便于单测） */
+export function buildSuggestions(args: {
+  hasConfig: boolean;
+  defaultProvider: string | null;
+  providersAvailable: number;
+  providersConfigured: number;
+  hasPython: boolean;
+  auditChainOk: ReturnType<typeof inspectAuditChain>;
+}): string[] {
+  const out: string[] = [];
+
+  if (!args.hasConfig || !args.defaultProvider) {
+    out.push("First time? Run `codeclaw setup` to configure a provider (LM Studio / Ollama / OpenAI / Anthropic).");
+    return out; // 没配置时其他建议没意义
+  }
+
+  if (args.providersConfigured === 0) {
+    out.push("No providers configured. Run `codeclaw config` to add API keys / endpoints.");
+  } else if (args.providersAvailable === 0) {
+    out.push(
+      "All providers configured but unavailable. Check 'reason' lines above; common fixes: " +
+        "(a) start LM Studio / Ollama; (b) verify API key env var; (c) check baseUrl reachability."
+    );
+  }
+
+  if (!args.hasPython) {
+    out.push(
+      "Python not detected. Optional for `multilspy` LSP fallback; install python3 + run `npm run setup:lsp` if you want symbol/definition tools."
+    );
+  }
+
+  if ("ok" in args.auditChainOk && args.auditChainOk.ok === false) {
+    out.push(
+      "Audit chain BROKEN. Investigate manually before continuing: backup audit.db, then run `codeclaw forget --all` or restore from a known-good copy."
+    );
+  }
+
+  return out;
 }
 
 // —— 辅助函数（与上方函数作用范围一致；保持纯函数 + 零副作用） ————————————

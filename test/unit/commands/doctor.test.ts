@@ -107,3 +107,83 @@ describe("runDoctor", () => {
     expect(out).toContain("not created");
   });
 });
+
+describe("buildSuggestions · #91", () => {
+  it("hasConfig=false → 提示 codeclaw setup", async () => {
+    const { buildSuggestions } = await import("../../../src/commands/doctor");
+    const r = buildSuggestions({
+      hasConfig: false,
+      defaultProvider: null,
+      providersAvailable: 0,
+      providersConfigured: 0,
+      hasPython: true,
+      auditChainOk: { skipped: true } as never,
+    });
+    expect(r.some((s) => s.includes("codeclaw setup"))).toBe(true);
+  });
+
+  it("有 config 但 0 provider configured → 提示 codeclaw config", async () => {
+    const { buildSuggestions } = await import("../../../src/commands/doctor");
+    const r = buildSuggestions({
+      hasConfig: true,
+      defaultProvider: "openai",
+      providersAvailable: 0,
+      providersConfigured: 0,
+      hasPython: true,
+      auditChainOk: { skipped: true } as never,
+    });
+    expect(r.some((s) => s.includes("codeclaw config"))).toBe(true);
+  });
+
+  it("provider 全 unavailable → 给常见修复建议", async () => {
+    const { buildSuggestions } = await import("../../../src/commands/doctor");
+    const r = buildSuggestions({
+      hasConfig: true,
+      defaultProvider: "lmstudio",
+      providersAvailable: 0,
+      providersConfigured: 2,
+      hasPython: true,
+      auditChainOk: { skipped: true } as never,
+    });
+    expect(r.some((s) => /LM Studio|Ollama|API key|baseUrl/.test(s))).toBe(true);
+  });
+
+  it("python 未装 → 提示 setup:lsp 可选项", async () => {
+    const { buildSuggestions } = await import("../../../src/commands/doctor");
+    const r = buildSuggestions({
+      hasConfig: true,
+      defaultProvider: "openai",
+      providersAvailable: 1,
+      providersConfigured: 1,
+      hasPython: false,
+      auditChainOk: { skipped: true } as never,
+    });
+    expect(r.some((s) => s.includes("setup:lsp"))).toBe(true);
+  });
+
+  it("audit chain BROKEN → 提示 backup + forget --all", async () => {
+    const { buildSuggestions } = await import("../../../src/commands/doctor");
+    const r = buildSuggestions({
+      hasConfig: true,
+      defaultProvider: "openai",
+      providersAvailable: 1,
+      providersConfigured: 1,
+      hasPython: true,
+      auditChainOk: { ok: false } as never,
+    });
+    expect(r.some((s) => /BROKEN|backup|forget/.test(s))).toBe(true);
+  });
+
+  it("一切正常 → 空建议", async () => {
+    const { buildSuggestions } = await import("../../../src/commands/doctor");
+    const r = buildSuggestions({
+      hasConfig: true,
+      defaultProvider: "openai",
+      providersAvailable: 1,
+      providersConfigured: 1,
+      hasPython: true,
+      auditChainOk: { ok: true, checked: 0, durationMs: 0 } as never,
+    });
+    expect(r).toEqual([]);
+  });
+});
