@@ -36,6 +36,8 @@ export function SafeTextInput({
   mask = false,
 }: SafeTextInputProps): React.JSX.Element {
   const [cursor, setCursor] = useState<number>(value.length);
+  // 诊断用：最近一次按键的 raw input + key flag dump
+  const [debugLast, setDebugLast] = useState<string>("(none)");
 
   // 当外部 value 变化（例如复用已有内容首次进入编辑），保持 cursor 在末尾
   useEffect(() => {
@@ -46,6 +48,18 @@ export function SafeTextInput({
 
   useInput(
     (input, key) => {
+      // 诊断：把每次收到的 raw input + key flags 打成一行字符串
+      const codes = Array.from(input ?? "")
+        .map((c) => c.charCodeAt(0).toString(16).padStart(2, "0"))
+        .join(",");
+      const flags = Object.entries(key as unknown as Record<string, boolean>)
+        .filter(([, v]) => v === true)
+        .map(([k]) => k)
+        .join(",");
+      setDebugLast(
+        `input=${JSON.stringify(input ?? "")} hex=[${codes}] flags=[${flags || "none"}]`
+      );
+
       // Enter
       if (key.return) {
         onSubmit?.(value);
@@ -153,10 +167,15 @@ export function SafeTextInput({
   const after = display.slice(cursor + 1);
 
   return (
-    <Box>
-      <Text>{before}</Text>
-      <Text inverse>{atChar ?? " "}</Text>
-      <Text>{after}</Text>
+    <Box flexDirection="column">
+      <Box>
+        <Text>{before}</Text>
+        <Text inverse>{atChar ?? " "}</Text>
+        <Text>{after}</Text>
+      </Box>
+      <Text color="yellow" dimColor>
+        DEBUG last-key: {debugLast}
+      </Text>
     </Box>
   );
 }
