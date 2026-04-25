@@ -788,6 +788,9 @@ describe("query engine", () => {
     expect(engine.getMessages().at(-1)?.text).toContain("approval-requests:");
     expect(engine.getMessages().at(-1)?.text).toContain("reflector-decision: complete");
     expect(engine.getMessages().at(-1)?.text).toContain("gaps: none");
+    // rounds 行可见，单轮 complete 不带 max-turns 后缀
+    expect(engine.getMessages().at(-1)?.text).toContain("rounds: 1/3");
+    expect(engine.getMessages().at(-1)?.text).not.toContain("max-turns reached");
   });
 
   it("/fix invokes fix-intent orchestration and uses orchestration reply format", { timeout: 15000 }, async () => {
@@ -839,6 +842,8 @@ describe("query engine", () => {
     await collect(engine.submitMessage("/orchestrate create src/new-feature.ts"));
     expect(engine.getMessages().at(-1)?.text).toContain("reflector-decision: escalated");
     expect(engine.getMessages().at(-1)?.text).toContain("is-complete: no");
+    // rounds 走了 2 轮（第 2 轮命中 escalated）
+    expect(engine.getMessages().at(-1)?.text).toContain("rounds: 2/3");
 
     // review H1 修：reflector escalated 应在 FSM 上记 completed/partial（自然结束但目标未达成）
     expect(engine.getFsmSnapshot!().lastHalt).toMatchObject({

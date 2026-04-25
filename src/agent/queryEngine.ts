@@ -1149,8 +1149,8 @@ class LocalQueryEngine implements QueryEngine {
       ].join("\n");
     }
 
-    const { execution, reflector } = await this.executePlanWithSideEffects(plan);
-    return this.buildOrchestrationReply(plan, execution, reflector);
+    const { execution, reflector, rounds } = await this.executePlanWithSideEffects(plan);
+    return this.buildOrchestrationReply(plan, execution, reflector, { rounds, maxRounds: 3 });
   }
 
   public async runReviewCommand(prompt: string): Promise<string> {
@@ -1198,8 +1198,8 @@ class LocalQueryEngine implements QueryEngine {
       ].join("\n");
     }
 
-    const { execution, reflector } = await this.executePlanWithSideEffects(plan);
-    return this.buildOrchestrationReply(plan, execution, reflector);
+    const { execution, reflector, rounds } = await this.executePlanWithSideEffects(plan);
+    return this.buildOrchestrationReply(plan, execution, reflector, { rounds, maxRounds: 3 });
   }
 
   private buildStatusReply(): string {
@@ -1733,13 +1733,21 @@ class LocalQueryEngine implements QueryEngine {
   private buildOrchestrationReply(
     plan: OrchestrationPlan,
     execution: ExecutionResult,
-    reflector: ReflectorResult
+    reflector: ReflectorResult,
+    meta: { rounds?: number; maxRounds?: number } = {}
   ): string {
+    // 显示 rounds 信息：让用户从输出里看到走了几轮 + 是否 hit max-turns
+    const roundsLine = meta.rounds !== undefined
+      ? meta.maxRounds !== undefined
+        ? `rounds: ${meta.rounds}/${meta.maxRounds}${meta.rounds >= meta.maxRounds && reflector.decision === "replan" ? " (max-turns reached)" : ""}`
+        : `rounds: ${meta.rounds}`
+      : null;
     return [
       "Orchestration",
       `goal: ${plan.userGoal}`,
       `intent: ${plan.intent.type}`,
       `strategy: ${plan.strategy.type}`,
+      ...(roundsLine ? [roundsLine] : []),
       `checks-run: ${execution.cost.checksRun}`,
       `completed-goals: ${execution.completed.length}`,
       `failed-goals: ${execution.failed.length}`,
