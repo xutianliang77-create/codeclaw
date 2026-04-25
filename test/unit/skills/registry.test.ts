@@ -37,7 +37,7 @@ describe("createSkillRegistry · 仅 builtin", () => {
   it("list() 返 review/explain/patch", () => {
     const reg = createSkillRegistry();
     const names = reg.list().map((s) => s.name).sort();
-    expect(names).toEqual(["explain", "patch", "review"]);
+    expect(names).toEqual(["data_insight", "explain", "patch", "review"]);
   });
 
   it("get 用大小写不敏感", () => {
@@ -55,7 +55,7 @@ describe("createSkillRegistryFromDisk · 合并 user", () => {
   it("空目录 → 仅 builtin", () => {
     const dir = mkDir();
     const reg = createSkillRegistryFromDisk({ skillsDir: dir });
-    expect(reg.list()).toHaveLength(3);
+    expect(reg.list()).toHaveLength(4); // builtin: review/explain/patch/data_insight
     expect(reg.getLoadErrors()).toEqual([]);
   });
 
@@ -69,11 +69,11 @@ describe("createSkillRegistryFromDisk · 合并 user", () => {
     });
     const reg = createSkillRegistryFromDisk({ skillsDir: dir });
     const list = reg.list();
-    expect(list).toHaveLength(4);
+    expect(list).toHaveLength(5); // 4 builtin + 1 user
     // builtin 先
-    expect(list.slice(0, 3).every((s) => s.source === "builtin")).toBe(true);
-    expect(list[3].name).toBe("lint-fix");
-    expect(list[3].source).toBe("user");
+    expect(list.slice(0, 4).every((s) => s.source === "builtin")).toBe(true);
+    expect(list[4].name).toBe("lint-fix");
+    expect(list[4].source).toBe("user");
   });
 
   it("user skill 与 builtin 重名 → 被 loader 拒，registry 不含", () => {
@@ -85,7 +85,7 @@ describe("createSkillRegistryFromDisk · 合并 user", () => {
       allowedTools: ["read"],
     });
     const reg = createSkillRegistryFromDisk({ skillsDir: dir });
-    expect(reg.list()).toHaveLength(3); // 仅 builtin
+    expect(reg.list()).toHaveLength(4); // 仅 builtin (review/explain/patch/data_insight)
     expect(reg.getLoadErrors().length).toBe(1);
   });
 
@@ -116,7 +116,7 @@ describe("SkillRegistry 直接构造", () => {
         },
       ],
     });
-    expect(reg.list()).toHaveLength(4); // 3 builtin + 1
+    expect(reg.list()).toHaveLength(5); // 4 builtin + 1
     expect(reg.get("test-skill")?.name).toBe("test-skill");
   });
 });

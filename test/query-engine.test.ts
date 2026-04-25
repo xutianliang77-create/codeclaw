@@ -719,7 +719,7 @@ describe("query engine", () => {
     });
 
     await collect(engine.submitMessage("/skills"));
-    expect(engine.getMessages().at(-1)?.text).toContain("discovered-skills: 3");
+    expect(engine.getMessages().at(-1)?.text).toContain("discovered-skills: 4");
     expect(engine.getMessages().at(-1)?.text).toContain("- review (builtin)");
     expect(engine.getMessages().at(-1)?.text).toContain("- explain (builtin)");
     expect(engine.getMessages().at(-1)?.text).toContain("- patch (builtin)");
@@ -917,7 +917,7 @@ describe("query engine", () => {
 
     await collect(engine.submitMessage("/reload-plugins"));
     expect(engine.getMessages().at(-1)?.text).toContain("Plugin reload complete.");
-    expect(engine.getMessages().at(-1)?.text).toContain("builtin-skills: 3");
+    expect(engine.getMessages().at(-1)?.text).toContain("builtin-skills: 4");
 
     await collect(engine.submitMessage("/review sample.ts greetUser"));
     expect(engine.getMessages().at(-1)?.text).toContain("Review");

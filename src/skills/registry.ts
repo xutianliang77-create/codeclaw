@@ -42,6 +42,20 @@ const BUILTIN_SKILLS: SkillDefinition[] = [
     allowedTools: ["read", "glob", "symbol", "definition", "references", "bash", "write", "append", "replace"],
     source: "builtin",
   },
+  // #82 data_insight：用 bash + sqlite3 跑只读 SQL 查询，输出 markdown 表
+  {
+    name: "data_insight",
+    description: "Read-only SQLite analysis: run SELECT queries via sqlite3 CLI and summarize results.",
+    prompt:
+      "Act as a data analyst on a SQLite database. " +
+      "Use bash with `sqlite3 <db-path>` to inspect schema (.schema, .tables) and run SELECT queries. " +
+      "Always use `-readonly` flag (`sqlite3 -readonly <db>`) to avoid accidental writes. " +
+      "Format query results as markdown tables in your reply (codeclaw provides formatMarkdownTable for skills). " +
+      "Never run INSERT/UPDATE/DELETE/CREATE; refuse if the user asks to mutate data. " +
+      "For complex analysis, suggest python via the runPython skill helper (user must opt-in to install matplotlib etc).",
+    allowedTools: ["read", "glob", "bash"],
+    source: "builtin",
+  },
 ];
 
 const BUILTIN_NAMES = new Set(BUILTIN_SKILLS.map((s) => s.name));

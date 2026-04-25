@@ -20,6 +20,7 @@ import yaml from "js-yaml";
 
 import type { SkillDefinition, SkillManifest, SkillSignature, SkillSlashCommand } from "./types";
 
+// 注意：与 registry.ts BUILTIN_NAMES 同步（不能让 user skill 覆盖）
 const VALID_TOOLS = new Set([
   "read",
   "glob",
