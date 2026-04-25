@@ -181,9 +181,30 @@ describe("Web server · 消息 + SSE", () => {
 });
 
 describe("Web server · 路由 misc", () => {
-  it("GET / → 占位 200", async () => {
+  it("GET / → 200 + HTML（默认 staticRoot 指 web/）", async () => {
     const r = await fetch(`${baseUrl}/`);
     expect(r.status).toBe(200);
+    const ct = r.headers.get("content-type") ?? "";
+    expect(ct).toMatch(/text\/(html|plain)/);
+  });
+
+  it("GET /static/styles.css → 200 + CSS", async () => {
+    const r = await fetch(`${baseUrl}/static/styles.css`);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toMatch(/text\/css/);
+    const body = await r.text();
+    expect(body).toContain("CodeClaw");
+  });
+
+  it("GET /static/app.js → 200 + JS", async () => {
+    const r = await fetch(`${baseUrl}/static/app.js`);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toMatch(/javascript/);
+  });
+
+  it("GET /static/../etc/passwd → 404（path traversal 拦截）", async () => {
+    const r = await fetch(`${baseUrl}/static/../etc/passwd`);
+    expect(r.status).toBe(404);
   });
 
   it("未知路径 → 404", async () => {

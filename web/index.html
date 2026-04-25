@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CodeClaw</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>CodeClaw <span class="version">web</span></h1>
+    <div id="status" class="status disconnected">未连接</div>
+  </header>
+
+  <section id="auth-bar" class="auth-bar">
+    <input id="token-input" type="password" placeholder="CODECLAW_WEB_TOKEN" autocomplete="off" />
+    <button id="connect-btn">连接</button>
+    <button id="logout-btn" class="hidden">登出</button>
+  </section>
+
+  <main id="chat" class="chat hidden">
+    <div id="messages" class="messages" aria-live="polite"></div>
+    <form id="composer" class="composer">
+      <textarea id="input" placeholder="输入消息（Enter 发送 · Shift+Enter 换行）" rows="2"></textarea>
+      <button id="send-btn" type="submit">发送</button>
+    </form>
+  </main>
+
+  <footer>
+    <span>本地 only · token 仅存浏览器 localStorage · 后端 SSE 推流</span>
+  </footer>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

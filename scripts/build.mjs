@@ -37,4 +37,8 @@ await cp(
   { recursive: true }
 );
 
-console.log("Built dist/cli.js + copied migrations/");
+// web SPA 静态文件：server.ts defaultStaticRoot 会找 dist/public 或 ../../web。
+// 生产构建拷贝到 dist/public 让 codeclaw web 命令直接 serve。
+await cp(path.join(rootDir, "web"), path.join(outDir, "public"), { recursive: true });
+
+console.log("Built dist/cli.js + copied migrations/ + web → dist/public/");

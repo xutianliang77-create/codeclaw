@@ -32,6 +32,8 @@ Usage:
   codeclaw gateway         Start the local HTTP gateway
   codeclaw wechat          Start the local WeChat adapter webhook
   codeclaw wechat --worker Start the iLink WeChat polling worker
+  codeclaw web             Start the Web SPA server (env CODECLAW_WEB_TOKEN required)
+                           Optional: --port=7180 --host=127.0.0.1
 `);
 }
 
@@ -71,6 +73,40 @@ async function main(): Promise<void> {
 
   if (command === "doctor") {
     console.log(await runDoctor());
+    return;
+  }
+
+  if (command === "web") {
+    const { startWebServer } = await import("./channels/web/server");
+    const { readWebAuthConfig } = await import("./channels/web/auth");
+    const auth = readWebAuthConfig();
+    if (!auth.bearerToken) {
+      console.error(
+        "[web] CODECLAW_WEB_TOKEN is not set. Set the env var to a strong\n" +
+          "       token and re-run. The Web channel REQUIRES auth to start."
+      );
+      process.exit(2);
+    }
+    const portArg = restArgs.find((a) => a.startsWith("--port="))?.split("=")[1];
+    const hostArg = restArgs.find((a) => a.startsWith("--host="))?.split("=")[1];
+    const port = portArg ? Number(portArg) : 7180;
+    const host = hostArg ?? "127.0.0.1";
+    const handle = await startWebServer({
+      port,
+      host,
+      auth,
+      engineDefaults: {
+        currentProvider: null,
+        fallbackProvider: null,
+        permissionMode: "plan",
+        workspace: process.cwd(),
+      },
+    });
+    console.log(`CodeClaw Web listening on http://${handle.host}:${handle.port}`);
+    console.log("Open it in your browser. Set the same CODECLAW_WEB_TOKEN value in the auth bar.");
+    process.on("SIGINT", () => {
+      void handle.close().finally(() => process.exit(0));
+    });
     return;
   }
 

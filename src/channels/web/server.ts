@@ -20,6 +20,9 @@
  */
 
 import http, { type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { URL } from "node:url";
 
 import { readWebAuthConfig, type WebAuthConfig } from "./auth";
@@ -44,6 +47,45 @@ export interface StartWebServerOptions {
   auth?: WebAuthConfig;
   /** QueryEngine 默认参数（每次新会话都用此基础） */
   engineDefaults: Omit<QueryEngineOptions, "channel" | "userId">;
+  /** 静态文件根目录；默认 <cwd>/web；测试可传空字符串禁用 */
+  staticRoot?: string;
+}
+
+const MIME_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+};
+
+function defaultStaticRoot(): string {
+  // 开发时 src/channels/web → ../../../web；build 时 dist/* 由 build.mjs 拷到 dist/public
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const fromDist = path.resolve(here, "public");
+  if (existsSync(fromDist)) return fromDist;
+  return path.resolve(here, "../../../web");
+}
+
+function serveStaticFile(
+  res: ServerResponse,
+  staticRoot: string,
+  relPath: string
+): boolean {
+  // 防 path traversal：拼好后 normalize 必须仍在 staticRoot 内
+  const requested = path.resolve(staticRoot, relPath.replace(/^\/+/, ""));
+  if (!requested.startsWith(staticRoot)) return false;
+  if (!existsSync(requested)) return false;
+  const st = statSync(requested);
+  if (!st.isFile()) return false;
+  const ext = path.extname(requested).toLowerCase();
+  res.statusCode = 200;
+  res.setHeader("content-type", MIME_TYPES[ext] ?? "application/octet-stream");
+  res.setHeader("cache-control", "no-cache");
+  res.end(readFileSync(requested));
+  return true;
 }
 
 export interface WebServerHandle {
@@ -69,7 +111,8 @@ function methodNotAllowed(res: ServerResponse): void {
 async function dispatch(
   req: IncomingMessage,
   res: ServerResponse,
-  deps: HandlerDeps
+  deps: HandlerDeps,
+  staticRoot: string
 ): Promise<void> {
   const url = new URL(req.url ?? "/", "http://internal");
   const method = (req.method ?? "GET").toUpperCase();
@@ -102,10 +145,20 @@ async function dispatch(
     return handleStream(req, res, deps, sessionId);
   }
 
-  // 静态文件（阶段 C 加；这里给最小占位）
+  // 静态文件
+  if (method === "GET" && staticRoot) {
+    if (url.pathname === "/") {
+      if (serveStaticFile(res, staticRoot, "index.html")) return;
+    }
+    const staticMatch = /^\/static\/(.+)$/.exec(url.pathname);
+    if (staticMatch) {
+      if (serveStaticFile(res, staticRoot, staticMatch[1])) return;
+    }
+  }
+  // 静态根禁用 / 文件不存在时给 / 一个占位（保留以前 server.test 兼容）
   if (url.pathname === "/" && method === "GET") {
     res.setHeader("content-type", "text/plain; charset=utf-8");
-    res.end("CodeClaw Web · 后端阶段 B 已就位，前端 SPA 由阶段 C 提供。");
+    res.end("CodeClaw Web · static root not configured.");
     return;
   }
 
@@ -131,9 +184,10 @@ export function startWebServer(opts: StartWebServerOptions): Promise<WebServerHa
     engineDefaults: opts.engineDefaults,
   });
   const deps: HandlerDeps = { store, auth };
+  const staticRoot = opts.staticRoot === "" ? "" : opts.staticRoot ?? defaultStaticRoot();
 
   const server = http.createServer((req, res) => {
-    dispatch(req, res, deps).catch((err) => {
+    dispatch(req, res, deps, staticRoot).catch((err) => {
       // 兜底：handler 内部未捕获错误
       try {
         if (!res.headersSent) {
