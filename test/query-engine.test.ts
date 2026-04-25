@@ -242,6 +242,75 @@ describe("query engine", () => {
     expect(engine.getMessages().at(-1)?.text).toContain("[interrupted]");
   });
 
+  it("W3-01: medium-risk approval 走 /approve 后 audit_events 链有完整记录", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-audit-"));
+    tempDirs.push(workspace);
+    const auditDbPath = path.join(workspace, "audit.db");
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace,
+      auditDbPath,
+    });
+    const auditLog = engine.getAuditLog!()!;
+    expect(auditLog).not.toBeNull();
+
+    // 触发 /write 在 plan mode 下入 pending（应当审计 tool.write decision=pending）
+    await collect(engine.submitMessage("/write demo.txt :: hi"));
+    await collect(engine.submitMessage("/approve"));
+
+    const events = auditLog.list({});
+    // 至少：tool.write pending（入队）+ approval.granted + tool.write allow（执行）
+    const actions = events.map((e) => `${e.action}:${e.decision}`);
+    expect(actions).toContain("tool.write:pending");
+    expect(actions).toContain("approval.granted:approved");
+    // 链 verify 仍 pass
+    const verifyResult = auditLog.verify();
+    expect(verifyResult.ok).toBe(true);
+    if (verifyResult.ok) expect(verifyResult.checkedCount).toBe(events.length);
+  });
+
+  it("W3-01: /mode 切换写一条 permission.mode-change 审计", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-audit-"));
+    tempDirs.push(workspace);
+    const auditDbPath = path.join(workspace, "audit.db");
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "default",
+      workspace,
+      auditDbPath,
+    });
+    const auditLog = engine.getAuditLog!()!;
+
+    await collect(engine.submitMessage("/mode auto"));
+
+    const events = auditLog.list({});
+    const modeChange = events.find((e) => e.action === "permission.mode-change");
+    expect(modeChange).toBeDefined();
+    expect(modeChange!.decision).toBe("allow");
+    expect(modeChange!.resource).toBe("auto");
+    expect(modeChange!.details).toEqual({ from: "default", to: "auto" });
+
+    // 链 verify pass
+    expect(auditLog.verify().ok).toBe(true);
+  });
+
+  it("W3-01: auditDbPath=null 显式禁用，引擎仍正常工作", async () => {
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "default",
+      workspace: process.cwd(),
+      auditDbPath: null,
+    });
+    expect(engine.getAuditLog!()).toBeNull();
+    // 主流程仍能跑
+    await collect(engine.submitMessage("/mode auto"));
+    expect(engine.getRuntimeState().permissionMode).toBe("auto");
+  });
+
   it("W3-04: /ask + 中途 interrupt 后 mode 延迟一轮 restore（已知行为，文档化）", { timeout: 15000 }, async () => {
     // deep-review U1：phaseEvent("halted") 不走 askMode restore 块；
     // 验证当前观察到的行为：interrupt 后 mode 仍 plan，**下一轮非 /ask** 跑完才 restore。

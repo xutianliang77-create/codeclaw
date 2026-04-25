@@ -30,6 +30,8 @@ export const PERMISSION_MODES: PermissionMode[] = [
 interface PermissionModeHolder {
   permissionMode: PermissionMode;
   permissions: { setMode(mode: PermissionMode): void };
+  /** W3-01：优先走统一入口 runModeCommand（含审计）；不存在时退回直接动字段（v1 兼容） */
+  runModeCommand?(prompt: string): string;
 }
 
 function isHolder(x: unknown): x is PermissionModeHolder {
@@ -57,6 +59,11 @@ export default defineCommand({
     const { argsRaw, queryEngine } = ctx;
     if (!isHolder(queryEngine)) {
       return reply("mode command unavailable: runtime does not expose permission state");
+    }
+
+    // 优先走统一入口（含 W3-01 audit），缺失时退回 v1 直接 setField + setMode
+    if (typeof queryEngine.runModeCommand === "function") {
+      return reply(queryEngine.runModeCommand(ctx.rawPrompt));
     }
 
     const nextMode = argsRaw.trim();

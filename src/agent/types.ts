@@ -77,6 +77,8 @@ export interface QueryEngineOptions {
   workspace: string;
   autoCompactThreshold?: number;
   approvalsDir?: string;
+  /** 审计链 db 路径；不传走 ~/.codeclaw/audit.db。设为 null 显式禁用 audit。 */
+  auditDbPath?: string | null;
   fetchImpl?: typeof fetch;
   wechat?: {
     tokenFile?: string;
@@ -160,4 +162,6 @@ export interface QueryEngine {
   getReadFileState(): Record<string, never>;
   /** 给 /cost / /status 等读 FSM 当前快照（W2-05） */
   getFsmSnapshot?(): import("../fsm").FsmSnapshot;
+  /** 给测试 / 调试访问审计链（W3-01；可能 null：未开启或打开失败） */
+  getAuditLog?(): import("../storage/auditLog").AuditLog | null;
 }

@@ -8,6 +8,9 @@ import { callMcpTool, listMcpResources, listMcpServers, listMcpTools, readMcpRes
 import { SlashRegistry, loadBuiltins } from "../commands/slash";
 import { EngineFsm } from "../fsm";
 import type { FsmSnapshot } from "../fsm";
+import { openAuditDb } from "../storage/audit";
+import { AuditLog } from "../storage/auditLog";
+import type { AuditDecision } from "../storage/auditLog";
 import QRCode from "qrcode";
 import {
   buildApprovedExecutionPlan,
@@ -427,6 +430,7 @@ class LocalQueryEngine implements QueryEngine {
   private activeSkill: SkillDefinition | null = null;
   private readonly slashRegistry = new SlashRegistry();
   private readonly fsm = new EngineFsm();
+  private readonly auditLog: AuditLog | null;
 
   /**
    * /ask 一次性 plan-mode 状态：
@@ -441,6 +445,42 @@ class LocalQueryEngine implements QueryEngine {
   /** 给 SlashCommand handler 通过 ctx.queryEngine 拿到 registry（供 /help 用） */
   public getSlashRegistry(): SlashRegistry {
     return this.slashRegistry;
+  }
+
+  /** 给测试 / 调试用：拿当前引擎的 AuditLog（可能为 null） */
+  public getAuditLog(): AuditLog | null {
+    return this.auditLog;
+  }
+
+  /**
+   * 写一条审计事件（W3-01）。auditLog 为 null 或写入失败时 noop（不阻塞主流程）。
+   * traceId 默认走 sessionId（每个 user prompt = 一个 trace 的简化模型）。
+   */
+  private audit(input: {
+    actor: string;
+    action: string;
+    decision: AuditDecision;
+    resource?: string | null;
+    reason?: string | null;
+    details?: Record<string, unknown> | null;
+    traceId?: string;
+  }): void {
+    if (!this.auditLog) return;
+    try {
+      this.auditLog.append({
+        traceId: input.traceId ?? this.sessionId,
+        sessionId: this.sessionId,
+        actor: input.actor,
+        action: input.action,
+        resource: input.resource ?? null,
+        decision: input.decision,
+        mode: this.permissionMode,
+        reason: input.reason ?? null,
+        details: input.details ?? null,
+      });
+    } catch {
+      // 审计写失败不阻塞主流程；W3+ 可加 logger 警告
+    }
   }
 
   /** 给 /cost / /status 等消费者读 FSM 当前快照 */
@@ -506,6 +546,27 @@ class LocalQueryEngine implements QueryEngine {
     // session A 的 save 不会删 B 的 pending。这是对"覆盖"风险与"recovery 可见性"的折中。
     this.pendingApprovals = loadPendingApprovals(options.approvalsDir);
     loadBuiltins(this.slashRegistry);
+    // W3-01：开 audit.db 句柄。
+    //   - 显式 auditDbPath === null → 禁用
+    //   - vitest 环境下 + 未显式指定 → 禁用（避免测试污染 ~/.codeclaw/）
+    //   - 其他情况：走默认 ~/.codeclaw/audit.db
+    const isVitest = !!process.env.VITEST;
+    const shouldDisable =
+      options.auditDbPath === null || (options.auditDbPath === undefined && isVitest);
+    if (shouldDisable) {
+      this.auditLog = null;
+    } else {
+      try {
+        const handle = openAuditDb({
+          path: options.auditDbPath ?? undefined,
+          singleton: false, // 多 engine 实例（测试 / multi-channel）需各自句柄
+        });
+        this.auditLog = new AuditLog(handle.db);
+      } catch {
+        // 打不开就降级：不阻塞引擎启动；后续写入 noop
+        this.auditLog = null;
+      }
+    }
     this.messages = [
       {
         id: createId("msg"),
@@ -653,6 +714,15 @@ class LocalQueryEngine implements QueryEngine {
         return;
       }
       this.persistPendingApprovals();
+      // W3-01：用户批准 pending approval → 审计
+      this.audit({
+        actor: "user",
+        action: "approval.granted",
+        decision: "approved",
+        resource: approval.toolName,
+        reason: approval.reason,
+        details: { approvalId: approval.id, detail: approval.detail },
+      });
       yield {
         type: "approval-cleared",
         approvalId: approval.id
@@ -794,6 +864,15 @@ class LocalQueryEngine implements QueryEngine {
         return;
       }
       this.persistPendingApprovals();
+      // W3-01：用户拒绝 pending approval → 审计
+      this.audit({
+        actor: "user",
+        action: "approval.denied",
+        decision: "rejected",
+        resource: approval.toolName,
+        reason: approval.reason,
+        details: { approvalId: approval.id, detail: approval.detail },
+      });
       yield {
         type: "approval-cleared",
         approvalId: approval.id
@@ -838,6 +917,14 @@ class LocalQueryEngine implements QueryEngine {
         const inspection = inspectLocalTool(trimmed, this.permissions);
 
         if (inspection.decision?.behavior === "allow") {
+          // W3-01：工具自动放行也是审计点
+          this.audit({
+            actor: "user",
+            action: `tool.${localToolName}`,
+            decision: "allow",
+            resource: inspection.detail ?? trimmed,
+            reason: inspection.decision.reason ?? null,
+          });
           yield {
             type: "tool-start",
             toolName: localToolName,
@@ -871,6 +958,15 @@ class LocalQueryEngine implements QueryEngine {
           };
           this.pendingApprovals.push(pendingApproval);
           this.persistPendingApprovals();
+          // W3-01：工具入 pending 队列也是审计点（可后续与 approval.granted/denied 关联）
+          this.audit({
+            actor: "agent",
+            action: `tool.${inspection.toolName}`,
+            decision: "pending",
+            resource: inspection.detail ?? trimmed,
+            reason: inspection.decision.reason ?? null,
+            details: { approvalId: pendingApproval.id },
+          });
           const activeApproval = this.pendingApprovals[0] ?? pendingApproval;
           output =
             this.pendingApprovals.length === 1
@@ -891,6 +987,14 @@ class LocalQueryEngine implements QueryEngine {
             delta: output
           };
         } else {
+          // W3-01：工具被权限策略直接拒（deny / dontAsk 无缓存）→ 审计
+          this.audit({
+            actor: "agent",
+            action: `tool.${localToolName}`,
+            decision: "deny",
+            resource: inspection.detail ?? trimmed,
+            reason: inspection.decision?.reason ?? "permission denied",
+          });
           output = `${localToolName[0].toUpperCase()}${localToolName.slice(1)} blocked: ${inspection.decision?.reason ?? "permission denied"}`;
           yield {
             type: "message-delta",
@@ -1954,7 +2058,8 @@ class LocalQueryEngine implements QueryEngine {
     return `model set to ${nextModel}`;
   }
 
-  private handleModeCommand(prompt: string): string {
+  /** 给 /mode slash builtin 用（公共入口，统一含审计） */
+  public runModeCommand(prompt: string): string {
     const nextMode = prompt.replace("/mode", "").trim();
 
     if (!nextMode) {
@@ -1965,8 +2070,18 @@ class LocalQueryEngine implements QueryEngine {
       return `unknown mode: ${nextMode}\navailable: ${PERMISSION_MODES.join(", ")}`;
     }
 
+    const previousMode = this.permissionMode;
     this.permissionMode = nextMode as PermissionMode;
     this.permissions.setMode(this.permissionMode);
+    // W3-01：mode 切换是可审计行为
+    this.audit({
+      actor: "user",
+      action: "permission.mode-change",
+      decision: "allow",
+      resource: this.permissionMode,
+      reason: `mode ${previousMode} → ${this.permissionMode}`,
+      details: { from: previousMode, to: this.permissionMode },
+    });
     return `mode set to ${this.permissionMode}`;
   }
 
