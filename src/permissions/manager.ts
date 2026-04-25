@@ -80,6 +80,8 @@ const DANGEROUS_BASH_PATTERNS = [
   /`/,
 ];
 
+// 测试用导出（生产代码内部用法保持为隐式调用）
+export { classifyBashCommand as classifyBashCommandForTest };
 function classifyBashCommand(command: string): ToolRiskLevel {
   const normalized = command.trim();
 

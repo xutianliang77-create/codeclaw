@@ -513,19 +513,29 @@ export async function* streamProviderResponse(
     abortSignal?: AbortSignal;
     /** W3-05：每流末尾收到 provider 的 token usage 时回调（best-effort，可选） */
     onUsage?: (usage: ProviderUsage) => void;
+    /** #92 T8：禁用发请求前的 secret redact（测试 / 用户显式同意发原始 prompt） */
+    disablePromptRedact?: boolean;
   }
 ): AsyncGenerator<string> {
   const fetchImpl = options?.fetchImpl ?? fetch;
 
+  // #92 T8：发给云端 LLM 前对 messages 做 secret redact
+  // 默认开启；env CODECLAW_NO_PROMPT_REDACT=1 关；options.disablePromptRedact=true 单次关
+  const { redactSecretsInMessages } = await import("../lib/redactPrompt");
+  const redactResult = redactSecretsInMessages(messages, {
+    disabled: options?.disablePromptRedact === true,
+  });
+  const safeMessages = redactResult.messages;
+
   if (provider.type === "anthropic") {
-    yield* streamAnthropic(provider, messages, fetchImpl, options?.abortSignal, options?.onUsage);
+    yield* streamAnthropic(provider, safeMessages, fetchImpl, options?.abortSignal, options?.onUsage);
     return;
   }
 
   if (provider.type === "ollama") {
-    yield* streamOllama(provider, messages, fetchImpl, options?.abortSignal, options?.onUsage);
+    yield* streamOllama(provider, safeMessages, fetchImpl, options?.abortSignal, options?.onUsage);
     return;
   }
 
-  yield* streamOpenAiCompatible(provider, messages, fetchImpl, options?.abortSignal, options?.onUsage);
+  yield* streamOpenAiCompatible(provider, safeMessages, fetchImpl, options?.abortSignal, options?.onUsage);
 }
