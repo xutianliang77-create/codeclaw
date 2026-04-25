@@ -51,6 +51,7 @@ import { PermissionManager } from "../permissions/manager";
 import { ProviderRequestError, streamProviderResponse } from "../provider/client";
 import { runWithProviderChain, type RunChainResult } from "../provider/chain";
 import { recordCall, summarizeBySession, summarizeToday, formatUsd } from "../provider/costTracker";
+import { evaluateBudget, formatBudgetConfig, readBudgetFromEnv, type BudgetConfig } from "../provider/budget";
 import { detectProviderCapabilities } from "../provider/capabilities";
 import type { ProviderStatus } from "../provider/types";
 import { createSkillRegistry, createSkillRegistryFromDisk } from "../skills/registry";
@@ -564,6 +565,8 @@ class LocalQueryEngine implements QueryEngine {
   private readonly recentGapSignatures: string[] = [];
   private pendingOrchestrationApprovals: PendingOrchestrationApproval[] = [];
   private activeSkill: SkillDefinition | null = null;
+  // #86：成本预算配置（构造时从 options.budget ?? env 决定）
+  private readonly budgetConfig: BudgetConfig;
   private readonly slashRegistry = new SlashRegistry();
   private readonly fsm = new EngineFsm();
   private readonly auditLog: AuditLog | null;
@@ -684,6 +687,8 @@ class LocalQueryEngine implements QueryEngine {
     this.permissionMode = options.permissionMode;
     this.modelLabel = this.currentProvider?.model ?? "scaffold";
     this.permissions = new PermissionManager(this.permissionMode);
+    // #86：budget 优先 options.budget，其次 env CODECLAW_BUDGET_*
+    this.budgetConfig = options.budget ?? readBudgetFromEnv();
     // W3-03：load 不按 sessionId 过滤（cross-session recovery 是预期使用场景，
     // 用户重启 / 切换 session 时仍能拿到上次的 pending）。隔离仅在 save/clear 上做：
     // session A 的 save 不会删 B 的 pending。这是对"覆盖"风险与"recovery 可见性"的折中。
@@ -1210,6 +1215,34 @@ class LocalQueryEngine implements QueryEngine {
         delta: output
       };
     } else {
+      // #86：调 LLM 前先 check budget；exceeded + block → 提前中止
+      const budgetVerdict = this.evaluateBudgetGate();
+      if (budgetVerdict?.shouldBlock) {
+        output = `[budget exceeded] ${budgetVerdict.detail}\nTo continue, raise CODECLAW_BUDGET_* env or set onExceeded='warn'.`;
+        assistantMessageSource = "local";
+        yield {
+          type: "message-delta",
+          messageId,
+          delta: output,
+        };
+        // 跳过 LLM 流程，直接走到 message-complete
+        this.messages.push({
+          id: messageId,
+          role: "assistant",
+          text: output,
+          source: assistantMessageSource,
+        });
+        this.notifyListeners();
+        yield { type: "message-complete", messageId, text: output };
+        yield this.phaseEvent("completed");
+        return;
+      }
+      if (budgetVerdict?.status === "warn") {
+        const note = `[budget warning] ${budgetVerdict.detail}\n`;
+        output += note;
+        yield { type: "message-delta", messageId, delta: note };
+      }
+
       assistantMessageSource = "model";
       const providers = [this.currentProvider, this.fallbackProvider].filter(
         (provider, index, list): provider is ProviderStatus =>
@@ -2210,6 +2243,19 @@ class LocalQueryEngine implements QueryEngine {
    * 注：当前只有"本地估算 token"（按字符 / 4），没有 provider 真实用量。
    * 真实 input/output tokens 与价位换算落到 P0 W3 provider client 改造后。
    */
+  /** #86：调 LLM 前 evaluate；无 dataDb 或无配置 → 返 null（不门控） */
+  private evaluateBudgetGate(): import("../provider/budget").BudgetVerdict | null {
+    if (!this.dataDb) return null;
+    if (Object.keys(this.budgetConfig).length === 0) return null;
+    try {
+      const session = summarizeBySession(this.dataDb, this.sessionId);
+      const today = summarizeToday(this.dataDb);
+      return evaluateBudget({ config: this.budgetConfig, session, today });
+    } catch {
+      return null;
+    }
+  }
+
   public runCostCommand(): string {
     const session = this.sessionId;
     const provider = this.currentProvider?.displayName ?? "not-configured";
@@ -2256,6 +2302,20 @@ class LocalQueryEngine implements QueryEngine {
         }
       } catch {
         // ignore cost summary failures
+      }
+    }
+
+    // #86：budget 状态（如配置了）
+    if (Object.keys(this.budgetConfig).length > 0) {
+      costLines.push("---");
+      costLines.push(formatBudgetConfig(this.budgetConfig));
+      const verdict = this.evaluateBudgetGate();
+      if (verdict) {
+        const marker = verdict.status === "exceeded" ? "✗" : verdict.status === "warn" ? "⚠" : "✓";
+        costLines.push(`budget-status: ${marker} ${verdict.status} · ${verdict.detail}`);
+        if (verdict.shouldBlock) {
+          costLines.push("budget-action: NEXT LLM CALL WILL BE BLOCKED (onExceeded='block')");
+        }
       }
     }
 
