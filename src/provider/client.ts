@@ -315,6 +315,10 @@ async function* streamOpenAiCompatible(
         stream: true,
         // W3-05：要求 OpenAI 在最后一帧返回 usage（默认 stream 不返回）
         stream_options: { include_usage: true },
+        // 给 output 设上限，避免本地小 ctx 模型（如 LM Studio 4096 ctx）
+        // 在 prompt 较长时被自身 output 撑爆 ctx 而被截断。1024 与 Anthropic 路径
+        // 一致；caller 后续可通过 provider.config 覆盖（W4 加）
+        max_tokens: 1024,
         messages: await toOpenAiMessages(messages)
       })
     },
