@@ -165,6 +165,77 @@ header h1 {
 .settings-body .provider-card .available-no { color: var(--error-fg); }
 .muted { color: var(--muted); font-size: 0.85rem; }
 
+/* #70-C 审批内嵌卡 */
+.approval-card {
+  background: var(--warning-bg, #fef3c7);
+  border: 1px solid var(--warning-border, #fcd34d);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.3rem;
+  font-size: 0.85rem;
+}
+.approval-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.1rem 0;
+}
+.approval-label {
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  min-width: 50px;
+  letter-spacing: 0.5px;
+}
+.approval-row code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+  background: rgba(0,0,0,0.05);
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  word-break: break-all;
+}
+.approval-id { font-size: 0.7rem; color: var(--muted); }
+.approval-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.approval-btn {
+  flex: 1;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+.approval-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.approval-btn.approve {
+  background: #10b98120;
+  border-color: #10b98155;
+  color: #047857;
+}
+.approval-btn.approve:hover:not(:disabled) { background: #10b98140; }
+.approval-btn.deny {
+  background: var(--error-bg);
+  border-color: var(--error-fg);
+  color: var(--error-fg);
+}
+.approval-btn.deny:hover:not(:disabled) { opacity: 0.85; }
+.approval-resolved {
+  opacity: 0.6;
+}
+.approval-resolved-tag {
+  margin-top: 0.4rem;
+  font-size: 0.78rem;
+  color: #059669;
+  font-weight: 500;
+}
+
 .auth-bar {
   display: flex;
   gap: 0.5rem;

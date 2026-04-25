@@ -217,16 +217,73 @@ function renderEvent(ev) {
       appendMessage("tool", `■ ${ev.toolName}: ${ev.status}`);
       break;
     case "approval-request":
-      appendMessage(
-        "approval",
-        `审批待办 [${ev.approvalId}]\n  工具: ${ev.toolName}\n  详情: ${ev.detail}\n  原因: ${ev.reason}\n  队列: ${ev.queuePosition}/${ev.totalPending}\n回复 /approve 或 /deny`
-      );
+      renderApprovalCard(ev);
       break;
     case "approval-cleared":
-      appendMessage("tool", `✓ 已处理 ${ev.approvalId}`);
+      markApprovalResolved(ev.approvalId);
       break;
     default:
       console.debug("[event]", ev);
+  }
+}
+
+// ───────────── 审批内嵌 #70-C ─────────────
+
+function renderApprovalCard(ev) {
+  const wrap = document.createElement("div");
+  wrap.className = "msg approval";
+  wrap.dataset.approvalId = ev.approvalId;
+
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.textContent = `审批待办 · 队列 ${ev.queuePosition}/${ev.totalPending}`;
+  wrap.appendChild(meta);
+
+  const card = document.createElement("div");
+  card.className = "approval-card";
+  card.innerHTML = `
+    <div class="approval-row"><span class="approval-label">tool</span><code>${escapeHtml(ev.toolName)}</code></div>
+    <div class="approval-row"><span class="approval-label">detail</span><span>${escapeHtml(ev.detail)}</span></div>
+    <div class="approval-row"><span class="approval-label">reason</span><span>${escapeHtml(ev.reason)}</span></div>
+    <div class="approval-row approval-id"><span class="approval-label">id</span><code>${escapeHtml(ev.approvalId)}</code></div>
+  `;
+  wrap.appendChild(card);
+
+  const actions = document.createElement("div");
+  actions.className = "approval-actions";
+  const approveBtn = document.createElement("button");
+  approveBtn.className = "approval-btn approve";
+  approveBtn.textContent = "✓ 批准";
+  approveBtn.addEventListener("click", () => {
+    approveBtn.disabled = true;
+    denyBtn.disabled = true;
+    sendMessage(`/approve ${ev.approvalId}`);
+  });
+  const denyBtn = document.createElement("button");
+  denyBtn.className = "approval-btn deny";
+  denyBtn.textContent = "✗ 拒绝";
+  denyBtn.addEventListener("click", () => {
+    approveBtn.disabled = true;
+    denyBtn.disabled = true;
+    sendMessage(`/deny ${ev.approvalId}`);
+  });
+  actions.appendChild(approveBtn);
+  actions.appendChild(denyBtn);
+  wrap.appendChild(actions);
+
+  els.messages.appendChild(wrap);
+  els.messages.scrollTop = els.messages.scrollHeight;
+}
+
+function markApprovalResolved(approvalId) {
+  const card = els.messages.querySelector(`[data-approval-id="${CSS.escape(approvalId)}"]`);
+  if (card) {
+    card.classList.add("approval-resolved");
+    card.querySelectorAll(".approval-btn").forEach((b) => (b.disabled = true));
+    const tag = document.createElement("div");
+    tag.className = "approval-resolved-tag";
+    tag.textContent = "✓ 已处理";
+    card.appendChild(tag);
   }
 }
 
