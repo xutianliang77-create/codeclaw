@@ -10,9 +10,15 @@ import { checkAndRegister, recordDelivery } from "../../ingress/dedupStore";
  *   - dedupDb 不传 → 不去重（向后兼容）
  *   - 同 (channel='wechat', userId=senderId, client_id=messageId) ttl 内重复 → 跳过 receiveMessage
  *   - 处理完成后用 traceId/sessionId 回填 last_delivery，下次重复请求复用
+ *
+ * sender whitelist（T3 prompt injection from bot 防御）：
+ *   - allowedSenders 不传或空 → 不做白名单（向后兼容；个人 bot 群仅自己用时）
+ *   - 提供时：senderId 不在集合内 → 整条 message event drop（不进 LLM；不计 dedup）
  */
 export interface WechatDedupOptions {
   dedupDb?: Database.Database;
+  /** T3：senderId 白名单。仅这些 senderId 的 message 事件会被处理。 */
+  allowedSenders?: ReadonlySet<string>;
 }
 
 function readBearerToken(request: IncomingMessage): string | null {
@@ -66,6 +72,13 @@ export async function handleWechatWebhookEvents(
   let dropped = 0;
 
   for (const event of request.events) {
+    // T3：sender whitelist 校验（仅 message 类型有 senderId）
+    if (event.type === "message" && opts.allowedSenders && opts.allowedSenders.size > 0) {
+      if (!opts.allowedSenders.has(event.message.senderId)) {
+        dropped += 1;
+        continue;
+      }
+    }
     // 仅 message 事件做 dedup（resume / approval-notify 无 messageId）
     if (event.type === "message" && opts.dedupDb) {
       const r = checkAndRegister(opts.dedupDb, {
@@ -127,6 +140,8 @@ export function createWechatWebhookRequestHandler(options: {
   adapter: WechatBotAdapter;
   authToken?: string | null;
   dedupDb?: Database.Database;
+  /** T3：senderId 白名单 */
+  allowedSenders?: ReadonlySet<string>;
 }): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
   return async (request, response) => {
     const authToken = options.authToken?.trim();
@@ -152,6 +167,7 @@ export function createWechatWebhookRequestHandler(options: {
       const body = await readJsonBody<unknown>(request);
       const result = await handleIlinkWebhookPayload(options.adapter, body, {
         dedupDb: options.dedupDb,
+        allowedSenders: options.allowedSenders,
       });
       writeJson(response, 200, result);
       return;
@@ -174,6 +190,8 @@ export function startWechatWebhookServer(options: {
   port?: number;
   authToken?: string | null;
   dedupDb?: Database.Database;
+  /** T3：senderId 白名单 */
+  allowedSenders?: ReadonlySet<string>;
 }): Promise<Server> {
   const server = createServer(createWechatWebhookRequestHandler(options));
 
