@@ -120,6 +120,60 @@ async function runShellCommand(
   });
 }
 
+/**
+ * /fix v3 diff_scope 默认阈值。fix 一个 bug 通常 1-3 文件 / <100 行；
+ * 超过这个规模说明 LLM 越权或题目本身不是单 bug 修复——abort 让用户审视。
+ */
+export const DIFF_SCOPE_MAX_FILES = 5;
+export const DIFF_SCOPE_MAX_LINES = 300;
+
+/**
+ * 解析 `git diff --stat` 末行 summary：
+ *   "5 files changed, 200 insertions(+), 100 deletions(-)"
+ *   "1 file changed, 5 insertions(+)"
+ *   "1 file changed, 5 deletions(-)"
+ * 找不到 summary 则返回 null（空 diff / git 不可用）。
+ */
+export function parseDiffStatSummary(
+  stat: string
+): { files: number; insertions: number; deletions: number } | null {
+  const lines = stat.trim().split(/\r?\n/);
+  const last = lines[lines.length - 1] ?? "";
+  const fileMatch = last.match(/(\d+)\s+files?\s+changed/);
+  if (!fileMatch) return null;
+  const insMatch = last.match(/(\d+)\s+insertions?\(\+\)/);
+  const delMatch = last.match(/(\d+)\s+deletions?\(-\)/);
+  return {
+    files: Number(fileMatch[1]),
+    insertions: insMatch ? Number(insMatch[1]) : 0,
+    deletions: delMatch ? Number(delMatch[1]) : 0,
+  };
+}
+
+/**
+ * 判断 fix 产生的 diff 是否超过 scope 阈值。
+ * 空 diff（找不到 summary 行）视为 ok（不 abort，但调用方会显式标 "no changes"）。
+ */
+export function evaluateDiffScope(
+  stat: string,
+  opts?: { maxFiles?: number; maxLines?: number }
+): { exceeded: boolean; files: number; lines: number; reason?: string } {
+  const maxFiles = opts?.maxFiles ?? DIFF_SCOPE_MAX_FILES;
+  const maxLines = opts?.maxLines ?? DIFF_SCOPE_MAX_LINES;
+  const summary = parseDiffStatSummary(stat);
+  if (!summary) return { exceeded: false, files: 0, lines: 0 };
+  const lines = summary.insertions + summary.deletions;
+  const reasons: string[] = [];
+  if (summary.files > maxFiles) reasons.push(`${summary.files} files > max-files=${maxFiles}`);
+  if (lines > maxLines) reasons.push(`${lines} lines > max-lines=${maxLines}`);
+  return {
+    exceeded: reasons.length > 0,
+    files: summary.files,
+    lines,
+    reason: reasons.length > 0 ? reasons.join("; ") : undefined,
+  };
+}
+
 function buildBuiltinReply(prompt: string): string | null {
   if (prompt === "doctor") {
     return "Run `npm run dev -- doctor` or `node dist/cli.js doctor` for environment diagnostics.";
@@ -1321,11 +1375,16 @@ class LocalQueryEngine implements QueryEngine {
    * v2 verify 行为：
    *   - 跑前：执行 cmd（exit 0 = 已修，abort）
    *   - 跑后：再执行 cmd（exit 0 = 修好，否则附 stderr）
-   *   - 末尾附 git diff --stat 信息（不强制 abort，仅展示）
+   *   - 末尾附 git diff --stat 信息
    *
-   * 仍未做（v3+）：
-   *   - diff_scope 的 max_files / max_lines 强制 abort
-   *   - 自动从 package.json 嗅探 verify cmd
+   * v3 diff_scope（task #65）：
+   *   - 跑后用 evaluateDiffScope 校验 git diff 范围
+   *   - 超过 max_files / max_lines 时 reply 末尾标 "diff-scope: ABORT"
+   *   - 不自动 rollback；让用户决策是否保留
+   *
+   * 仍未做（v4+）：
+   *   - 自动从 package.json 嗅探 verify cmd（task #66）
+   *   - 多语言 verify 模板（task #67）
    */
   public async runFixCommand(prompt: string): Promise<string> {
     const stripped = prompt.replace("/fix", "").trim();
@@ -1373,10 +1432,16 @@ class LocalQueryEngine implements QueryEngine {
     const { execution, reflector, rounds } = await this.executePlanWithSideEffects(plan);
     let reply = this.buildOrchestrationReply(plan, execution, reflector, { rounds, maxRounds: 3 });
 
-    // v2 跑后 post_verify + git diff --stat
+    // v2 跑后 post_verify + git diff --stat；v3 加 diff_scope 校验
     if (verifyCmd) {
       const postVerify = await runShellCommand(verifyCmd, cwd, 60_000);
       const diffStat = await runShellCommand("git diff --stat HEAD", cwd, 10_000);
+      const scope = diffStat.ok ? evaluateDiffScope(diffStat.stdout) : null;
+      const diffScopeLine = !scope
+        ? "diff-scope: skipped (git unavailable)"
+        : scope.exceeded
+        ? `diff-scope: ABORT (${scope.reason}) — manual review required, run \`git diff\` and \`git reset\` if not desired`
+        : `diff-scope: ok (${scope.files} files, ${scope.lines} lines; max ${DIFF_SCOPE_MAX_FILES}/${DIFF_SCOPE_MAX_LINES})`;
       reply += "\n\n" + [
         "--- verify ---",
         `verify-cmd: ${verifyCmd}`,
@@ -1388,6 +1453,7 @@ class LocalQueryEngine implements QueryEngine {
         diffStat.ok && diffStat.stdout.trim()
           ? `diff-stat:\n${diffStat.stdout.trim()}`
           : "diff-stat: (no changes or git unavailable)",
+        diffScopeLine,
       ].join("\n");
     }
 

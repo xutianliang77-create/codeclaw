@@ -1066,6 +1066,8 @@ describe("query engine", () => {
     expect(lastText).toContain("--- verify ---");
     expect(lastText).toContain("verify-broken (pre): yes");
     expect(lastText).toContain("verify-fixed (post): no");
+    // v3：reply 末尾必带 diff-scope 行（mock LLM 没真改文件 → 应是 ok 或 skipped）
+    expect(lastText).toMatch(/diff-scope:\s+(ok|skipped|ABORT)/);
   });
 
   it("/fix without args returns usage hint", async () => {
