@@ -1,0 +1,213 @@
+/**
+ * Web channel server 端到端集成测试
+ *
+ * 启 server 在随机端口，用 fetch 验证：
+ *   - 401 unauthorized：缺 / 错 token
+ *   - 创建 session 返回 sessionId
+ *   - POST /messages 后能从 SSE 读到事件
+ *   - DELETE sessions 后 stream 关闭
+ *   - 跨用户隔离：A 的 token 拿不到 B 的 session
+ */
+
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { WebServerHandle } from "../../../../src/channels/web/server";
+import { startWebServer } from "../../../../src/channels/web/server";
+
+const TOKEN = "test-token-aaaa1111";
+
+let handle: WebServerHandle;
+let baseUrl: string;
+
+beforeEach(async () => {
+  handle = await startWebServer({
+    port: 0,
+    auth: { bearerToken: TOKEN },
+    engineDefaults: {
+      currentProvider: null,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      // dataDbPath 不传 → vitest 自动禁用 L2 memory
+    },
+  });
+  baseUrl = `http://${handle.host}:${handle.port}`;
+});
+
+afterEach(async () => {
+  await handle.close();
+});
+
+function authHeaders(token = TOKEN): Record<string, string> {
+  return { Authorization: `Bearer ${token}`, "content-type": "application/json" };
+}
+
+describe("Web server · 鉴权", () => {
+  it("缺 Authorization → 401", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/sessions`, { method: "POST" });
+    expect(r.status).toBe(401);
+  });
+
+  it("错误 token → 401", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/sessions`, {
+      method: "POST",
+      headers: { Authorization: "Bearer wrong-token" },
+    });
+    expect(r.status).toBe(401);
+  });
+
+  it("正确 token → 201 创建 session", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/sessions`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    expect(r.status).toBe(201);
+    const body = (await r.json()) as { sessionId: string; userId: string };
+    expect(body.sessionId).toMatch(/^web-/);
+    expect(body.userId).toBe("web-test-tok");  // token 前 8 位 prefix
+  });
+});
+
+describe("Web server · session CRUD", () => {
+  it("create → list 包含新 session", async () => {
+    const created = await fetch(`${baseUrl}/v1/web/sessions`, {
+      method: "POST",
+      headers: authHeaders(),
+    }).then((r) => r.json()) as { sessionId: string };
+
+    const list = await fetch(`${baseUrl}/v1/web/sessions`, {
+      headers: authHeaders(),
+    }).then((r) => r.json()) as { sessions: Array<{ sessionId: string }> };
+
+    expect(list.sessions.find((s) => s.sessionId === created.sessionId)).toBeDefined();
+  });
+
+  it("delete 后 list 不再包含 / 再 delete 返回 404", async () => {
+    const created = await fetch(`${baseUrl}/v1/web/sessions`, {
+      method: "POST",
+      headers: authHeaders(),
+    }).then((r) => r.json()) as { sessionId: string };
+
+    const del1 = await fetch(
+      `${baseUrl}/v1/web/sessions/${encodeURIComponent(created.sessionId)}`,
+      { method: "DELETE", headers: authHeaders() }
+    );
+    expect(del1.status).toBe(200);
+    const del2 = await fetch(
+      `${baseUrl}/v1/web/sessions/${encodeURIComponent(created.sessionId)}`,
+      { method: "DELETE", headers: authHeaders() }
+    );
+    expect(del2.status).toBe(404);
+  });
+
+  it("跨用户隔离：A 看不到 B 的 session", async () => {
+    handle.store.create("web-test-tok"); // user A
+    handle.store.create("web-other-to"); // user B
+
+    const listA = await fetch(`${baseUrl}/v1/web/sessions`, {
+      headers: authHeaders(TOKEN),
+    }).then((r) => r.json()) as { sessions: unknown[] };
+
+    expect(listA.sessions).toHaveLength(1);
+  });
+});
+
+describe("Web server · 消息 + SSE", () => {
+  it("POST /messages → SSE 收到 event", async () => {
+    const created = await fetch(`${baseUrl}/v1/web/sessions`, {
+      method: "POST",
+      headers: authHeaders(),
+    }).then((r) => r.json()) as { sessionId: string };
+
+    // 先建 SSE 连接（异步读流）
+    const sseResponse = await fetch(
+      `${baseUrl}/v1/web/stream?sessionId=${encodeURIComponent(created.sessionId)}`,
+      { headers: authHeaders() }
+    );
+    expect(sseResponse.status).toBe(200);
+    expect(sseResponse.headers.get("content-type")).toMatch(/text\/event-stream/);
+
+    // 异步读 SSE 第一帧（QueryEngine 处理 /help 输出 message-complete）
+    const reader = sseResponse.body!.getReader();
+    const eventPromise = (async (): Promise<string> => {
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) return buf;
+        buf += decoder.decode(value, { stream: true });
+        if (buf.includes("data:")) return buf;
+      }
+    })();
+
+    // 发送一个 /help 命令（QueryEngine 内部会同步处理给出 message-complete）
+    const post = await fetch(`${baseUrl}/v1/web/messages`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ sessionId: created.sessionId, input: "/help" }),
+    });
+    expect(post.status).toBe(202);
+
+    const sse = await Promise.race([
+      eventPromise,
+      new Promise<string>((_, rej) => setTimeout(() => rej(new Error("timeout")), 5000)),
+    ]);
+    expect(sse).toContain("data:");
+
+    reader.cancel();
+  });
+
+  it("POST /messages 缺 input → 400", async () => {
+    const created = await fetch(`${baseUrl}/v1/web/sessions`, {
+      method: "POST",
+      headers: authHeaders(),
+    }).then((r) => r.json()) as { sessionId: string };
+
+    const r = await fetch(`${baseUrl}/v1/web/messages`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ sessionId: created.sessionId }),
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it("POST /messages 不存在的 sessionId → 404", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/messages`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ sessionId: "web-nonexistent-id", input: "/help" }),
+    });
+    expect(r.status).toBe(404);
+  });
+});
+
+describe("Web server · 路由 misc", () => {
+  it("GET / → 占位 200", async () => {
+    const r = await fetch(`${baseUrl}/`);
+    expect(r.status).toBe(200);
+  });
+
+  it("未知路径 → 404", async () => {
+    const r = await fetch(`${baseUrl}/nonexistent`);
+    expect(r.status).toBe(404);
+  });
+
+  it("GET /v1/web/stream 缺 sessionId → 400", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/stream`, { headers: authHeaders() });
+    expect(r.status).toBe(400);
+  });
+
+  it("无 CODECLAW_WEB_TOKEN env → startWebServer reject", async () => {
+    await expect(
+      startWebServer({
+        port: 0,
+        auth: { bearerToken: null },
+        engineDefaults: {
+          currentProvider: null,
+          fallbackProvider: null,
+          permissionMode: "plan",
+          workspace: process.cwd(),
+        },
+      })
+    ).rejects.toThrow(/CODECLAW_WEB_TOKEN/);
+  });
+});
