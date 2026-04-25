@@ -440,7 +440,7 @@ async function runBashTool(command: string, workspace: string): Promise<string> 
   }
 
   try {
-    const result = await execFileAsync("zsh", ["-lc", command], {
+    const result = await execFileAsync(process.env.SHELL ?? "bash", ["-lc", command], {
       cwd: workspace,
       timeout: 10_000,
       maxBuffer: 128 * 1024
