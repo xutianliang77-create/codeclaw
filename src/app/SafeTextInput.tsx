@@ -62,8 +62,16 @@ export function SafeTextInput({
         return;
       }
 
-      // Backspace / Delete-back（终端发送 \x7f 或 \x08）
-      if (key.backspace || key.delete) {
+      // Backspace / DEL 兼容：ink 在某些终端下 key.backspace / key.delete flag
+      // 不可靠（特别是 macOS Terminal、某些 SSH 客户端、tmux）。直接看 raw 字符兜底：
+      //   - \x7f (DEL, ASCII 127)：现代 Linux / macOS 终端发送
+      //   - \x08 (BS,  ASCII   8)：Windows / 部分 Telnet
+      const isBackspace =
+        key.backspace ||
+        key.delete ||
+        input === "\x7f" ||
+        input === "\b";
+      if (isBackspace) {
         if (cursor > 0) {
           const next = value.slice(0, cursor - 1) + value.slice(cursor);
           onChange(next);
