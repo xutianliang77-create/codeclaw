@@ -1,5 +1,5 @@
 import { build } from "esbuild";
-import { mkdir } from "node:fs/promises";
+import { mkdir, cp } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -28,4 +28,13 @@ await build({
   }
 });
 
-console.log("Built dist/cli.js");
+// migrate.ts 用 path.join(__dirname, "migrations", kind) 解析 sql 文件位置；
+// 打包后 __dirname = dist/，所以 sql 必须随之拷贝到 dist/migrations/{data,audit}/。
+// esbuild bundle 不会处理 fs.readdirSync 引用的非 import 资源。
+await cp(
+  path.join(rootDir, "src", "storage", "migrations"),
+  path.join(outDir, "migrations"),
+  { recursive: true }
+);
+
+console.log("Built dist/cli.js + copied migrations/");
