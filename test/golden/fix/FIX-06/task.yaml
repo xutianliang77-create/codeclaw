@@ -1,0 +1,28 @@
+id: FIX-06
+version: 1
+language: ts
+workspace: test/golden/fix/FIX-06/workspace
+setup:
+  install: "npm ci --silent"
+  verify_broken: "npm test --silent 2>&1 | grep -q 'failed'"
+prompt: |
+  这是一个简单的 immutable store helper。跑 `npm test` 会看到测试失败：
+    "does NOT mutate original state.user" —— 期望原 state 的 name 仍是 'alice'，但已被改成 'bob'
+  根因：updateUser 用 `Object.assign(state.user, patch)` 直接 mutate 了 state.user 对象。
+  外层 spread `{ ...state }` 只是浅拷贝，state.user 依旧是同一个引用。
+  请修 `src/store.ts`，让 updateUser 真正不修改入参。不要改测试。
+expected:
+  post_verify: "npm test --silent 2>&1 | grep -q '4 passed' && npm test --silent 2>&1 | grep -v 'failed' >/dev/null"
+  diff_scope:
+    allow_paths: ["src/**/*.ts"]
+    max_files: 1
+    max_lines: 8
+  forbidden_changes:
+    - "package.json"
+    - "package-lock.json"
+    - "test/**"
+    - "tsconfig.json"
+  time_budget_sec: 120
+  token_budget_usd: 0.3
+category: shallow-copy-mutation
+difficulty: medium

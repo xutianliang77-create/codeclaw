@@ -1,0 +1,29 @@
+id: FIX-07
+version: 1
+language: ts
+workspace: test/golden/fix/FIX-07/workspace
+setup:
+  install: "npm ci --silent"
+  verify_broken: "npm test --silent 2>&1 | grep -q 'failed'"
+prompt: |
+  这是一个 dashboard 数据加载器：fetchUser / fetchOrders / fetchNotifications 三段独立。
+  跑 `npm test` 会看到性能 test 失败：
+    "loads three sources in parallel (total < 200ms)" —— 实测 ≈ 240ms
+  现在的实现是串行 await。三段无依赖，应该并发触发后再 await。
+  请修 `src/dashboard.ts` 的 loadDashboard，让总耗时 ≈ max(三段) 而不是 sum。
+  不要改测试 / fetch 函数。
+expected:
+  post_verify: "npm test --silent 2>&1 | grep -q '2 passed' && npm test --silent 2>&1 | grep -v 'failed' >/dev/null"
+  diff_scope:
+    allow_paths: ["src/**/*.ts"]
+    max_files: 1
+    max_lines: 10
+  forbidden_changes:
+    - "package.json"
+    - "package-lock.json"
+    - "test/**"
+    - "tsconfig.json"
+  time_budget_sec: 180
+  token_budget_usd: 0.5
+category: async-serial-vs-parallel
+difficulty: hard

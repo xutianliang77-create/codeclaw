@@ -1,0 +1,25 @@
+id: FIX-09
+version: 1
+language: py
+workspace: test/golden/fix/FIX-09/workspace
+setup:
+  install: "python3 -m venv .venv && . .venv/bin/activate && pip install -q -r requirements.txt"
+  verify_broken: ". .venv/bin/activate && pytest -q 2>&1 | grep -q 'failed'"
+prompt: |
+  这是一个工具函数 `last_n_lines(lines, n)`：返回列表最后 n 行。
+  跑 `pytest` 会看到几个 test 失败，比如 `test_last_2_of_5` 期望 `['d', 'e']` 但实际返回 `['c', 'd', 'e']`。
+  根因是 lines.py 里的切片 `lines[-n - 1:]` 多取了一行（off-by-one）。
+  请修这一行。
+expected:
+  post_verify: ". .venv/bin/activate && pytest -q 2>&1 | grep -q '6 passed'"
+  diff_scope:
+    allow_paths: ["lines.py"]
+    max_files: 1
+    max_lines: 3
+  forbidden_changes:
+    - "requirements.txt"
+    - "test_*.py"
+  time_budget_sec: 60
+  token_budget_usd: 0.1
+category: off-by-one-slice
+difficulty: easy

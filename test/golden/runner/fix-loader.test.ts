@@ -1,6 +1,6 @@
 /**
  * fix-loader 单测
- *   - loadAllFix() 正向：返回 3 个 fixture（FIX-01/02/08）
+ *   - loadAllFix() 正向：返回当前所有 fixture
  *   - 字段读取正确
  *   - validate 错误路径（用临时文件测）
  */
@@ -23,7 +23,10 @@ describe("fix-loader · happy path", () => {
   it("加载 test/golden/fix/ 下全部 fixture", () => {
     const tasks = loadAllFix();
     const ids = tasks.map((t) => t.id).sort();
-    expect(ids).toEqual(["FIX-01", "FIX-02", "FIX-08"]);
+    expect(ids).toEqual([
+      "FIX-01", "FIX-02", "FIX-03", "FIX-04", "FIX-05",
+      "FIX-06", "FIX-07", "FIX-08", "FIX-09", "FIX-10",
+    ]);
   });
 
   it("FIX-01 字段读取正确", () => {

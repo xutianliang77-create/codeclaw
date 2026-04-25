@@ -1,0 +1,27 @@
+id: FIX-04
+version: 1
+language: py
+workspace: test/golden/fix/FIX-04/workspace
+setup:
+  install: "python3 -m venv .venv && . .venv/bin/activate && pip install -q -r requirements.txt"
+  verify_broken: ". .venv/bin/activate && pytest -q 2>&1 | grep -q 'failed'"
+prompt: |
+  这是一个工具函数 `parse_csv_line(line, errors=[])`，把 CSV 行解析为列表，
+  并把解析中遇到的错误 append 到 errors 参数。
+  跑 `pytest` 会看到第二个 test 失败：
+    test_independent_calls_dont_share_errors —— 两次独立调用，errors 列表竟然累计了。
+  这是 Python 经典坑。请修 `parser.py`，使每次调用的 errors 默认是新列表（也允许显式传入用户的列表）。
+  不要改测试。
+expected:
+  post_verify: ". .venv/bin/activate && pytest -q 2>&1 | grep -q '3 passed'"
+  diff_scope:
+    allow_paths: ["parser.py"]
+    max_files: 1
+    max_lines: 6
+  forbidden_changes:
+    - "requirements.txt"
+    - "test_*.py"
+  time_budget_sec: 120
+  token_budget_usd: 0.2
+category: mutable-default-arg
+difficulty: easy

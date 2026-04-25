@@ -1,0 +1,29 @@
+id: FIX-03
+version: 1
+language: ts
+workspace: test/golden/fix/FIX-03/workspace
+setup:
+  install: "npm ci --silent"
+  verify_broken: "TZ=America/Los_Angeles npm test --silent 2>&1 | grep -q 'failed'"
+prompt: |
+  这是一个把 "YYYY-MM-DD" 字符串解析为 Date 的小工具。在 UTC+ 时区跑测试都过，
+  但 CI 跑在 `TZ=America/Los_Angeles`（UTC-8）下时一直 fail：
+    expected day to be 31, got 30
+  根因是 `new Date("2024-12-31")` 把字符串当 UTC 0:00 解析，再以本地时区显示就成了前一天。
+  请修 `src/dateParser.ts`，让 `parseLocalDate("2024-12-31")` 在任何时区下都返回当地的 12 月 31 日 0:00。
+  不要改测试文件。
+expected:
+  post_verify: "TZ=America/Los_Angeles npm test --silent 2>&1 | grep -q '3 passed' && TZ=America/Los_Angeles npm test --silent 2>&1 | grep -v 'failed' >/dev/null"
+  diff_scope:
+    allow_paths: ["src/**/*.ts"]
+    max_files: 1
+    max_lines: 10
+  forbidden_changes:
+    - "package.json"
+    - "package-lock.json"
+    - "test/**"
+    - "tsconfig.json"
+  time_budget_sec: 180
+  token_budget_usd: 0.4
+category: timezone-handling
+difficulty: medium

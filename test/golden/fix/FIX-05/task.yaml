@@ -1,0 +1,28 @@
+id: FIX-05
+version: 1
+language: ts
+workspace: test/golden/fix/FIX-05/workspace
+setup:
+  install: "npm ci --silent"
+  verify_broken: "npm test --silent 2>&1 | grep -q 'failed'"
+prompt: |
+  这是一个返回"按 index 取值"closure 列表的工具。跑 `npm test` 会看到三个测试都 fail：
+    expected 'a' but got undefined
+  原因是 src/handlers.ts 用 `var` 声明 i，所有 closure 共享同一个 i，循环结束时 i = items.length。
+  请修 `src/handlers.ts`，使每个 closure 捕获正确的 index。
+  不要改测试文件、不要改 package.json。
+expected:
+  post_verify: "npm test --silent 2>&1 | grep -q '3 passed' && npm test --silent 2>&1 | grep -v 'failed' >/dev/null"
+  diff_scope:
+    allow_paths: ["src/**/*.ts"]
+    max_files: 1
+    max_lines: 6
+  forbidden_changes:
+    - "package.json"
+    - "package-lock.json"
+    - "test/**"
+    - "tsconfig.json"
+  time_budget_sec: 120
+  token_budget_usd: 0.3
+category: closure-capture
+difficulty: medium
