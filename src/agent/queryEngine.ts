@@ -694,6 +694,26 @@ class LocalQueryEngine implements QueryEngine {
     // session A 的 save 不会删 B 的 pending。这是对"覆盖"风险与"recovery 可见性"的折中。
     this.pendingApprovals = loadPendingApprovals(options.approvalsDir);
     loadBuiltins(this.slashRegistry);
+    // #81：把 user skill manifest 的 commands[] 桥接到 slashRegistry
+    // handler 行为 = 自动激活该 skill（等价 /skills use <name>）；冲突 builtin 时 skip
+    for (const skill of this.skillRegistry.list()) {
+      if (skill.source === "builtin" || !skill.commands?.length) continue;
+      for (const cmd of skill.commands) {
+        this.slashRegistry.register(
+          {
+            name: cmd.name,
+            category: "plugin",
+            risk: "low",
+            summary: cmd.summary ?? `Activate skill: ${skill.name}`,
+            handler: () => {
+              // 复用 buildSkillsReply 的 'use <name>' 路径
+              return { kind: "reply", text: this.buildSkillsReply(`/skills use ${skill.name}`) };
+            },
+          },
+          "skip" // 与 builtin slash 冲突时跳过，不抛
+        );
+      }
+    }
     // W3-01：开 audit.db 句柄。
     //   - 显式 auditDbPath === null → 禁用
     //   - vitest 环境下 + 未显式指定 → 禁用（避免测试污染 ~/.codeclaw/）

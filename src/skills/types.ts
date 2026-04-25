@@ -32,6 +32,18 @@ export interface SkillManifest {
   author?: string;
   /** P2 预留：签名信息（loader 解析但不校验） */
   signature?: SkillSignature;
+  /**
+   * #81：用户 skill 自定义 slash 命令；激活时 handler 等价于 /skills use <skill-name>
+   * 每条 name 必须以 / 开头；不能与 builtin slash 命令重名（loader 校验）
+   */
+  commands?: SkillSlashCommand[];
+}
+
+export interface SkillSlashCommand {
+  /** 含 / 前缀，例：/review-mode */
+  name: string;
+  /** 一行 summary（用于 /help） */
+  summary?: string;
 }
 
 export interface SkillDefinition {
@@ -43,4 +55,6 @@ export interface SkillDefinition {
   /** user / signed 类才有；指向 manifest 文件以便诊断显示 */
   manifestPath?: string;
   signature?: SkillSignature;
+  /** #81：从 manifest commands[] 解析的 slash 命令名（含 /） */
+  commands?: SkillSlashCommand[];
 }

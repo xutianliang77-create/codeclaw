@@ -18,7 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import yaml from "js-yaml";
 
-import type { SkillDefinition, SkillManifest, SkillSignature } from "./types";
+import type { SkillDefinition, SkillManifest, SkillSignature, SkillSlashCommand } from "./types";
 
 const VALID_TOOLS = new Set([
   "read",
@@ -119,6 +119,7 @@ export function loadUserSkillsFromDir(
       source: validation.manifest.signature ? "signed" : "user",
       manifestPath,
       signature: validation.manifest.signature,
+      commands: validation.manifest.commands,
     };
     result.skills.push(skill);
   }
@@ -214,6 +215,31 @@ export function validateManifest(
     return { ok: false, reason: "author must be string if present" };
   }
 
+  let commands: SkillSlashCommand[] | undefined;
+  if (obj.commands !== undefined) {
+    if (!Array.isArray(obj.commands)) {
+      return { ok: false, reason: "commands must be array if present" };
+    }
+    const list: SkillSlashCommand[] = [];
+    for (const raw of obj.commands) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        return { ok: false, reason: "each commands[] item must be object" };
+      }
+      const cmd = raw as Record<string, unknown>;
+      if (typeof cmd.name !== "string" || !/^\/[a-z][a-z0-9_-]{0,30}$/i.test(cmd.name)) {
+        return {
+          ok: false,
+          reason: `command.name must match /^\\/[a-z][a-z0-9_-]{0,30}$/ (got ${JSON.stringify(cmd.name)})`,
+        };
+      }
+      list.push({
+        name: cmd.name.toLowerCase(),
+        summary: typeof cmd.summary === "string" ? cmd.summary : undefined,
+      });
+    }
+    if (list.length > 0) commands = list;
+  }
+
   let signature: SkillSignature | undefined;
   if (obj.signature !== undefined) {
     if (!obj.signature || typeof obj.signature !== "object" || Array.isArray(obj.signature)) {
@@ -244,6 +270,7 @@ export function validateManifest(
       version: typeof version === "number" ? version : undefined,
       author: typeof author === "string" ? author : undefined,
       signature,
+      commands,
     },
   };
 }

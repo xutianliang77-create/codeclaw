@@ -224,4 +224,46 @@ describe("validateManifest", () => {
     expect(validateManifest({ ...baseValid, version: 0 }, BUILTIN).ok).toBe(false);
     expect(validateManifest({ ...baseValid, version: "1" }, BUILTIN).ok).toBe(false);
   });
+
+  // #81 commands[] 校验
+  it("#81 commands 数组合法 → ok 并保留", () => {
+    const r = validateManifest(
+      {
+        ...baseValid,
+        commands: [
+          { name: "/lint", summary: "run lint mode" },
+          { name: "/lint-fix" },
+        ],
+      },
+      BUILTIN
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.manifest.commands).toEqual([
+        { name: "/lint", summary: "run lint mode" },
+        { name: "/lint-fix", summary: undefined },
+      ]);
+    }
+  });
+
+  it("#81 command name 缺 / 前缀 → fail", () => {
+    const r = validateManifest({ ...baseValid, commands: [{ name: "lint" }] }, BUILTIN);
+    expect(r.ok).toBe(false);
+  });
+
+  it("#81 command name 含非法字符（如空格 / 特殊符号）→ fail", () => {
+    const r = validateManifest({ ...baseValid, commands: [{ name: "/lint fix" }] }, BUILTIN);
+    expect(r.ok).toBe(false);
+  });
+
+  it("#81 commands 不是数组 → fail", () => {
+    const r = validateManifest({ ...baseValid, commands: "not-an-array" }, BUILTIN);
+    expect(r.ok).toBe(false);
+  });
+
+  it("#81 commands 空数组 → ok 但 commands undefined", () => {
+    const r = validateManifest({ ...baseValid, commands: [] }, BUILTIN);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.manifest.commands).toBeUndefined();
+  });
 });
