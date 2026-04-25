@@ -28,6 +28,7 @@ const els = {
   input: $("input"),
   sendBtn: $("send-btn"),
   status: $("status"),
+  cost: $("cost"),
 };
 
 const state = {
@@ -35,6 +36,7 @@ const state = {
   sessionId: null,
   eventSource: null,
   currentStreamMsg: null, // 当前正在 streaming 的 assistant 气泡
+  costTimer: null,
 };
 
 // ───────────── UI 工具 ─────────────
@@ -108,6 +110,9 @@ async function connect() {
     els.authBar.classList.add("hidden");
     els.chat.classList.remove("hidden");
     els.logoutBtn.classList.remove("hidden");
+    els.cost.classList.remove("hidden");
+    refreshCost();
+    state.costTimer = setInterval(refreshCost, 5000);
     openStream();
   } catch (err) {
     setStatus("连接失败", false);
@@ -220,6 +225,33 @@ function renderEvent(ev) {
   }
 }
 
+// ───────────── Cost dashboard #70-A ─────────────
+
+async function refreshCost() {
+  if (!state.sessionId || !state.token) return;
+  try {
+    const r = await fetch(
+      "/v1/web/cost?sessionId=" + encodeURIComponent(state.sessionId),
+      { headers: { Authorization: "Bearer " + state.token } }
+    );
+    if (!r.ok) return;
+    const data = await r.json();
+    if (!data.enabled) {
+      els.cost.textContent = "cost: disabled";
+      return;
+    }
+    const s = data.session;
+    const t = data.today;
+    els.cost.innerHTML =
+      "<span title='本会话累计 LLM 调用成本'>session " + s.totalUsdCostFormatted +
+      " · " + s.callCount + " calls · " + (s.totalInputTokens + s.totalOutputTokens) + " tok</span>" +
+      " · " +
+      "<span title='今日跨会话累计'>today " + t.totalUsdCostFormatted + "</span>";
+  } catch (err) {
+    console.warn("[cost] refresh failed:", err);
+  }
+}
+
 // ───────────── 提交输入 ─────────────
 
 async function sendMessage(text) {
@@ -246,9 +278,15 @@ function logout() {
   localStorage.removeItem("codeclaw_token");
   state.token = "";
   state.sessionId = null;
+  if (state.costTimer) {
+    clearInterval(state.costTimer);
+    state.costTimer = null;
+  }
   els.authBar.classList.remove("hidden");
   els.chat.classList.add("hidden");
   els.logoutBtn.classList.add("hidden");
+  els.cost.classList.add("hidden");
+  els.cost.textContent = "";
   els.messages.innerHTML = "";
   setStatus("已登出", false);
 }

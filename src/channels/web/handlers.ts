@@ -10,14 +10,18 @@ import type Database from "better-sqlite3";
 import type { SessionStore } from "./sessionStore";
 import { validateBearer, type WebAuthConfig } from "./auth";
 import { checkAndRegister, recordDelivery } from "../../ingress/dedupStore";
+import { summarizeBySession, summarizeToday, formatUsd } from "../../provider/costTracker";
 
 export interface HandlerDeps {
   store: SessionStore;
   auth: WebAuthConfig;
   /** Bearer token → 派生的稳定 userId。默认拿 token 前 8 字符。 */
   deriveUserId?: (token: string) => string;
-  /** ingress dedup db 句柄；不注入则不去重（向后兼容） */
-  dedupDb?: Database.Database;
+  /**
+   * 共享 data.db 句柄（singleton 同 QueryEngine 内部）。
+   * 不注入则相关功能（ingress dedup / cost dashboard）静默禁用。
+   */
+  dataDb?: Database.Database;
 }
 
 function jsonResponse(res: ServerResponse, status: number, body: unknown): void {
@@ -142,10 +146,10 @@ export async function handleMessage(
     jsonResponse(res, 404, { error: "session not found" });
     return;
   }
-  // dedup：仅当 client 明确传 clientId 且 deps.dedupDb 注入时启用
+  // dedup：仅当 client 明确传 clientId 且 deps.dataDb 注入时启用
   // ttl 内同 (channel,user,client_id) 重复请求 → 短路，复用上次 delivery
-  if (body.clientId && deps.dedupDb) {
-    const r = checkAndRegister(deps.dedupDb, {
+  if (body.clientId && deps.dataDb) {
+    const r = checkAndRegister(deps.dataDb, {
       clientId: body.clientId,
       channel: "http",
       userId: auth.userId,
@@ -162,13 +166,49 @@ export async function handleMessage(
   // fire-and-forget；events 通过 SSE 推给前端
   void deps.store.runSubmit(body.sessionId, auth.userId, body.input);
   // 异步回填 last_delivery（ack 维度，不等 LLM）让 dedup 重试有迹可循
-  if (body.clientId && deps.dedupDb) {
-    recordDelivery(deps.dedupDb, body.clientId, {
+  if (body.clientId && deps.dataDb) {
+    recordDelivery(deps.dataDb, body.clientId, {
       sessionId: body.sessionId,
       acceptedAt: Date.now(),
     });
   }
   jsonResponse(res, 202, { accepted: true });
+}
+
+// GET /v1/web/cost?sessionId=<id>   #70-A
+export async function handleCost(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  sessionId: string
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+  if (!deps.dataDb) {
+    jsonResponse(res, 200, {
+      enabled: false,
+      message: "cost tracking disabled (no data.db)",
+    });
+    return;
+  }
+  const session = deps.store.get(sessionId, auth.userId);
+  if (!session) {
+    jsonResponse(res, 404, { error: "session not found" });
+    return;
+  }
+  const bySession = summarizeBySession(deps.dataDb, sessionId);
+  const today = summarizeToday(deps.dataDb);
+  jsonResponse(res, 200, {
+    enabled: true,
+    session: {
+      ...bySession,
+      totalUsdCostFormatted: formatUsd(bySession.totalUsdCost),
+    },
+    today: {
+      ...today,
+      totalUsdCostFormatted: formatUsd(today.totalUsdCost),
+    },
+  });
 }
 
 // GET /v1/web/stream?sessionId=<id>   SSE

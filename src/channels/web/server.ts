@@ -27,6 +27,7 @@ import { URL } from "node:url";
 
 import { readWebAuthConfig, type WebAuthConfig } from "./auth";
 import {
+  handleCost,
   handleCreateSession,
   handleDeleteSession,
   handleListSessions,
@@ -135,6 +136,16 @@ async function dispatch(
   if (url.pathname === "/v1/web/messages" && method === "POST") {
     return handleMessage(req, res, deps);
   }
+  // GET /v1/web/cost?sessionId=<id>  #70-A
+  if (url.pathname === "/v1/web/cost" && method === "GET") {
+    const sessionId = url.searchParams.get("sessionId") ?? "";
+    if (!sessionId) {
+      res.statusCode = 400;
+      res.end("missing sessionId");
+      return;
+    }
+    return handleCost(req, res, deps, sessionId);
+  }
   // GET /v1/web/stream
   if (url.pathname === "/v1/web/stream" && method === "GET") {
     const sessionId = url.searchParams.get("sessionId") ?? "";
@@ -184,18 +195,18 @@ export function startWebServer(opts: StartWebServerOptions): Promise<WebServerHa
     engineFactory: createQueryEngine,
     engineDefaults: opts.engineDefaults,
   });
-  // 若 engineDefaults 提供了 dataDbPath，复用同一 db 做 ingress dedup
+  // 若 engineDefaults 提供了 dataDbPath，复用同一 db 做 dedup + cost 等
   // singleton 模式让 QueryEngine 内部 open 与此处指向同一实例
-  let dedupDb: import("better-sqlite3").Database | undefined;
+  let dataDb: import("better-sqlite3").Database | undefined;
   const dataDbPath = opts.engineDefaults.dataDbPath;
   if (dataDbPath) {
     try {
-      dedupDb = openDataDb({ path: dataDbPath }).db;
+      dataDb = openDataDb({ path: dataDbPath }).db;
     } catch {
-      // singleton 冲突或文件不可用 → 静默降级（不去重）
+      // singleton 冲突或文件不可用 → 静默降级
     }
   }
-  const deps: HandlerDeps = { store, auth, dedupDb };
+  const deps: HandlerDeps = { store, auth, dataDb };
   const staticRoot = opts.staticRoot === "" ? "" : opts.staticRoot ?? defaultStaticRoot();
 
   const server = http.createServer((req, res) => {

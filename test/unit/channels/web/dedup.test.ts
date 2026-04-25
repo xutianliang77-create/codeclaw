@@ -89,7 +89,7 @@ function buildDeps(opts: { withDedup: boolean; runSubmit: ReturnType<typeof vi.f
       runSubmit: opts.runSubmit,
     } as unknown as HandlerDeps["store"],
     auth: { bearerToken: TOKEN },
-    dedupDb: opts.withDedup ? dedupDb : undefined,
+    dataDb: opts.withDedup ? dedupDb : undefined,
   };
 }
 

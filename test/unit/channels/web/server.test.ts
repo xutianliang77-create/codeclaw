@@ -239,6 +239,33 @@ describe("Web server · 路由 misc", () => {
     expect(r.status).toBe(400);
   });
 
+  // ───────── #70-A cost dashboard ─────────
+  it("GET /v1/web/cost 缺 sessionId → 400", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/cost`, { headers: authHeaders() });
+    expect(r.status).toBe(400);
+  });
+
+  it("GET /v1/web/cost · dataDb 未注入 → 200 enabled=false", async () => {
+    // 当前 server 启动 engineDefaults.dataDbPath 不传 → dataDb 未注入
+    const sess = await fetch(`${baseUrl}/v1/web/sessions`, {
+      method: "POST",
+      headers: authHeaders(),
+    }).then((r) => r.json()) as { sessionId: string };
+    const r = await fetch(`${baseUrl}/v1/web/cost?sessionId=${encodeURIComponent(sess.sessionId)}`, {
+      headers: authHeaders(),
+    });
+    expect(r.status).toBe(200);
+    const body = await r.json() as { enabled: boolean };
+    expect(body.enabled).toBe(false);
+  });
+
+  it("GET /v1/web/cost 错误 token → 401", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/cost?sessionId=x`, {
+      headers: { Authorization: "Bearer wrong" },
+    });
+    expect(r.status).toBe(401);
+  });
+
   it("无 CODECLAW_WEB_TOKEN env → startWebServer reject", async () => {
     await expect(
       startWebServer({

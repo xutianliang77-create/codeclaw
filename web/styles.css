@@ -72,6 +72,16 @@ header h1 {
 .status.connected { background: #10b98120; color: #059669; }
 .status.disconnected { background: var(--error-bg); color: var(--error-fg); }
 
+.cost {
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", "Menlo", monospace;
+  margin-left: auto;
+  margin-right: 0.75rem;
+  white-space: nowrap;
+}
+.cost.hidden { display: none; }
+
 .auth-bar {
   display: flex;
   gap: 0.5rem;
