@@ -47,6 +47,7 @@ import type {
 import type { ExecutionAction } from "../orchestration/types";
 import { PermissionManager } from "../permissions/manager";
 import { ProviderRequestError, streamProviderResponse } from "../provider/client";
+import { recordCall, summarizeBySession, summarizeToday, formatUsd } from "../provider/costTracker";
 import { detectProviderCapabilities } from "../provider/capabilities";
 import type { ProviderStatus } from "../provider/types";
 import { createSkillRegistry } from "../skills/registry";
@@ -1221,6 +1222,11 @@ class LocalQueryEngine implements QueryEngine {
         for (const provider of providers) {
           this.abortController = new AbortController();
           let providerProducedOutput = false;
+          // W3-17：本次调用的 token 累计（onUsage 回调内填，结束时写库）
+          const llmCallStart = Date.now();
+          let callInputTokens = 0;
+          let callOutputTokens = 0;
+          let callModelId: string | undefined = provider.model;
 
           try {
             for await (const chunk of streamProviderResponse(provider, this.getProviderMessages(), {
@@ -1231,6 +1237,9 @@ class LocalQueryEngine implements QueryEngine {
                 this.sessionInputTokens += usage.inputTokens ?? 0;
                 this.sessionOutputTokens += usage.outputTokens ?? 0;
                 this.lastProviderModelId = usage.modelId ?? this.lastProviderModelId;
+                callInputTokens = usage.inputTokens ?? callInputTokens;
+                callOutputTokens = usage.outputTokens ?? callOutputTokens;
+                callModelId = usage.modelId ?? callModelId;
               },
             })) {
               providerProducedOutput = true;
@@ -1243,6 +1252,18 @@ class LocalQueryEngine implements QueryEngine {
             }
 
             lastError = null;
+            // W3-17：成功完成一次调用 → 写 llm_calls_raw（含 USD 估算）
+            if (callInputTokens > 0 || callOutputTokens > 0) {
+              recordCall(this.dataDb, {
+                traceId: this.sessionId,
+                sessionId: this.sessionId,
+                provider: provider.type,
+                modelId: callModelId ?? provider.model,
+                inputTokens: callInputTokens,
+                outputTokens: callOutputTokens,
+                latencyMs: Date.now() - llmCallStart,
+              });
+            }
             break;
           } catch (error) {
             if ((error as Error).name === "AbortError") {
@@ -2145,6 +2166,23 @@ class LocalQueryEngine implements QueryEngine {
         (this.lastProviderModelId ? ` (last-model=${this.lastProviderModelId})` : "")
       : "provider-tokens: 0 (no LLM round-trip yet — try sending a non-slash message)";
 
+    // W3-17：USD cost 累计（dataDb 可用时查 llm_calls_raw）
+    const costLines: string[] = [];
+    if (this.dataDb) {
+      try {
+        const sessionCost = summarizeBySession(this.dataDb, this.sessionId);
+        const todayCost = summarizeToday(this.dataDb);
+        if (sessionCost.callCount > 0 || todayCost.callCount > 0) {
+          costLines.push(
+            `session-cost: ${formatUsd(sessionCost.totalUsdCost)} (${sessionCost.callCount} call(s))`,
+            `today-cost: ${formatUsd(todayCost.totalUsdCost)} (${todayCost.callCount} call(s) across all sessions)`
+          );
+        }
+      } catch {
+        // ignore cost summary failures
+      }
+    }
+
     return [
       "Cost & Activity Snapshot",
       `session: ${session}`,
@@ -2154,6 +2192,7 @@ class LocalQueryEngine implements QueryEngine {
       haltLine,
       `messages: ${messages}  (user=${userMessages}, assistant=${assistantMessages})`,
       usageLine,
+      ...costLines,
       `estimated-tokens (local heuristic, char/4): ${estimatedTokens}`,
       `compacts: ${compacts}  (reactive=${reactiveCompacts})`,
       `files-read: ${filesRead}`,
