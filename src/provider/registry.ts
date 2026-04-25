@@ -38,7 +38,8 @@ function mergeProviderConfig(
     apiKey: apiKeyFromEnv.value,
     apiKeyEnvVar: apiKeyFromEnv.envVar,
     envVars,
-    fileConfig: configEntry
+    fileConfig: configEntry,
+    maxTokens: configEntry.maxTokens
   };
 }
 

@@ -59,6 +59,8 @@ export interface ProviderFileEntry {
   model?: string;
   timeoutMs?: number;
   apiKeyEnvVar?: string;
+  /** 单次请求 max_tokens 上限；不传走 client 默认（OpenAI compat 4096 / Anthropic 1024） */
+  maxTokens?: number;
 }
 
 export type ProvidersFileConfig = Partial<Record<ProviderType, ProviderFileEntry>>;

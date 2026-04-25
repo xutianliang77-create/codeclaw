@@ -340,10 +340,9 @@ async function* streamOpenAiCompatible(
         stream: true,
         // W3-05：要求 OpenAI 在最后一帧返回 usage（默认 stream 不返回）
         stream_options: { include_usage: true },
-        // 给 output 设宽松上限：4096 token 对绝大部分中长答案足够（~12k 字符），
-        // 又能挡极端无限输出。本地模型 ctx ≥ 8k 时 prompt+4096 都能塞下；
-        // ctx < 8k 时 caller 应在 provider.config 覆盖（W4 落）。
-        max_tokens: 4096,
+        // 默认 4096 token 对常规答案够用；reasoning 模型需更大（reasoning + content 总和），
+        // 用户可在 ~/.codeclaw/providers.json 用 maxTokens 字段覆盖（如 16384）。
+        max_tokens: provider.maxTokens ?? 4096,
         messages: await toOpenAiMessages(messages)
       })
     },
@@ -398,7 +397,7 @@ async function* streamAnthropic(
       },
       body: JSON.stringify({
         model: provider.model,
-        max_tokens: 1024,
+        max_tokens: provider.maxTokens ?? 1024,
         stream: true,
         messages: await toAnthropicMessages(messages)
       })
