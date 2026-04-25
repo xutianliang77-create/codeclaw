@@ -75,16 +75,25 @@ export function ProviderConfigApp({
       : "Interactive provider config ready."
   );
 
+  // Ctrl+C 永远生效
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
       exit();
     }
-
-    if (key.escape && screen !== "done") {
-      setScreen("main");
-      setBanner("Returned to main menu.");
-    }
   });
+
+  // ESC 回主菜单；但编辑文本时禁用：与 ink-text-input 共抢按键 + setScreen
+  // 卸载 TextInput 会导致 backspace / arrow / 中段编辑失效（ink 5 + ink-text-input 6
+  // 已知互扰）。编辑时若想取消，按 Ctrl+C 退出，或 Enter 保存当前内容（包含空串）。
+  useInput(
+    (_input, key) => {
+      if (key.escape && screen !== "done") {
+        setScreen("main");
+        setBanner("Returned to main menu.");
+      }
+    },
+    { isActive: screen !== "field-input" }
+  );
 
   const mainItems = useMemo<MenuItem[]>(
     () => [
@@ -311,7 +320,12 @@ export function ProviderConfigApp({
               Edit {selectedProvider}.{selectedField}
             </Text>
             <Text color="gray">
-              {selectedField === "timeoutMs" ? "Enter a number or leave blank to clear." : "Press Enter to save."}
+              {selectedField === "timeoutMs"
+                ? "Enter a number or leave blank to clear. Enter saves; Ctrl+C exits."
+                : "Press Enter to save. Backspace/Arrow OK. Ctrl+C exits (no save)."}
+            </Text>
+            <Text color="gray">
+              buffer length: {fieldValue.length}
             </Text>
             <Box marginTop={1}>
               <Text color="cyan">{"> "}</Text>
