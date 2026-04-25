@@ -13,6 +13,7 @@
 
 import type { AskQuestion, ScoreResult } from "./types";
 import { matchesAny, matchesSubstring } from "./normalize";
+import type { LlmJudge } from "./llm-judge";
 
 const PASS_THRESHOLD = 0.8;
 
@@ -70,5 +71,43 @@ export function score(question: AskQuestion, answer: string): ScoreResult {
     score: scoreValue,
     maxScore,
     reason: parts.join(" "),
+  };
+}
+
+/**
+ * #68 LLM-judge 路径：用 LLM 当评分员；失败时降级到字符串 scorer。
+ * fallbackOnError=true 时，judge 抛错 / 解析失败 → 走 score()；并在 reason 标注 [fallback]。
+ */
+export async function scoreWithJudge(
+  question: AskQuestion,
+  answer: string,
+  judge: LlmJudge,
+  fallbackOnError = true
+): Promise<ScoreResult> {
+  let verdict;
+  try {
+    verdict = await judge.evaluate({ question, answer });
+  } catch (err) {
+    if (!fallbackOnError) throw err;
+    const fallback = score(question, answer);
+    fallback.reason = `[fallback string after judge error: ${err instanceof Error ? err.message : String(err)}] ${fallback.reason}`;
+    return fallback;
+  }
+
+  // judge 返回的 reason 含 "judge: " 前缀（解析失败 / 空回复）→ 视为不可信，降级
+  if (fallbackOnError && /^judge:/.test(verdict.reason)) {
+    const fallback = score(question, answer);
+    fallback.reason = `[fallback string after judge unparseable: ${verdict.reason}] ${fallback.reason}`;
+    return fallback;
+  }
+
+  return {
+    pass: verdict.pass,
+    matched: verdict.pass ? ["judge:pass"] : [],
+    missed: verdict.pass ? [] : ["judge:fail"],
+    triggered: [],
+    score: verdict.pass ? 1 : 0,
+    maxScore: 1,
+    reason: `[llm-judge] ${verdict.reason}`,
   };
 }

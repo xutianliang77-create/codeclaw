@@ -18,12 +18,13 @@
 import process from "node:process";
 import { loadAllAsk, GoldenLoaderError } from "./loader";
 import { MockLlmInvoker, FailingMockLlmInvoker, LlmInvoker, createRealInvoker } from "./provider";
-import { score } from "./scorer";
+import { score, scoreWithJudge } from "./scorer";
+import { createRealJudge, MockLlmJudge, type LlmJudge } from "./llm-judge";
 import { defaultReportPath, printSummary, summarize, writeJsonlReport } from "./report";
 import type { AskCategory, AskRunRecord, Difficulty, RunnerConfig } from "./types";
 
 function parseArgs(argv: string[]): RunnerConfig {
-  const cfg: RunnerConfig = { useMock: true };
+  const cfg: RunnerConfig = { useMock: true, judgeMode: "string" };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     switch (arg) {
@@ -40,6 +41,11 @@ function parseArgs(argv: string[]): RunnerConfig {
       case "--mock":
         cfg.useMock = true;
         break;
+      case "--judge": {
+        const v = argv[++i];
+        if (v === "string" || v === "llm") cfg.judgeMode = v;
+        break;
+      }
       case "--id": {
         const val = argv[++i];
         if (val) {
@@ -95,7 +101,8 @@ Options:
   --category <cat>     Limit to one or more categories (code-understanding, debug, ...).
   --difficulty <diff>  Limit to difficulty: easy|medium|hard.
   --mock               Use deterministic mock invoker (default).
-  --real               Use real LLM provider (NOT wired yet; throws).
+  --real               Use real LLM provider.
+  --judge string|llm   Scorer mode: 'string' (default) or 'llm' (LLM-judge per #68).
   --provider <id>      Override provider id (used with --real).
   --report <path>      Write jsonl report to path.
   --verbose, -v        Print each question result.
@@ -170,12 +177,33 @@ async function main(): Promise<number> {
     }
   }
 
+  // #68 judge：默认 string；--judge llm 时启用 LLM-judge（mock 模式自动用 MockLlmJudge）
+  let judge: LlmJudge | null = null;
+  if (cfg.judgeMode === "llm") {
+    if (cfg.useMock) {
+      judge = new MockLlmJudge();
+      console.log("[judge] mock LlmJudge");
+    } else {
+      try {
+        judge = await createRealJudge();
+        console.log("[judge] real LlmJudge using ~/.codeclaw/ provider");
+      } catch (err) {
+        console.error(
+          `[judge] failed to initialize: ${err instanceof Error ? err.message : String(err)}`
+        );
+        return 2;
+      }
+    }
+  }
+
   const records: AskRunRecord[] = [];
   for (const q of questions) {
     const callStart = Date.now();
     try {
       const resp = await invoker.invoke(q);
-      const s = score(q, resp.answer);
+      const s = judge
+        ? await scoreWithJudge(q, resp.answer, judge, /* fallbackOnError */ true)
+        : score(q, resp.answer);
       const record: AskRunRecord = {
         id: q.id,
         version: q.version,

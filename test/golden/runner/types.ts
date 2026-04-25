@@ -73,6 +73,8 @@ export interface RunnerConfig {
   useMock?: boolean; // 强制 mock provider
   categoryFilter?: AskCategory[];
   difficultyFilter?: Difficulty[];
+  /** #68 评分模式：string（默认）/ llm（用 LLM judge 评分） */
+  judgeMode?: "string" | "llm";
 }
 
 /** 报告汇总 */
