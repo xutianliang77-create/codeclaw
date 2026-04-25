@@ -17,7 +17,7 @@
 
 import process from "node:process";
 import { loadAllAsk, GoldenLoaderError } from "./loader";
-import { MockLlmInvoker, FailingMockLlmInvoker, LlmInvoker } from "./provider";
+import { MockLlmInvoker, FailingMockLlmInvoker, LlmInvoker, createRealInvoker } from "./provider";
 import { score } from "./scorer";
 import { defaultReportPath, printSummary, summarize, writeJsonlReport } from "./report";
 import type { AskCategory, AskRunRecord, Difficulty, RunnerConfig } from "./types";
@@ -155,12 +155,20 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  const invoker: LlmInvoker = cfg.useMock
-    ? new MockLlmInvoker()
-    : ((): LlmInvoker => {
-        console.error("--real not wired yet; falling back to mock.");
-        return new MockLlmInvoker();
-      })();
+  let invoker: LlmInvoker;
+  if (cfg.useMock) {
+    invoker = new MockLlmInvoker();
+  } else {
+    try {
+      invoker = await createRealInvoker();
+      console.log("[real] using configured provider from ~/.codeclaw/");
+    } catch (err) {
+      console.error(
+        `[real] failed to initialize: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return 2;
+    }
+  }
 
   const records: AskRunRecord[] = [];
   for (const q of questions) {

@@ -12,6 +12,9 @@ export interface LlmInvocation {
   modelId?: string;
   answer: string;
   latencyMs: number;
+  /** W4-real：真实 provider 返回的 token 用量（mock invoker 没这俩字段） */
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 export interface LlmInvoker {
@@ -57,10 +60,67 @@ export class FailingMockLlmInvoker implements LlmInvoker {
 }
 
 /**
- * 真实 provider 接入占位：P0 W2 完成 Provider chain 后接上
+ * 真实 provider 接入（W3 后期落地）：
+ * 用户配置文件 + streamProviderResponse 包装成 LlmInvoker。
+ * 跑前会从 ~/.codeclaw 读 providers.json 和 config.yaml，挑出 default provider。
  */
-export function createRealInvoker(): LlmInvoker {
-  throw new Error(
-    "Real LLM invoker not wired yet. Use --mock for now; will be connected in P0 W2 after provider chain is merged."
-  );
+export async function createRealInvoker(): Promise<LlmInvoker> {
+  const { loadRuntimeSelection } = await import("../../../src/provider/registry");
+  const { streamProviderResponse } = await import("../../../src/provider/client");
+
+  const { config, selection } = await loadRuntimeSelection();
+  if (!config || !selection || !selection.current) {
+    throw new Error(
+      "No usable provider configured. Run `codeclaw setup` or `codeclaw config` first."
+    );
+  }
+  const provider = selection.current;
+
+  return {
+    async invoke(question: AskQuestion): Promise<LlmInvocation> {
+      const start = Date.now();
+      let answer = "";
+      let usageInputTokens = 0;
+      let usageOutputTokens = 0;
+      let modelId: string | undefined = provider.model;
+
+      const messages = [
+        {
+          id: "user-1",
+          role: "user" as const,
+          text: question.prompt,
+          source: "user" as const,
+        },
+      ];
+
+      try {
+        for await (const chunk of streamProviderResponse(provider, messages, {
+          onUsage: (u) => {
+            usageInputTokens = u.inputTokens ?? 0;
+            usageOutputTokens = u.outputTokens ?? 0;
+            modelId = u.modelId ?? modelId;
+          },
+        })) {
+          answer += chunk;
+        }
+      } catch (err) {
+        // 失败时把错误塞进 answer，让 scorer 走"没命中 must_mention"路径自然 fail
+        answer = `[provider error] ${err instanceof Error ? err.message : String(err)}`;
+      }
+
+      return {
+        provider: provider.type,
+        modelId,
+        answer,
+        latencyMs: Date.now() - start,
+        // 携带真实 token 用量供 runner / report 累加
+        ...(usageInputTokens || usageOutputTokens
+          ? {
+              inputTokens: usageInputTokens,
+              outputTokens: usageOutputTokens,
+            }
+          : {}),
+      } as LlmInvocation;
+    },
+  };
 }
