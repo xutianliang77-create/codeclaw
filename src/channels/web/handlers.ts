@@ -6,12 +6,36 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { mkdirSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { randomBytes } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { SessionStore } from "./sessionStore";
 import { validateBearer, type WebAuthConfig } from "./auth";
 import { checkAndRegister, recordDelivery } from "../../ingress/dedupStore";
 import { summarizeBySession, summarizeToday, formatUsd } from "../../provider/costTracker";
 import type { ProviderStatus } from "../../provider/types";
+
+/** 解析 dataUrl → 写入 tmpdir 拿到本地路径，让 queryEngine 像 wechat 路径一样消费 */
+function persistDataUrlAttachment(
+  dataUrl: string,
+  fileName?: string
+): { localPath: string; mimeType?: string; sizeBytes: number; fileName: string } | null {
+  const m = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+  if (!m) return null;
+  const mimeType = m[1];
+  const buf = Buffer.from(m[2], "base64");
+  if (buf.length === 0) return null;
+  const dir = path.join(os.tmpdir(), "codeclaw-web-uploads");
+  mkdirSync(dir, { recursive: true });
+  const ext = (mimeType.split("/")[1] ?? "bin").replace(/[^a-z0-9]/gi, "");
+  const safeName = fileName ?? `upload-${randomBytes(4).toString("hex")}.${ext}`;
+  const finalName = `${Date.now()}-${randomBytes(4).toString("hex")}-${safeName}`;
+  const localPath = path.join(dir, finalName);
+  writeFileSync(localPath, buf);
+  return { localPath, mimeType, sizeBytes: buf.length, fileName: safeName };
+}
 
 export interface HandlerDeps {
   store: SessionStore;
@@ -128,7 +152,8 @@ export async function handleDeleteSession(
   jsonResponse(res, ok ? 200 : 404, { ok });
 }
 
-// POST /v1/web/messages   body: { sessionId, input, clientId? }
+// POST /v1/web/messages   body: { sessionId, input, clientId?, attachments? }
+//   attachments: [{ kind: "image", dataUrl: "data:image/png;base64,...", fileName?, mimeType? }]
 export async function handleMessage(
   req: IncomingMessage,
   res: ServerResponse,
@@ -136,9 +161,14 @@ export async function handleMessage(
 ): Promise<void> {
   const auth = authenticate(req, res, deps);
   if (!auth) return;
-  let body: { sessionId?: string; input?: string; clientId?: string };
+  let body: {
+    sessionId?: string;
+    input?: string;
+    clientId?: string;
+    attachments?: Array<{ kind?: string; dataUrl?: string; fileName?: string; mimeType?: string }>;
+  };
   try {
-    body = await readJsonBody(req);
+    body = await readJsonBody(req, /* maxBytes 含 dataUrl */ 8 * 1024 * 1024);
   } catch (err) {
     jsonResponse(res, 400, { error: "bad request", detail: String(err) });
     return;
@@ -151,6 +181,25 @@ export async function handleMessage(
   if (!session) {
     jsonResponse(res, 404, { error: "session not found" });
     return;
+  }
+
+  // #70-D 附件：第一张 image 走 channelSpecific.image（同 wechat 路径约定）
+  let channelSpecific: Record<string, unknown> | undefined;
+  if (Array.isArray(body.attachments) && body.attachments.length > 0) {
+    const firstImage = body.attachments.find((a) => a?.kind === "image" && typeof a.dataUrl === "string");
+    if (firstImage?.dataUrl) {
+      const persisted = persistDataUrlAttachment(firstImage.dataUrl, firstImage.fileName);
+      if (persisted) {
+        channelSpecific = {
+          image: {
+            localPath: persisted.localPath,
+            mimeType: firstImage.mimeType ?? persisted.mimeType,
+            fileName: persisted.fileName,
+            sizeBytes: persisted.sizeBytes,
+          },
+        };
+      }
+    }
   }
   // dedup：仅当 client 明确传 clientId 且 deps.dataDb 注入时启用
   // ttl 内同 (channel,user,client_id) 重复请求 → 短路，复用上次 delivery
@@ -170,7 +219,7 @@ export async function handleMessage(
     }
   }
   // fire-and-forget；events 通过 SSE 推给前端
-  void deps.store.runSubmit(body.sessionId, auth.userId, body.input);
+  void deps.store.runSubmit(body.sessionId, auth.userId, body.input, channelSpecific);
   // 异步回填 last_delivery（ack 维度，不等 LLM）让 dedup 重试有迹可循
   if (body.clientId && deps.dataDb) {
     recordDelivery(deps.dataDb, body.clientId, {

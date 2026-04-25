@@ -33,6 +33,8 @@ const els = {
   settingsPanel: $("settings-panel"),
   settingsClose: $("settings-close"),
   settingsBody: $("settings-body"),
+  attachInput: $("attach-input"),
+  attachmentTray: $("attachment-tray"),
 };
 
 const state = {
@@ -41,6 +43,7 @@ const state = {
   eventSource: null,
   currentStreamMsg: null, // 当前正在 streaming 的 assistant 气泡
   costTimer: null,
+  pendingAttachments: [], // [{ kind, dataUrl, fileName, mimeType }]
 };
 
 // ───────────── UI 工具 ─────────────
@@ -227,6 +230,54 @@ function renderEvent(ev) {
   }
 }
 
+// ───────────── 附件上传 #70-D ─────────────
+
+function renderAttachmentTray() {
+  if (state.pendingAttachments.length === 0) {
+    els.attachmentTray.classList.add("hidden");
+    els.attachmentTray.innerHTML = "";
+    return;
+  }
+  els.attachmentTray.classList.remove("hidden");
+  els.attachmentTray.innerHTML = state.pendingAttachments
+    .map((a, i) => `
+      <div class="attachment-chip" data-i="${i}">
+        ${a.dataUrl.startsWith("data:image/") ? `<img src="${escapeHtml(a.dataUrl)}" alt="" />` : ""}
+        <span class="attachment-name">${escapeHtml(a.fileName || "image")}</span>
+        <button class="attachment-remove" type="button" data-i="${i}" aria-label="移除">×</button>
+      </div>
+    `)
+    .join("");
+  els.attachmentTray.querySelectorAll(".attachment-remove").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = Number(btn.dataset.i);
+      state.pendingAttachments.splice(idx, 1);
+      renderAttachmentTray();
+    });
+  });
+}
+
+async function pickAttachment(file) {
+  // 5MB 上限（后端 readJsonBody maxBytes 8MB，留余量给 base64 膨胀）
+  if (file.size > 5 * 1024 * 1024) {
+    appendMessage("error", `图片太大（${(file.size / 1024 / 1024).toFixed(1)} MB），上限 5 MB`);
+    return;
+  }
+  const dataUrl = await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+  });
+  state.pendingAttachments.push({
+    kind: "image",
+    dataUrl,
+    fileName: file.name,
+    mimeType: file.type || "image/png",
+  });
+  renderAttachmentTray();
+}
+
 // ───────────── 审批内嵌 #70-C ─────────────
 
 function renderApprovalCard(ev) {
@@ -376,8 +427,17 @@ async function refreshCost() {
 // ───────────── 提交输入 ─────────────
 
 async function sendMessage(text) {
-  if (!state.sessionId || !text.trim()) return;
-  appendMessage("user", text, "user");
+  if (!state.sessionId) return;
+  // 允许仅图无文：text 为空时用占位避免后端 400
+  const input = text.trim() || (state.pendingAttachments.length ? "[image]" : "");
+  if (!input) return;
+  const attachments = state.pendingAttachments.slice();
+  state.pendingAttachments = [];
+  renderAttachmentTray();
+
+  let metaParts = ["user"];
+  if (attachments.length) metaParts.push(`+${attachments.length} 张图片`);
+  appendMessage("user", input, metaParts.join(" "));
   try {
     const r = await fetch("/v1/web/messages", {
       method: "POST",
@@ -385,7 +445,11 @@ async function sendMessage(text) {
         Authorization: "Bearer " + state.token,
         "content-type": "application/json",
       },
-      body: JSON.stringify({ sessionId: state.sessionId, input: text }),
+      body: JSON.stringify({
+        sessionId: state.sessionId,
+        input,
+        ...(attachments.length ? { attachments } : {}),
+      }),
     });
     if (!r.ok) {
       appendMessage("error", "提交失败 HTTP " + r.status);
@@ -420,6 +484,20 @@ els.connectBtn.addEventListener("click", connect);
 els.logoutBtn.addEventListener("click", logout);
 els.settingsBtn.addEventListener("click", openSettings);
 els.settingsClose.addEventListener("click", closeSettings);
+els.attachInput.addEventListener("change", (e) => {
+  const file = e.target.files?.[0];
+  if (file) pickAttachment(file);
+  e.target.value = "";
+});
+// 拖拽到对话区也能上传
+els.chat?.addEventListener("dragover", (e) => {
+  e.preventDefault();
+});
+els.chat?.addEventListener("drop", (e) => {
+  e.preventDefault();
+  const file = e.dataTransfer?.files?.[0];
+  if (file && file.type.startsWith("image/")) pickAttachment(file);
+});
 
 els.composer.addEventListener("submit", (e) => {
   e.preventDefault();

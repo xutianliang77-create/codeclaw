@@ -98,12 +98,18 @@ export class SessionStore {
   /**
    * 异步驱动 engine.submitMessage 把 events 喂给 emitter；不抛任何异常。
    * 调用方（POST /messages handler）通常 fire-and-forget 这个 promise。
+   * channelSpecific 可携带 image 等附件元数据（透给 submitMessage options）。
    */
-  async runSubmit(sessionId: string, userId: string, input: string): Promise<void> {
+  async runSubmit(
+    sessionId: string,
+    userId: string,
+    input: string,
+    channelSpecific?: Record<string, unknown>
+  ): Promise<void> {
     const s = this.get(sessionId, userId);
     if (!s) return;
     try {
-      for await (const ev of s.engine.submitMessage(input)) {
+      for await (const ev of s.engine.submitMessage(input, { channelSpecific })) {
         s.emitter.emit("event", ev satisfies EngineEvent);
       }
     } catch (err) {

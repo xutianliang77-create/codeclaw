@@ -239,6 +239,45 @@ describe("Web server · 路由 misc", () => {
     expect(r.status).toBe(400);
   });
 
+  // ───────── #70-D 附件上传 ─────────
+  it("POST /v1/web/messages 含 attachments → 202 accepted（dataUrl 落 tmp 不抛）", async () => {
+    const sess = await fetch(`${baseUrl}/v1/web/sessions`, {
+      method: "POST",
+      headers: authHeaders(),
+    }).then((r) => r.json()) as { sessionId: string };
+    // 1×1 PNG dataUrl（base64）
+    const tinyPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const r = await fetch(`${baseUrl}/v1/web/messages`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        sessionId: sess.sessionId,
+        input: "[image]",
+        attachments: [
+          { kind: "image", dataUrl: `data:image/png;base64,${tinyPng}`, fileName: "tiny.png", mimeType: "image/png" },
+        ],
+      }),
+    });
+    expect(r.status).toBe(202);
+  });
+
+  it("POST /v1/web/messages 含恶意 dataUrl（不带 base64 前缀） → 仍 202（attachment 静默丢弃）", async () => {
+    const sess = await fetch(`${baseUrl}/v1/web/sessions`, {
+      method: "POST",
+      headers: authHeaders(),
+    }).then((r) => r.json()) as { sessionId: string };
+    const r = await fetch(`${baseUrl}/v1/web/messages`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        sessionId: sess.sessionId,
+        input: "hi",
+        attachments: [{ kind: "image", dataUrl: "javascript:alert(1)" }],
+      }),
+    });
+    expect(r.status).toBe(202);
+  });
+
   // ───────── #70-B 设置中心 ─────────
   it("GET /v1/web/providers · 默认无 provider 注入 → current/fallback 都为 null", async () => {
     const r = await fetch(`${baseUrl}/v1/web/providers`, { headers: authHeaders() });

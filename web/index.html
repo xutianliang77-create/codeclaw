@@ -38,8 +38,13 @@
   <main id="chat" class="chat hidden">
     <div id="messages" class="messages" aria-live="polite"></div>
     <form id="composer" class="composer">
-      <textarea id="input" placeholder="输入消息（Enter 发送 · Shift+Enter 换行）" rows="2"></textarea>
-      <button id="send-btn" type="submit">发送</button>
+      <div id="attachment-tray" class="attachment-tray hidden"></div>
+      <div class="composer-row">
+        <label class="attach-btn" for="attach-input" title="附加图片（拖拽也支持）">📎</label>
+        <input id="attach-input" type="file" accept="image/*" hidden />
+        <textarea id="input" placeholder="输入消息（Enter 发送 · Shift+Enter 换行）" rows="2"></textarea>
+        <button id="send-btn" type="submit">发送</button>
+      </div>
     </form>
   </main>
 
