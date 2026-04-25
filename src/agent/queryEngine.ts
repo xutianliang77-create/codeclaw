@@ -53,7 +53,7 @@ import { runWithProviderChain, type RunChainResult } from "../provider/chain";
 import { recordCall, summarizeBySession, summarizeToday, formatUsd } from "../provider/costTracker";
 import { detectProviderCapabilities } from "../provider/capabilities";
 import type { ProviderStatus } from "../provider/types";
-import { createSkillRegistry } from "../skills/registry";
+import { createSkillRegistry, createSkillRegistryFromDisk } from "../skills/registry";
 import type { SkillDefinition } from "../skills/registry";
 import { detectLocalTool, inspectLocalTool, isHandledLocalToolResult, runLocalTool } from "../tools/local";
 import type { LocalToolName } from "../tools/local";
@@ -542,7 +542,8 @@ type PendingOrchestrationApproval = OrchestrationApprovalRequest & {
 class LocalQueryEngine implements QueryEngine {
   private readonly sessionId = createId("session");
   private readonly messages: EngineMessage[];
-  private readonly skillRegistry = createSkillRegistry();
+  // #71：默认从磁盘加载 user skills（~/.codeclaw/skills/）；目录不存在时仅 builtin
+  private readonly skillRegistry = createSkillRegistryFromDisk();
   private readonly listeners = new Set<() => void>();
   private interrupted = false;
   private abortController: AbortController | null = null;
