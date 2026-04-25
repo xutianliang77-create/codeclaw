@@ -170,23 +170,48 @@ async function fetchWithConnectTimeout(
   }
 }
 
+/**
+ * 从 OpenAI compat 流帧抽 delta 文本。
+ * 兼容 reasoning 模型（GPT-5 / DeepSeek R1 / Qwen3 reasoning / Gemini thinking 等）：
+ *   - 优先取 delta.content
+ *   - 为空时回退到 delta.reasoning_content（LM Studio / DeepSeek 兼容字段）
+ *   - 也回退到 delta.reasoning（OpenRouter 等用法）
+ *   - 单帧 reasoning 与 content 同时存在时，content 优先（避免重复 yield）
+ *
+ * 设计：stream 期间整段 reasoning_content 也吐给上层，让用户能看到推理过程；
+ * 上层（queryEngine / golden ask）累积成完整 answer，LLM-judge 可基于全文评分。
+ */
 function getDeltaTextFromOpenAiPayload(payload: unknown): string {
-  const choice = (payload as { choices?: Array<{ delta?: { content?: unknown } }> }).choices?.[0];
-  const content = choice?.delta?.content;
+  const choice = (payload as {
+    choices?: Array<{
+      delta?: {
+        content?: unknown;
+        reasoning_content?: unknown;
+        reasoning?: unknown;
+      };
+    }>;
+  }).choices?.[0];
+  const delta = choice?.delta;
+  if (!delta) return "";
 
-  if (typeof content === "string") {
-    return content;
-  }
+  const primary = pickDeltaText(delta.content);
+  if (primary) return primary;
 
-  if (Array.isArray(content)) {
-    return content
+  const reasoning =
+    pickDeltaText(delta.reasoning_content) || pickDeltaText(delta.reasoning);
+  return reasoning;
+}
+
+function pickDeltaText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value
       .map((item) => {
         const text = (item as { text?: unknown }).text;
         return typeof text === "string" ? text : "";
       })
       .join("");
   }
-
   return "";
 }
 
