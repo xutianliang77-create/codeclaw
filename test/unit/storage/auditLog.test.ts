@@ -105,6 +105,85 @@ describe("AuditLog.append", () => {
     expect(listed[0]!.reason).toBe("low risk");
     db.close();
   });
+
+  it("W3-02 timestamp monotonic: incoming earlier than latest is bumped to latest+1", () => {
+    const db = openFreshAuditDb();
+    const log = new AuditLog(db);
+
+    // 第一条用一个固定较大的 timestamp
+    const e1 = log.append({
+      traceId: "t1",
+      actor: "user",
+      action: "tool.bash",
+      decision: "allow",
+      timestamp: 10_000,
+    });
+    expect(e1.timestamp).toBe(10_000);
+
+    // 第二条 incoming 比 latest 还早 → 应被强制 bump 到 latest+1
+    const e2 = log.append({
+      traceId: "t1",
+      actor: "user",
+      action: "tool.bash",
+      decision: "allow",
+      timestamp: 5_000, // 比 e1 早 5000ms
+    });
+    expect(e2.timestamp).toBe(10_001);
+
+    // 第三条 incoming 与 latest 相等 → 也得 bump
+    const e3 = log.append({
+      traceId: "t1",
+      actor: "user",
+      action: "tool.bash",
+      decision: "allow",
+      timestamp: 10_001,
+    });
+    expect(e3.timestamp).toBe(10_002);
+
+    // 第四条 incoming 远超 latest → 直接用 incoming
+    const e4 = log.append({
+      traceId: "t1",
+      actor: "user",
+      action: "tool.bash",
+      decision: "allow",
+      timestamp: 99_999,
+    });
+    expect(e4.timestamp).toBe(99_999);
+
+    // 链 verify 仍 pass（这就是 W3-02 的核心：乱序写入后链不断）
+    const result = log.verify();
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.checkedCount).toBe(4);
+    db.close();
+  });
+
+  it("W3-02 timestamp monotonic: defaulted Date.now() also bumped if late by clock-skew", () => {
+    const db = openFreshAuditDb();
+    const log = new AuditLog(db);
+
+    // 第一条人为给"未来"timestamp（模拟时钟回拨前的写入）
+    const future = Date.now() + 60 * 60 * 1000; // +1 hour
+    const e1 = log.append({
+      traceId: "t1",
+      actor: "user",
+      action: "tool.bash",
+      decision: "allow",
+      timestamp: future,
+    });
+    expect(e1.timestamp).toBe(future);
+
+    // 第二条没传 timestamp → Date.now() 取当前；当前 < future → 应 bump 到 future+1
+    const e2 = log.append({
+      traceId: "t1",
+      actor: "user",
+      action: "tool.bash",
+      decision: "allow",
+    });
+    expect(e2.timestamp).toBe(future + 1);
+
+    expect(log.verify().ok).toBe(true);
+    db.close();
+  });
 });
 
 describe("AuditLog.verify", () => {

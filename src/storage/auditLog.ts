@@ -141,10 +141,10 @@ export class AuditLog {
    */
   append(input: AuditEventInput): AuditEvent {
     const eventId = createEventId();
-    const timestamp = input.timestamp ?? Date.now();
+    const incomingTs = input.timestamp ?? Date.now();
 
     const selectLast = this.db.prepare(
-      `SELECT event_hash FROM audit_events
+      `SELECT event_hash, timestamp FROM audit_events
        ORDER BY timestamp DESC, event_id DESC
        LIMIT 1`
     );
@@ -156,8 +156,12 @@ export class AuditLog {
     );
 
     const tx = this.db.transaction(() => {
-      const last = selectLast.get() as { event_hash: string } | undefined;
+      const last = selectLast.get() as { event_hash: string; timestamp: number } | undefined;
       const prevHash = last?.event_hash ?? GENESIS_HASH;
+      // W3-02：强制 timestamp 单调。incoming 即使比 latest 早（NTP 回拨 / 测试 mock /
+      // 跨节点合并），也要至少 latest+1，避免 verify 路径用 timestamp ASC 排序时
+      // "最新 prev_hash" 与"排序后的上一条"不一致导致断链。
+      const timestamp = last ? Math.max(incomingTs, last.timestamp + 1) : incomingTs;
       const resource = input.resource ?? null;
       const eventHash = computeEventHash({
         prevHash,
@@ -184,10 +188,10 @@ export class AuditLog {
         eventHash,
         timestamp
       );
-      return { prevHash, eventHash };
+      return { prevHash, eventHash, timestamp };
     });
 
-    const { prevHash, eventHash } = tx.immediate();
+    const { prevHash, eventHash, timestamp } = tx.immediate();
     return {
       eventId,
       traceId: input.traceId,
