@@ -6,14 +6,18 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type Database from "better-sqlite3";
 import type { SessionStore } from "./sessionStore";
 import { validateBearer, type WebAuthConfig } from "./auth";
+import { checkAndRegister, recordDelivery } from "../../ingress/dedupStore";
 
 export interface HandlerDeps {
   store: SessionStore;
   auth: WebAuthConfig;
   /** Bearer token → 派生的稳定 userId。默认拿 token 前 8 字符。 */
   deriveUserId?: (token: string) => string;
+  /** ingress dedup db 句柄；不注入则不去重（向后兼容） */
+  dedupDb?: Database.Database;
 }
 
 function jsonResponse(res: ServerResponse, status: number, body: unknown): void {
@@ -114,7 +118,7 @@ export async function handleDeleteSession(
   jsonResponse(res, ok ? 200 : 404, { ok });
 }
 
-// POST /v1/web/messages   body: { sessionId, input }
+// POST /v1/web/messages   body: { sessionId, input, clientId? }
 export async function handleMessage(
   req: IncomingMessage,
   res: ServerResponse,
@@ -122,7 +126,7 @@ export async function handleMessage(
 ): Promise<void> {
   const auth = authenticate(req, res, deps);
   if (!auth) return;
-  let body: { sessionId?: string; input?: string };
+  let body: { sessionId?: string; input?: string; clientId?: string };
   try {
     body = await readJsonBody(req);
   } catch (err) {
@@ -138,8 +142,32 @@ export async function handleMessage(
     jsonResponse(res, 404, { error: "session not found" });
     return;
   }
+  // dedup：仅当 client 明确传 clientId 且 deps.dedupDb 注入时启用
+  // ttl 内同 (channel,user,client_id) 重复请求 → 短路，复用上次 delivery
+  if (body.clientId && deps.dedupDb) {
+    const r = checkAndRegister(deps.dedupDb, {
+      clientId: body.clientId,
+      channel: "http",
+      userId: auth.userId,
+    });
+    if (r.isDuplicate) {
+      jsonResponse(res, 202, {
+        accepted: true,
+        deduplicated: true,
+        lastDelivery: r.lastDelivery ?? null,
+      });
+      return;
+    }
+  }
   // fire-and-forget；events 通过 SSE 推给前端
   void deps.store.runSubmit(body.sessionId, auth.userId, body.input);
+  // 异步回填 last_delivery（ack 维度，不等 LLM）让 dedup 重试有迹可循
+  if (body.clientId && deps.dedupDb) {
+    recordDelivery(deps.dedupDb, body.clientId, {
+      sessionId: body.sessionId,
+      acceptedAt: Date.now(),
+    });
+  }
   jsonResponse(res, 202, { accepted: true });
 }
 

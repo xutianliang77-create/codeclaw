@@ -37,6 +37,7 @@ import {
 import { SessionStore } from "./sessionStore";
 import type { QueryEngineOptions } from "../../agent/types";
 import { createQueryEngine } from "../../agent/queryEngine";
+import { openDataDb } from "../../storage/db";
 
 export interface StartWebServerOptions {
   /** 监听端口；0 = 随机（测试用）；默认 7180 */
@@ -183,7 +184,18 @@ export function startWebServer(opts: StartWebServerOptions): Promise<WebServerHa
     engineFactory: createQueryEngine,
     engineDefaults: opts.engineDefaults,
   });
-  const deps: HandlerDeps = { store, auth };
+  // 若 engineDefaults 提供了 dataDbPath，复用同一 db 做 ingress dedup
+  // singleton 模式让 QueryEngine 内部 open 与此处指向同一实例
+  let dedupDb: import("better-sqlite3").Database | undefined;
+  const dataDbPath = opts.engineDefaults.dataDbPath;
+  if (dataDbPath) {
+    try {
+      dedupDb = openDataDb({ path: dataDbPath }).db;
+    } catch {
+      // singleton 冲突或文件不可用 → 静默降级（不去重）
+    }
+  }
+  const deps: HandlerDeps = { store, auth, dedupDb };
   const staticRoot = opts.staticRoot === "" ? "" : opts.staticRoot ?? defaultStaticRoot();
 
   const server = http.createServer((req, res) => {

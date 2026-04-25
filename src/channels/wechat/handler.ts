@@ -1,7 +1,19 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type Database from "better-sqlite3";
 import { WechatBotAdapter } from "./adapter";
 import type { WechatDeliveryCard, WechatWebhookEvent, WechatWebhookRequest, WechatWebhookResponse } from "./types";
 import { normalizeIlinkWebhookPayload } from "./ilink";
+import { checkAndRegister, recordDelivery } from "../../ingress/dedupStore";
+
+/**
+ * dedup 选项：
+ *   - dedupDb 不传 → 不去重（向后兼容）
+ *   - 同 (channel='wechat', userId=senderId, client_id=messageId) ttl 内重复 → 跳过 receiveMessage
+ *   - 处理完成后用 traceId/sessionId 回填 last_delivery，下次重复请求复用
+ */
+export interface WechatDedupOptions {
+  dedupDb?: Database.Database;
+}
 
 function readBearerToken(request: IncomingMessage): string | null {
   const header = request.headers.authorization;
@@ -47,15 +59,39 @@ async function resolveWebhookEvent(
 
 export async function handleWechatWebhookEvents(
   adapter: WechatBotAdapter,
-  request: WechatWebhookRequest
+  request: WechatWebhookRequest,
+  opts: WechatDedupOptions = {}
 ): Promise<WechatWebhookResponse> {
   const cards: WechatDeliveryCard[] = [];
   let dropped = 0;
 
   for (const event of request.events) {
+    // 仅 message 事件做 dedup（resume / approval-notify 无 messageId）
+    if (event.type === "message" && opts.dedupDb) {
+      const r = checkAndRegister(opts.dedupDb, {
+        clientId: event.message.messageId,
+        channel: "wechat",
+        userId: event.message.senderId,
+      });
+      if (r.isDuplicate) {
+        // 复用上次 traceId/sessionId 让重试拿回相同 card
+        if (r.lastDelivery && typeof r.lastDelivery === "object") {
+          cards.push(r.lastDelivery as WechatDeliveryCard);
+          continue;
+        }
+        // 上次未回填或 corrupt → 视为 drop（保险）
+        dropped += 1;
+        continue;
+      }
+    }
+
     const card = await resolveWebhookEvent(adapter, event);
     if (card) {
       cards.push(card);
+      // 回填 delivery：含 traceId / contextToken；下次重复请求短路复用
+      if (event.type === "message" && opts.dedupDb) {
+        recordDelivery(opts.dedupDb, event.message.messageId, card);
+      }
       continue;
     }
 
@@ -71,10 +107,11 @@ export async function handleWechatWebhookEvents(
 
 export async function handleIlinkWebhookPayload(
   adapter: WechatBotAdapter,
-  payload: unknown
+  payload: unknown,
+  opts: WechatDedupOptions = {}
 ): Promise<WechatWebhookResponse> {
   const request = normalizeIlinkWebhookPayload(payload as Parameters<typeof normalizeIlinkWebhookPayload>[0]);
-  return handleWechatWebhookEvents(adapter, request);
+  return handleWechatWebhookEvents(adapter, request, opts);
 }
 
 export function buildWechatApprovalSweep(adapter: WechatBotAdapter): WechatWebhookResponse {
@@ -89,6 +126,7 @@ export function buildWechatApprovalSweep(adapter: WechatBotAdapter): WechatWebho
 export function createWechatWebhookRequestHandler(options: {
   adapter: WechatBotAdapter;
   authToken?: string | null;
+  dedupDb?: Database.Database;
 }): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
   return async (request, response) => {
     const authToken = options.authToken?.trim();
@@ -112,7 +150,9 @@ export function createWechatWebhookRequestHandler(options: {
 
     if (request.method === "POST" && request.url === "/v1/wechat/events") {
       const body = await readJsonBody<unknown>(request);
-      const result = await handleIlinkWebhookPayload(options.adapter, body);
+      const result = await handleIlinkWebhookPayload(options.adapter, body, {
+        dedupDb: options.dedupDb,
+      });
       writeJson(response, 200, result);
       return;
     }
@@ -133,6 +173,7 @@ export function startWechatWebhookServer(options: {
   adapter: WechatBotAdapter;
   port?: number;
   authToken?: string | null;
+  dedupDb?: Database.Database;
 }): Promise<Server> {
   const server = createServer(createWechatWebhookRequestHandler(options));
 

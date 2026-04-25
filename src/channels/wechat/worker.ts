@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
+import type Database from "better-sqlite3";
 import { WechatBotAdapter } from "./adapter";
 import { handleIlinkWebhookPayload } from "./handler";
 import { loadIlinkWechatCredentials } from "./token";
@@ -88,6 +89,8 @@ export interface IlinkWechatWorkerOptions {
   baseUrl?: string;
   pollIntervalMs?: number;
   fetchImpl?: FetchLike;
+  /** ingress dedup db；不传则不去重 */
+  dedupDb?: Database.Database;
 }
 
 export class IlinkWechatWorker {
@@ -138,7 +141,9 @@ export class IlinkWechatWorker {
     }
 
     const receivedMessages = Boolean(payload.msgs?.length);
-    const result = await handleIlinkWebhookPayload(this.options.adapter, payload);
+    const result = await handleIlinkWebhookPayload(this.options.adapter, payload, {
+      dedupDb: this.options.dedupDb,
+    });
     const syncCards = this.options.adapter.buildSessionUpdateCards();
     const cards = [...result.cards, ...syncCards];
 
