@@ -36,8 +36,6 @@ export function SafeTextInput({
   mask = false,
 }: SafeTextInputProps): React.JSX.Element {
   const [cursor, setCursor] = useState<number>(value.length);
-  // 诊断用：最近一次按键的 raw input + key flag dump
-  const [debugLast, setDebugLast] = useState<string>("(none)");
 
   // 当外部 value 变化（例如复用已有内容首次进入编辑），保持 cursor 在末尾
   useEffect(() => {
@@ -48,18 +46,6 @@ export function SafeTextInput({
 
   useInput(
     (input, key) => {
-      // 诊断：把每次收到的 raw input + key flags 打成一行字符串
-      const codes = Array.from(input ?? "")
-        .map((c) => c.charCodeAt(0).toString(16).padStart(2, "0"))
-        .join(",");
-      const flags = Object.entries(key as unknown as Record<string, boolean>)
-        .filter(([, v]) => v === true)
-        .map(([k]) => k)
-        .join(",");
-      setDebugLast(
-        `input=${JSON.stringify(input ?? "")} hex=[${codes}] flags=[${flags || "none"}]`
-      );
-
       // Enter
       if (key.return) {
         onSubmit?.(value);
@@ -76,20 +62,21 @@ export function SafeTextInput({
         return;
       }
 
-      // Backspace / DEL 兼容：ink 在某些终端下 key.backspace / key.delete flag
-      // 不可靠（特别是 macOS Terminal、某些 SSH 客户端、tmux）。直接看 raw 字符兜底：
-      //   - \x7f (DEL, ASCII 127)：现代 Linux / macOS 终端发送
-      //   - \x08 (BS,  ASCII   8)：Windows / 部分 Telnet
-      const isBackspace =
-        key.backspace ||
-        key.delete ||
-        input === "\x7f" ||
-        input === "\b";
-      if (isBackspace) {
-        if (cursor > 0) {
-          const next = value.slice(0, cursor - 1) + value.slice(cursor);
+      // Backspace / DEL 兼容：
+      //   - ink 5 在某些终端下 key.backspace / key.delete flag 不可靠
+      //   - **快速连按 backspace 时 ink 会把多个 \x7f 合并到一次事件的 input 里**
+      //     （已实测：按 4 次 → input 含 4 个 \x7f）
+      //   - raw 字节：\x7f (DEL, Linux/macOS) 或 \x08 (BS, Windows/Telnet)
+      // 因此：用 regex 数 input 中的 \x7f/\x08 字符个数决定要删几个字符。
+      const bsMatches = (input ?? "").match(/[\x7f\x08]/g);
+      const bsCount = bsMatches?.length ?? 0;
+      const isBackspaceFlag = key.backspace || key.delete;
+      if (bsCount > 0 || isBackspaceFlag) {
+        const reduce = Math.min(Math.max(bsCount, isBackspaceFlag ? 1 : 0), cursor);
+        if (reduce > 0) {
+          const next = value.slice(0, cursor - reduce) + value.slice(cursor);
           onChange(next);
-          setCursor(cursor - 1);
+          setCursor(cursor - reduce);
         }
         return;
       }
@@ -167,15 +154,10 @@ export function SafeTextInput({
   const after = display.slice(cursor + 1);
 
   return (
-    <Box flexDirection="column">
-      <Box>
-        <Text>{before}</Text>
-        <Text inverse>{atChar ?? " "}</Text>
-        <Text>{after}</Text>
-      </Box>
-      <Text color="yellow" dimColor>
-        DEBUG last-key: {debugLast}
-      </Text>
+    <Box>
+      <Text>{before}</Text>
+      <Text inverse>{atChar ?? " "}</Text>
+      <Text>{after}</Text>
     </Box>
   );
 }
