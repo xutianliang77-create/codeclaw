@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# CodeClaw pre-push gate
+#
+# 启用方式：在仓库根跑一次
+#   npm run setup-hooks
+# 等价于：
+#   git config core.hooksPath scripts/git-hooks
+#
+# 跑：typecheck + 全量 vitest，任一失败阻止 push。
+# 紧急绕过：git push --no-verify（仅在确知安全时用）。
+
+set -e
+
+echo "[pre-push] typecheck..."
+npx tsc --noEmit
+
+echo "[pre-push] vitest run..."
+npx vitest run
+
+echo "[pre-push] all checks passed."
