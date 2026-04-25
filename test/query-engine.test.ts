@@ -347,7 +347,7 @@ describe("query engine", () => {
     await collect(engine.submitMessage("/cost"));
     const lastText = engine.getMessages().at(-1)?.text ?? "";
     expect(lastText).toContain("provider-tokens: 0");
-    expect(lastText).toContain("no LLM call yet");
+    expect(lastText).toContain("no LLM round-trip yet");
   });
 
   it("W3-01: auditDbPath=null 显式禁用，引擎仍正常工作", async () => {

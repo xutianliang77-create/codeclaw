@@ -1890,24 +1890,29 @@ class LocalQueryEngine implements QueryEngine {
     const pendingTool = this.pendingApprovals.length;
     const pendingOrch = this.pendingOrchestrationApprovals.length;
     const fsm = this.fsm.snapshot();
+    // /cost 自身就是这一轮的 executing 阶段；显示当前 phase 容易误读"卡住"。
+    // 改写：
+    //   - "this turn (#N): <phase>" 表明当前轮在哪个 phase（多数情况是 executing）
+    //   - "last completed turn: <reason>/<completion>" 才是用户真正关心的"上一轮怎么收的"
+    const turnLine = `current turn: #${fsm.turn} phase=${fsm.phase} (this is /cost itself running)`;
     const haltLine = fsm.lastHalt
-      ? `last-halt: reason=${fsm.lastHalt.reason} completion=${fsm.lastHalt.completion}` +
+      ? `last-completed-turn: reason=${fsm.lastHalt.reason} completion=${fsm.lastHalt.completion}` +
         (fsm.lastHalt.message ? ` message="${fsm.lastHalt.message}"` : "")
-      : "last-halt: none";
+      : "last-completed-turn: none yet (this is the first turn)";
 
     // W3-05：provider 真实 token 用量
     const totalTokens = this.sessionInputTokens + this.sessionOutputTokens;
     const usageLine = totalTokens > 0
       ? `provider-tokens: input=${this.sessionInputTokens} output=${this.sessionOutputTokens} total=${totalTokens}` +
         (this.lastProviderModelId ? ` (last-model=${this.lastProviderModelId})` : "")
-      : "provider-tokens: 0 (no LLM call yet, or provider not surfacing usage)";
+      : "provider-tokens: 0 (no LLM round-trip yet — try sending a non-slash message)";
 
     return [
       "Cost & Activity Snapshot",
       `session: ${session}`,
       `provider: ${provider}`,
       `model: ${model}`,
-      `fsm-phase: ${fsm.phase}  (turn=${fsm.turn})`,
+      turnLine,
       haltLine,
       `messages: ${messages}  (user=${userMessages}, assistant=${assistantMessages})`,
       usageLine,
