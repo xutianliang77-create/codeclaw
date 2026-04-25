@@ -1,16 +1,15 @@
 /**
- * `/commit` · git 提交预览（read-only）
+ * `/commit` · git 提交预览（read-only）+ secret 扫描
  *
- * 当前实现：纯只读 — 跑 `git status --porcelain` + `git diff --stat HEAD`，
- * 把当前工作区变更摆出来给用户决策。**不主动 git commit**：
- *   - 自动 commit 涉及消息生成 + 不可逆副作用，需走审批 / message generator，
- *     设计议题留 W2-04+ 单独做。
+ * 当前实现：纯只读 — 跑 `git status --porcelain` + `git diff --stat HEAD` +
+ * 扫描 `git diff HEAD` 实际 patch 找 secret（W4-05/06）。**不主动 git commit**。
  *
- * 输入：可选 message（透给未来真正能 commit 的版本，先忽略）。
+ * Secret 命中只警告不阻塞——用户决定是否继续。规则集见 src/lib/secretScan.ts。
  */
 
 import { execFileSync } from "node:child_process";
 import { defineCommand, reply } from "../registry";
+import { formatFindings, scanForSecrets } from "../../../lib/secretScan";
 
 interface CommitHolder {
   /** 可选：让宿主指定 cwd（测试 / 多仓场景）。缺省走 process.cwd() */
@@ -61,6 +60,9 @@ export default defineCommand({
     }
     const diffStat = gitOrEmpty(["diff", "--stat", "HEAD"], cwd);
     const branchOut = gitOrEmpty(["rev-parse", "--abbrev-ref", "HEAD"], cwd);
+    // 实际 patch 内容用于 secret 扫描；输出可能很大，限制 1MB
+    const diffPatch = gitOrEmpty(["diff", "HEAD"], cwd);
+    const findings = diffPatch.ok ? scanForSecrets(diffPatch.stdout) : [];
 
     const branch = branchOut.ok ? branchOut.stdout.trim() : "?";
     const statusLines = status.stdout.trim();
@@ -76,19 +78,26 @@ export default defineCommand({
       );
     }
 
-    return reply(
-      [
-        "Commit preview (read-only)",
-        `branch: ${branch}`,
-        "",
-        "git status --porcelain:",
-        statusLines || "  (no entries)",
-        "",
-        "git diff --stat HEAD:",
-        diffLines || "  (no diff)",
-        "",
-        "next: run `git add -A && git commit -m \"...\"` yourself if this looks right.",
-      ].join("\n")
+    const lines: string[] = [
+      "Commit preview (read-only)",
+      `branch: ${branch}`,
+      "",
+      "git status --porcelain:",
+      statusLines || "  (no entries)",
+      "",
+      "git diff --stat HEAD:",
+      diffLines || "  (no diff)",
+    ];
+
+    if (findings.length > 0) {
+      lines.push("", "--- secret scan ---", formatFindings(findings));
+    }
+
+    lines.push(
+      "",
+      'next: run `git add -A && git commit -m "..."` yourself if this looks right.'
     );
+
+    return reply(lines.join("\n"));
   },
 });
