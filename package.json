@@ -18,6 +18,7 @@
     "test:watch": "vitest",
     "lint": "eslint src test scripts eslint.config.js",
     "golden:ask": "tsx test/golden/runner/ask.ts",
+    "golden:fix": "tsx test/golden/runner/fix.ts",
     "setup:lsp": "bash ./scripts/setup-lsp.sh",
     "setup:hooks": "git config core.hooksPath scripts/git-hooks && echo 'pre-push gate enabled (scripts/git-hooks/pre-push)'",
     "nightly": "node scripts/nightly.mjs",
