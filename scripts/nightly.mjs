@@ -178,6 +178,28 @@ async function dataDbStats() {
   }
 }
 
+// T18：核 .gitignore 是否覆盖敏感路径
+const REQUIRED_GITIGNORE_PATTERNS = [
+  "node_modules",
+  ".codeclaw",
+  "doc",
+  ".env",
+];
+
+function checkGitignore() {
+  const gitignorePath = path.join(rootDir, ".gitignore");
+  let content = "";
+  try {
+    content = readFileSync(gitignorePath, "utf8");
+  } catch {
+    return { ok: false, reason: "missing .gitignore", missing: REQUIRED_GITIGNORE_PATTERNS };
+  }
+  const missing = REQUIRED_GITIGNORE_PATTERNS.filter(
+    (p) => !content.split(/\r?\n/).some((line) => line.trim().includes(p))
+  );
+  return { ok: missing.length === 0, missing };
+}
+
 async function main() {
   console.log("[nightly] start at", new Date().toISOString());
 
@@ -192,12 +214,17 @@ async function main() {
   const stats = await dataDbStats();
   console.log(`[nightly] data.db:`, JSON.stringify(stats));
 
+  // T18：.gitignore 覆盖检查
+  const gitignoreResult = checkGitignore();
+  console.log(`[nightly] gitignore:`, JSON.stringify(gitignoreResult));
+
   const report = {
     generatedAt: new Date().toISOString(),
     repo: rootDir,
     secretScan: secretResult,
     auditChain: auditResult,
     dataDbStats: stats,
+    gitignore: gitignoreResult,
   };
 
   mkdirSync(REPORT_DIR, { recursive: true });

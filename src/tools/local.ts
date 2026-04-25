@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { appendFile, readFile, readdir, writeFile } from "node:fs/promises";
+import { backupFileIfExists } from "./backup";
 import path from "node:path";
 import { promisify } from "node:util";
 import { invalidateWorkspaceIndex, queryDefinitions, queryReferences, querySymbols } from "../lsp/service";
@@ -469,6 +470,8 @@ async function runWriteTool(target: string, content: string, workspace: string):
   }
 
   const absolutePath = resolveWorkspacePath(workspace, target.trim());
+  // #93 T16：覆盖前备份，防误操作 / 并发冲突
+  backupFileIfExists(absolutePath, workspace);
   await writeFile(absolutePath, content, "utf8");
   invalidateWorkspaceIndex(workspace, toWorkspaceRelativePath(workspace, target.trim()));
 
@@ -481,6 +484,8 @@ async function runAppendTool(target: string, content: string, workspace: string)
   }
 
   const absolutePath = resolveWorkspacePath(workspace, target.trim());
+  // #93 T16：append 也要备份（append 失败时数据可能损坏）
+  backupFileIfExists(absolutePath, workspace);
   await appendFile(absolutePath, content, "utf8");
   invalidateWorkspaceIndex(workspace, toWorkspaceRelativePath(workspace, target.trim()));
 
@@ -504,6 +509,8 @@ async function runReplaceTool(target: string, findText: string, replaceText: str
   }
 
   const next = current.replace(findText, replaceText);
+  // #93 T16：replace 之前备份原内容
+  backupFileIfExists(absolutePath, workspace);
   await writeFile(absolutePath, next, "utf8");
   invalidateWorkspaceIndex(workspace, toWorkspaceRelativePath(workspace, target.trim()));
 

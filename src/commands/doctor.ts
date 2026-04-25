@@ -126,6 +126,15 @@ export async function runDoctor(): Promise<string> {
   const makeV = probe("make", ["--version"])?.split("\n")[0];
   if (makeV) lines.push(`- make: ${makeV}`);
 
+  // T13：bash 工具非强隔离明示（plan §13 / threat T13）
+  lines.push(
+    "",
+    "security note:",
+    "- bash tool: NOT sandboxed (personal edition); risky commands gated by Permission Manager.",
+    "- prompts auto-redact secrets (set CODECLAW_NO_PROMPT_REDACT=1 to disable).",
+    "- writes auto-backup to ~/.codeclaw/backups/<batch>/ before overwrite."
+  );
+
   lines.push("", "libs:");
   for (const pkg of ["better-sqlite3", "ulid", "@noble/hashes", "pino"]) {
     const v = readPkgVersion(pkg);
