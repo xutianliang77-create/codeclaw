@@ -1,0 +1,25 @@
+id: ASK-021
+version: 1
+category: code-understanding
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  ObservationRepo 写 db 时存的 body_path 是相对路径（如 observations.jsonl 或
+  observations/step-1.jsonl），而不是绝对路径。
+  为什么这么设计？给运维 / 跨机迁移带来什么便利？
+expected:
+  must_mention:
+    - 迁移 或 migrate 或 移动 或 拷贝
+    - sessions 或 目录 或 directory
+    - 绝对路径
+  must_not_mention:
+    - SQLite 不能存路径
+    - 一定要用 symlink
+  rubric: |
+    要点：
+    - 相对路径以 sessions/{sid}/ 为根，整目录 rsync / tar / 拷贝到新机器后路径仍然有效。
+    - 绝对路径会写死 ~/.codeclaw/sessions/{sid}/...，新机器用户名 / home 一变就全部失效。
+    - 备份 / 恢复 / 多账户拷贝场景都更友好。
+    - 代价：读取时要拼上 sessionsDir 前缀（已封装）。
+  answer_key: ASK-021.md

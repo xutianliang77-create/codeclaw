@@ -1,0 +1,26 @@
+id: ASK-026
+version: 1
+category: debug
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  跑 npm test 时 vitest 报 4 个失败，其中 3 个落在 test/golden/fix/FIX-XX/workspace/test/ 下。
+  这些 FIX workspace 是 Golden Set 故意 broken 的素材，不该混进主回归。怎么定位 + 修？
+expected:
+  must_mention:
+    - vitest.config 或 vitest 配置
+    - exclude 或 排除
+    - golden/fix 或 fixture
+  must_not_mention:
+    - 删除测试文件
+    - 改 ts 编译目标
+  rubric: |
+    定位：vitest 默认会扫整仓 *.test.ts；FIX workspace 内的 test 文件被自动收进。
+    修复：根目录 vitest.config.ts 加 test.exclude，把 "test/golden/fix/**"
+    排掉。重跑 npm test 应回到 baseline。
+    根本原因：早期没建 vitest.config.ts，靠默认配置。引入 Golden FIX 素材后
+    要显式排除。
+    不该做：删除 FIX workspace 里的测试文件（那是 Golden runner 的输入）；
+    改 tsconfig（无关）。
+  answer_key: ASK-026.md

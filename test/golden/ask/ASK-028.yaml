@@ -1,0 +1,31 @@
+id: ASK-028
+version: 1
+category: architecture
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  /commit 命令当前是 read-only：跑 git status / git diff --stat 给用户看，
+  但不真的 git commit。为什么 W2 阶段不直接做"自动 commit + 自动写 message"？
+  哪些子问题需要先解决？
+expected:
+  must_mention:
+    - 不可逆 或 irreversible
+    - 审批 或 approval
+    - message 或 提交信息
+  must_not_mention:
+    - 永远不能 auto commit
+    - 必须用 GUI
+  rubric: |
+    自动 commit 涉及多个未解决的子问题：
+    1. **不可逆副作用**：commit 入仓库历史后撤销代价高；新手用 reset --soft 可
+       逆，但已 push 后就不行了。
+    2. **message 生成质量**：好的 commit message 需要看 diff + 上下文
+       综合，目前没有专门的 message generator skill。
+    3. **审批入口**：自动 commit 必须走 pendingApproval，让用户至少瞄一眼
+       message 和文件清单再放行。这套流程当前只对工具调用接好。
+    4. **scope 决策**：是 commit 全部 / 仅 staged / 仅本会话动过的文件？需要
+       和 /diff 的 changedFiles 集合对齐。
+    在解决这四个之前，read-only preview 是 minimum-viable + 零回归路径。
+    禁止说 "永远不能"或"必须 GUI"。
+  answer_key: ASK-028.md

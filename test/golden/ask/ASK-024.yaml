@@ -1,0 +1,28 @@
+id: ASK-024
+version: 1
+category: debug
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  从 @noble/hashes v1 升到 v2 后，原来 import { blake3 } from "@noble/hashes/blake3"
+  突然报 ERR_MODULE_NOT_FOUND。其他模块没动，怎么排查？
+expected:
+  must_mention:
+    - 子路径 或 subpath 或 .js
+    - exports
+    - ESM 或 esm 或 模块解析
+  must_not_mention:
+    - 必须降级回 v1
+    - tsconfig 必须用 NodeNext
+  rubric: |
+    根因：v2 改了 package.json exports，subpath import 必须显式带文件后缀。
+    "@noble/hashes/blake3" → "@noble/hashes/blake3.js"，utils 同理。
+    排查思路：
+    - 看错误堆栈拿到具体的 require 路径
+    - 翻包内 package.json exports 字段，匹配实际暴露的文件
+    - 在 node_modules/@noble/hashes/ 下看是不是有 blake3.js 但没有 blake3 目录
+    解决：所有 noble subpath import 加 .js；同时函数签名 v2 要求 Uint8Array
+    输入，字符串得先 TextEncoder.encode。
+    不该做：降回 v1（错过安全 / 性能更新）。
+  answer_key: ASK-024.md

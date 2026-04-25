@@ -1,0 +1,25 @@
+id: ASK-019
+version: 1
+category: code-understanding
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 SlashRegistry.match 在判断 prompt 是否命中某个命令时，
+  做了一道"前缀 + 空白边界"的限制：/foo 不能命中 /foobar。
+  这条规则解决了什么类型的 bug？如果换成单纯 startsWith 会出什么问题？
+expected:
+  must_mention:
+    - 前缀 或 prefix
+    - 空格 或 空白 或 边界
+    - 误命中 或 误匹配 或 误判
+  must_not_mention:
+    - 区分大小写
+    - 必须用正则匹配
+  rubric: |
+    要点：纯 startsWith 会让 /foo 命中 /foobar 整条，导致用户输入 /foobar 时
+    被前面注册的 /foo 抢截，handler 拿不到完整 token，参数解析也错。
+    规则是 prompt === "/foo" 或 prompt 以 "/foo " 开头（含末尾空格），等价于
+    "完整 token + 空白边界"，避免 prefix 串味。
+    与大小写无关；用正则也能做但更重。
+  answer_key: ASK-019.md

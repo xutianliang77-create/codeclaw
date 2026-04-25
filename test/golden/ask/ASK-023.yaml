@@ -1,0 +1,27 @@
+id: ASK-023
+version: 1
+category: debug
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  跑 npm test 时看到 test/local-tools.test.ts 报 "spawn zsh ENOENT"。
+  其他 240 多条测试都是绿的，只这一条挂。怎么定位是配置问题、环境问题还是代码 bug？
+  应急方案与根因修复分别是什么？
+expected:
+  must_mention:
+    - which 或 zsh 或 shell
+    - 环境 或 environment 或 路径 或 PATH
+    - skip 或 跳过 或 条件
+  must_not_mention:
+    - 卸载 npm
+    - 关掉测试
+  rubric: |
+    定位：which zsh 看不存在 → 环境问题（机器没装 zsh）。如果用 `git stash`
+    把改动暂存后跑同一条仍 fail → 不是新引入。属于环境性 / 基线问题。
+    应急：本地装 zsh（apt/brew install zsh）；或 `vitest run --exclude
+    test/local-tools.test.ts`。
+    根因修复：测试 setup 加一个 `which zsh` 守卫，没有就 it.skip()；或者把硬
+    编码的 shell:"zsh" 改成 process.env.SHELL ?? "bash"。
+    禁止：卸载 npm / 关掉所有测试。
+  answer_key: ASK-023.md

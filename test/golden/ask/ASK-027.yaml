@@ -1,0 +1,31 @@
+id: ASK-027
+version: 1
+category: architecture
+difficulty: hard
+requires:
+  tools: []
+prompt: |
+  SlashRegistry 的 builtin 命令访问 QueryEngine 状态时用 "duck-typed cast"
+  （每个 builtin 自己声明一个 minimal interface 然后 cast ctx.queryEngine 过去），
+  而不是直接 import QueryEngine 的具体类型。这是为什么？这种取舍有什么代价？
+expected:
+  must_mention:
+    - 循环依赖 或 circular 或 dependency cycle
+    - 接口 或 interface 或 解耦
+    - 类型 或 type
+  must_not_mention:
+    - TypeScript 不支持泛型
+    - 必须用 any
+  rubric: |
+    动机：
+    - 避免 src/commands/slash/builtins/* import src/agent/queryEngine 形成
+      循环依赖（queryEngine 已经 import slash 来挂 registry）。
+    - 让 builtin 只声明"我用到的最小子集"，命令文件本身就是其依赖契约的文档。
+    - 测试时不需要构造完整 QueryEngine，给一个实现了同名方法的 plain object 就能跑。
+    代价：
+    - 编译期不会捕获"QueryEngine 重命名了 buildStatusReply 但 builtin 没改"
+      之类的问题；要靠测试覆盖。
+    - 重构 QueryEngine 公共方法时要全局搜 builtin 文件确认。
+    缓解：每个 builtin 在 holder 缺方法时返回 "command unavailable" 而不是
+    崩溃；相关单测覆盖 graceful degrade 路径。
+  answer_key: ASK-027.md

@@ -1,0 +1,31 @@
+id: ASK-029
+version: 1
+category: tool-choice
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  我要把仓库里 30 个 .ts 文件中相同的一行 import 路径
+  `import x from "../../old-utils"` 全改成 `from "@/utils"`。
+  应该用 /replace 一个一个跑、用 /bash + sed 批量替换，还是开 /orchestrate？
+expected:
+  must_mention:
+    - sed 或 批量 或 bulk
+    - replace 或 /replace
+    - 审批 或 review 或 diff
+  must_not_mention:
+    - 一定要手动改
+    - 必须开新分支
+  rubric: |
+    取舍：
+    - **/replace**：单文件一对找/换，对 30 个文件要跑 30 次，慢且每次都要 ask；
+      适合"每个文件改的内容不同"的场景，这里不是。
+    - **/bash + sed -i**：一条命令搞定，但 sed 对路径里特殊字符（/、@）容易翻车，
+      且没 dry-run 的话直接改完 + 没办法只看 diff 不落地。
+    - **/orchestrate "rename old-utils import to @/utils"**：planner 会规划出
+      grep + 批量 replace + 跑测试 + 报告 diff，并把每一步 high-risk 操作走
+      pendingApproval；适合这种"批量 + 需要看 diff"的场景。
+    建议路径：先 /grep `from "../../old-utils"` 拿候选清单 → /orchestrate 批量改
+    + 必走 /diff 复核 → 确认无误后再人工 git commit。
+    禁止"必须手动改"或"必须开新分支"。
+  answer_key: ASK-029.md

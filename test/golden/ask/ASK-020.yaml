@@ -1,0 +1,25 @@
+id: ASK-020
+version: 1
+category: code-understanding
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  Golden Set scorer 的 splitAlternatives 函数支持把 "A 或 B" / "A or B" / "A | B" 拆成多选一。
+  最初版本的 regex 把 "or" 当分隔符时漏了一个细节，导致 must_not_mention 写
+  "proof-of-work" 这种英文词时被错误切分。请说明这个 bug 是什么、修了什么。
+expected:
+  must_mention:
+    - 词边界 或 \\b 或 boundary
+    - "\"or\" 或 OR 或 ascii"
+    - proof-of-work 或 work
+  must_not_mention:
+    - regex 不支持 \\b
+    - 必须用 split 不能用 regex
+  rubric: |
+    bug：原 regex 是 /\\s*(?:或|\\/|or|\\|)\\s*/i，"or" 没加 \\b 词边界，
+    匹配 "proof-of-w[or]k" 中的 or，把字符串切成 ["proof-of-w", "k"]，
+    然后 "k" 作为 needle 几乎一定命中任何答案，触发 must_not_mention 误报。
+    修复：把 "or" 改成 "\\bor\\b"，要求前后是非单词字符（含字符串边界），
+    "proof-of-work" 不再被切。
+  answer_key: ASK-020.md

@@ -1,0 +1,26 @@
+id: ASK-025
+version: 1
+category: debug
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  用户跑 /doctor 看到 tokenFile 段提示 "exists but mode=0644 (expected 0600)"。
+  这是什么意思？为什么 600 重要？怎么修？
+expected:
+  must_mention:
+    - 600 或 0600 或 chmod
+    - 权限 或 permission
+    - 其他用户 或 same-host 或 group
+  must_not_mention:
+    - rm 删除文件
+    - 换数据库
+  rubric: |
+    含义：tokenFile 是 iLink WeChat 登录 token，里面是长 access token + cookie。
+    0644 意味着 group / others 都可读，本机其他用户可以偷 token 冒充你。
+    600 = 仅 owner 可读写，是 secret 文件的最低安全门槛。
+    修复：`chmod 600 ~/.codeclaw/wechat-ibot/default.json`，再跑 /doctor 验证。
+    若 ensureIlinkWechatTokenFile 已实现自动 chmod 600，重启 codeclaw 让它再
+    走一遍迁移路径也能修。
+    禁止建议：rm 文件（要重登）、换数据库（无关）。
+  answer_key: ASK-025.md

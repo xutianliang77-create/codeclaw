@@ -1,0 +1,29 @@
+id: ASK-030
+version: 1
+category: tool-choice
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  我想看 src/agent/queryEngine.ts 最近 10 次提交的简短历史，知道每次改了大概什么。
+  在 CodeClaw REPL 里应该用什么命令？为什么不需要其他更复杂的工具链？
+expected:
+  must_mention:
+    - bash 或 /bash
+    - git log
+    - --oneline 或 -10 或 author
+  must_not_mention:
+    - 必须开 GitHub 浏览器
+    - 必须用 IDE
+  rubric: |
+    最佳选择：`/bash git log -n 10 --oneline -- src/agent/queryEngine.ts`
+    或带文件统计：`/bash git log -n 10 --stat -- src/agent/queryEngine.ts`
+    理由：
+    - git 是仓库一手数据，输出确定、cheap、不动状态。
+    - 不需要 LSP / planner / orchestrate；这是单纯的"查询历史"，规模零副作用。
+    - GitHub 浏览器 / IDE 也能看，但脱离当前 REPL 上下文，回答里粘贴不便。
+    扣分：
+    - 答 /read（不能展开历史）
+    - 答 /symbol（错维度，找符号定义而非提交记录）
+    - 一定要装 IDE / 开浏览器
+  answer_key: ASK-030.md

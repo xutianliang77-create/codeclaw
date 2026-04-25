@@ -1,0 +1,33 @@
+id: ASK-022
+version: 1
+category: code-understanding
+difficulty: hard
+requires:
+  tools: []
+prompt: |
+  CodeClaw 有 6 种 PermissionMode：default / plan / auto / acceptEdits / bypassPermissions / dontAsk。
+  对一个 medium 风险动作（比如 /write 一个新文件），这 6 种模式各自怎么处理？
+  哪些直接通过、哪些需要 /approve、哪些直接拒绝？
+expected:
+  must_mention:
+    - plan
+    - auto
+    - acceptEdits
+    - bypassPermissions
+    - dontAsk
+    - 审批 或 approve 或 ask
+  must_not_mention:
+    - 全部直接通过
+    - 全部直接拒绝
+  rubric: |
+    medium 风险（如 write）行为：
+    | 模式 | 处理 |
+    |------|------|
+    | default | 询问用户（pending approval） |
+    | plan | 询问用户（仅产计划，但用户确认后才能落地） |
+    | auto | 自动通过（low/medium 自动放行，high 仍 ask） |
+    | acceptEdits | 自动通过（write 类自动允许） |
+    | bypassPermissions | 全自动通过（仍写审计） |
+    | dontAsk | 按缓存决策，无缓存则拒绝 |
+    扣分：把所有模式答成"全 ask"或"全 auto"。
+  answer_key: ASK-022.md
