@@ -66,6 +66,33 @@ describe("inspectAuditChain", () => {
       expect(r.durationMs).toBeGreaterThanOrEqual(0);
     }
   });
+
+  // 安全：审计链端到端 tampering 检测（W4-B-SEC-2）
+  // 攻击意图：attacker 拿到 audit.db 写权限后直接 SQL UPDATE 改某条事件的 resource，
+  // 期望事件本身改了但旁观者看不出来。
+  // 防御：event_hash 包含 resource，链断在被改的位置，verify 应能精确报警。
+  it("SEC: 直接 SQL 改 audit_events.resource 后，inspectAuditChain 报 BROKEN", () => {
+    const dbPath = path.join(mkTempDir(), "audit.db");
+    const handle = openAuditDb({ path: dbPath, singleton: false });
+    const log = new AuditLog(handle.db);
+    log.append({ traceId: "t1", actor: "user", action: "test:e1", decision: "allow", resource: "r1" });
+    log.append({ traceId: "t2", actor: "user", action: "test:e2", decision: "allow", resource: "r2" });
+    log.append({ traceId: "t3", actor: "user", action: "test:e3", decision: "allow", resource: "r3" });
+
+    // attacker 改第二条 resource（例如把 "/etc/shadow" 伪装成 "/tmp/innocent"）
+    handle.db
+      .prepare("UPDATE audit_events SET resource = 'tampered' WHERE trace_id = ?")
+      .run("t2");
+    handle.close();
+
+    const r = inspectAuditChain(dbPath);
+    expect("ok" in r).toBe(true);
+    if (!("ok" in r)) throw new Error("expected verify result");
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("expected broken");
+    expect(r.brokenAt).toBeTruthy();
+    expect(r.reason).toBeTruthy();
+  });
 });
 
 describe("inspectApprovalsPending", () => {

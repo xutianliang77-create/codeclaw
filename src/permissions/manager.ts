@@ -73,7 +73,11 @@ const DANGEROUS_BASH_PATTERNS = [
   /\bdd\b/,
   /\bmkfs\b/,
   /\breboot\b/,
-  /\bshutdown\b/
+  /\bshutdown\b/,
+  // 命令替换：safe prefix 嵌套时让 shell 先跑内部命令，绕过 risk 分类
+  // negative lookahead 把 $((...)) 算术展开放行（不跑命令）
+  /\$\((?!\()/,
+  /`/,
 ];
 
 function classifyBashCommand(command: string): ToolRiskLevel {
