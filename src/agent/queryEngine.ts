@@ -49,6 +49,7 @@ import type {
 import type { ExecutionAction } from "../orchestration/types";
 import { PermissionManager } from "../permissions/manager";
 import { ProviderRequestError, streamProviderResponse } from "../provider/client";
+import { runWithProviderChain, type RunChainResult } from "../provider/chain";
 import { recordCall, summarizeBySession, summarizeToday, formatUsd } from "../provider/costTracker";
 import { detectProviderCapabilities } from "../provider/capabilities";
 import type { ProviderStatus } from "../provider/types";
@@ -1220,74 +1221,108 @@ class LocalQueryEngine implements QueryEngine {
       while (true) {
         lastError = null;
         allowFallback = true;
+        this.abortController = new AbortController();
 
-        for (const provider of providers) {
-          this.abortController = new AbortController();
-          let providerProducedOutput = false;
-          // W3-17：本次调用的 token 累计（onUsage 回调内填，结束时写库）
-          const llmCallStart = Date.now();
-          let callInputTokens = 0;
-          let callOutputTokens = 0;
-          let callModelId: string | undefined = provider.model;
+        // #69：把 provider 重试 + fallback 编排交给 runWithProviderChain；
+        // 这里只关心：每次新 attempt 重置 token 计数 + 成功 attempt 写 llm_calls_raw。
+        let currentCall: {
+          provider: ProviderStatus;
+          startMs: number;
+          inputTokens: number;
+          outputTokens: number;
+          modelId?: string;
+        } | null = null;
 
-          try {
-            for await (const chunk of streamProviderResponse(provider, this.getProviderMessages(), {
+        const chain = runWithProviderChain({
+          providers,
+          abortSignal: this.abortController.signal,
+          invoke: (provider) => {
+            currentCall = {
+              provider,
+              startMs: Date.now(),
+              inputTokens: 0,
+              outputTokens: 0,
+              modelId: provider.model,
+            };
+            return streamProviderResponse(provider, this.getProviderMessages(), {
               fetchImpl: this.options.fetchImpl,
-              abortSignal: this.abortController.signal,
+              abortSignal: this.abortController!.signal,
               onUsage: (usage) => {
                 // W3-05：累加真实 token 用量到 session
                 this.sessionInputTokens += usage.inputTokens ?? 0;
                 this.sessionOutputTokens += usage.outputTokens ?? 0;
                 this.lastProviderModelId = usage.modelId ?? this.lastProviderModelId;
-                callInputTokens = usage.inputTokens ?? callInputTokens;
-                callOutputTokens = usage.outputTokens ?? callOutputTokens;
-                callModelId = usage.modelId ?? callModelId;
+                if (currentCall) {
+                  currentCall.inputTokens = usage.inputTokens ?? currentCall.inputTokens;
+                  currentCall.outputTokens = usage.outputTokens ?? currentCall.outputTokens;
+                  currentCall.modelId = usage.modelId ?? currentCall.modelId;
+                }
               },
-            })) {
-              providerProducedOutput = true;
-              output += chunk;
-              yield {
-                type: "message-delta",
-                messageId,
-                delta: chunk
-              };
-            }
-
-            lastError = null;
-            // W3-17：成功完成一次调用 → 写 llm_calls_raw（含 USD 估算）
-            if (callInputTokens > 0 || callOutputTokens > 0) {
+            });
+          },
+          onAttempt: (attempt) => {
+            // W3-17：成功 attempt → 写 llm_calls_raw（含 USD 估算）
+            if (
+              attempt.ok &&
+              currentCall &&
+              (currentCall.inputTokens > 0 || currentCall.outputTokens > 0)
+            ) {
               recordCall(this.dataDb, {
                 traceId: this.sessionId,
                 sessionId: this.sessionId,
-                provider: provider.type,
-                modelId: callModelId ?? provider.model,
-                inputTokens: callInputTokens,
-                outputTokens: callOutputTokens,
-                latencyMs: Date.now() - llmCallStart,
+                provider: currentCall.provider.type,
+                modelId: currentCall.modelId ?? currentCall.provider.model,
+                inputTokens: currentCall.inputTokens,
+                outputTokens: currentCall.outputTokens,
+                latencyMs: Date.now() - currentCall.startMs,
               });
             }
-            break;
-          } catch (error) {
-            if ((error as Error).name === "AbortError") {
-              this.interrupted = true;
+          },
+        });
+
+        let chainResult: RunChainResult | undefined;
+        let producedAny = false;
+        try {
+          while (true) {
+            const next = await chain.next();
+            if (next.done) {
+              chainResult = next.value;
               break;
             }
-
-            lastError = error as Error;
-            if (providerProducedOutput) {
-              allowFallback = false;
-              break;
-            }
-
-            output = "";
-            continue;
-          } finally {
-            this.abortController = null;
+            producedAny = true;
+            output += next.value;
+            yield {
+              type: "message-delta",
+              messageId,
+              delta: next.value,
+            };
           }
+        } catch (error) {
+          // chain 仅会向上抛 AbortError；其余 provider 错都被 chain 收编进 chainResult
+          if ((error as Error).name === "AbortError") {
+            this.interrupted = true;
+          } else {
+            throw error;
+          }
+        } finally {
+          this.abortController = null;
         }
 
+        if (this.interrupted) {
+          break;
+        }
+
+        if (chainResult?.ok) {
+          lastError = null;
+          break;
+        }
+
+        lastError = chainResult?.lastError ?? null;
+        // 已 yield 过 chunk → outer 也不该再 retry（避免重叠）
+        allowFallback = !producedAny;
+        if (producedAny) break;
+
         if (
-          !this.interrupted &&
           !output &&
           lastError &&
           !reactiveCompactTriggered &&

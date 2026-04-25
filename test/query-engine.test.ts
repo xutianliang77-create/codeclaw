@@ -1681,4 +1681,85 @@ describe("query engine", () => {
     expect(engine.getMessages().at(-1)?.text).toContain("[stream interrupted:");
     expect(engine.getMessages().at(-1)?.text).not.toContain("should-not-run");
   });
+
+  it("#69 transient 5xx retries the same provider before falling back", async () => {
+    let openaiCalls = 0;
+    let ollamaCalls = 0;
+    const fetchImpl = async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("api.openai.com")) {
+        openaiCalls += 1;
+        if (openaiCalls === 1) {
+          // 首次：5xx → chain 应该 retry 同 provider
+          return new Response("upstream blip", { status: 503 });
+        }
+        // 第二次：成功流
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode('data: {"choices":[{"delta":{"content":"primary recovered"}}]}\n')
+              );
+              controller.enqueue(new TextEncoder().encode("data: [DONE]\n"));
+              controller.close();
+            },
+          })
+        );
+      }
+      ollamaCalls += 1;
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"message":{"content":"should-not-fallback"}}\n'));
+            controller.close();
+          },
+        })
+      );
+    };
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await collect(engine.submitMessage("hi"));
+    expect(engine.getMessages().at(-1)?.text).toContain("primary recovered");
+    expect(engine.getMessages().at(-1)?.text).not.toContain("should-not-fallback");
+    expect(openaiCalls).toBe(2); // 1 失败 + 1 retry 成功
+    expect(ollamaCalls).toBe(0); // 没切 fallback
+  }, 15_000);
+
+  it("#69 auth 401 不 retry，直接切 fallback", async () => {
+    let openaiCalls = 0;
+    const fetchImpl = async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("api.openai.com")) {
+        openaiCalls += 1;
+        return new Response("forbidden", { status: 401 });
+      }
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"message":{"content":"from fallback"}}\n'));
+            controller.close();
+          },
+        })
+      );
+    };
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await collect(engine.submitMessage("hi"));
+    expect(engine.getMessages().at(-1)?.text).toContain("from fallback");
+    expect(openaiCalls).toBe(1); // auth 不 retry
+  });
 });
