@@ -36,6 +36,14 @@ export class EngineFsm {
     this.transitionTo("planning");
   }
 
+  /**
+   * 同一 turn 内的内层 re-plan（如 /orchestrate 多轮循环之间）：转到 planning 但不 bump turn。
+   * 与 beginTurn 的区别仅在 turn 计数。
+   */
+  enterPlanning(): void {
+    this.transitionTo("planning");
+  }
+
   /** 进入工具/skill 执行 */
   enterExecuting(): void {
     this.transitionTo("executing");

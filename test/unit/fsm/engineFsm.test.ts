@@ -87,6 +87,32 @@ describe("EngineFsm · transitions", () => {
     fsm.enterAwaiting();
     expect(fsm.currentPhase()).toBe("awaiting");
   });
+
+  it("enterPlanning transitions to planning without bumping turn", () => {
+    fsm.beginTurn();
+    expect(fsm.snapshot().turn).toBe(1);
+    fsm.enterExecuting();
+    fsm.enterReflecting();
+    // 同一 turn 内 re-plan
+    fsm.enterPlanning();
+    expect(fsm.currentPhase()).toBe("planning");
+    expect(fsm.snapshot().turn).toBe(1); // 不变
+    fsm.enterExecuting();
+    fsm.enterReflecting();
+    fsm.enterPlanning();
+    expect(fsm.snapshot().turn).toBe(1); // 还是不变
+  });
+
+  it("max-turns halt records expected reason and partial completion", () => {
+    fsm.beginTurn();
+    fsm.enterExecuting();
+    fsm.halt("max-turns", "partial", { message: "loop hit max rounds (3)" });
+    expect(fsm.snapshot().lastHalt).toMatchObject({
+      reason: "max-turns",
+      completion: "partial",
+    });
+    expect(fsm.snapshot().lastHalt!.message).toContain("max rounds");
+  });
 });
 
 describe("EngineFsm · listeners", () => {

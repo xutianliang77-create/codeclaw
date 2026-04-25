@@ -834,9 +834,13 @@ describe("query engine", () => {
       workspace
     });
 
+    // 单次 /orchestrate 现在会自动多轮循环（task #59）：
+    // round 1 → replan（gap 入历史） → round 2 同 gap 再现 → escalated
     await collect(engine.submitMessage("/orchestrate create src/new-feature.ts"));
-    expect(engine.getMessages().at(-1)?.text).toContain("reflector-decision: replan");
+    expect(engine.getMessages().at(-1)?.text).toContain("reflector-decision: escalated");
+    expect(engine.getMessages().at(-1)?.text).toContain("is-complete: no");
 
+    // 再次调用：gap 已在 LRU，仍 escalated（不会反复 replan 浪费 turn）
     await collect(engine.submitMessage("/orchestrate create src/new-feature.ts"));
     expect(engine.getMessages().at(-1)?.text).toContain("reflector-decision: escalated");
     expect(engine.getMessages().at(-1)?.text).toContain("is-complete: no");

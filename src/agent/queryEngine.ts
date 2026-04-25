@@ -1017,32 +1017,69 @@ class LocalQueryEngine implements QueryEngine {
   }
 
   /**
-   * 共用：跑出一个 plan 的完整 execute → reflect → gap → pendingApproval 副作用流，
-   * 由 /review 与 /orchestrate 调用。
+   * 共用：跑出一个 plan 的完整 execute → reflect → gap → pendingApproval 副作用流。
+   * 由 /review / /orchestrate / /fix 调用。
+   *
+   * 多轮循环（task #59）：
+   *   - 当 reflector decision = "replan"、无 pending approval、且 round < maxRounds 时，
+   *     用最新 gap 上下文 rebuild plan 再跑一轮
+   *   - reflector decision != "replan" → break（complete / escalated / approval-required）
+   *   - pendingOrchestrationApprovals 非空 → break（被审批挡住）
+   *   - round 达到 maxRounds 仍想 replan → halt(max-turns, partial) 并 break
+   *
+   * /review 传 maxRounds=1（read-only 永远单轮）。
    */
-  private async executePlanWithSideEffects(plan: OrchestrationPlan): Promise<{
+  private async executePlanWithSideEffects(
+    initialPlan: OrchestrationPlan,
+    options: { maxRounds?: number } = {}
+  ): Promise<{
     execution: Awaited<ReturnType<typeof executeOrchestrationPlan>>;
     reflector: ReturnType<typeof reflectOnExecution>;
+    rounds: number;
   }> {
-    const execution = await executeOrchestrationPlan(plan, this.buildOrchestrationContext());
-    const reflector = reflectOnExecution(plan.goals, execution, this.recentGapSignatures);
-    const gapSignature = buildGapSignature(execution.gaps);
+    const maxRounds = Math.max(1, options.maxRounds ?? 3);
+    let plan = initialPlan;
+    let execution!: Awaited<ReturnType<typeof executeOrchestrationPlan>>;
+    let reflector!: ReturnType<typeof reflectOnExecution>;
+    let round = 0;
 
-    if (gapSignature) {
-      this.recentGapSignatures.push(gapSignature);
-      if (this.recentGapSignatures.length > 5) {
-        this.recentGapSignatures.shift();
+    while (true) {
+      round += 1;
+
+      execution = await executeOrchestrationPlan(plan, this.buildOrchestrationContext());
+      this.fsm.enterReflecting();
+      reflector = reflectOnExecution(plan.goals, execution, this.recentGapSignatures);
+
+      const gapSignature = buildGapSignature(execution.gaps);
+      if (gapSignature) {
+        this.recentGapSignatures.push(gapSignature);
+        if (this.recentGapSignatures.length > 5) {
+          this.recentGapSignatures.shift();
+        }
       }
+
+      this.pendingOrchestrationApprovals = execution.approvalRequests
+        .filter((request) => request.status === "pending")
+        .map((request) => ({
+          ...request,
+          planGoal: plan.userGoal,
+        }));
+
+      if (reflector.decision !== "replan") break;
+      if (this.pendingOrchestrationApprovals.length > 0) break;
+      if (round >= maxRounds) {
+        this.fsm.halt("max-turns", "partial", {
+          message: `replan loop hit max rounds (${maxRounds})`,
+        });
+        break;
+      }
+
+      // 进下一轮：FSM 转 planning（不 bump turn），用更新后的 ctx 重 build plan
+      this.fsm.enterPlanning();
+      plan = buildOrchestrationPlan(plan.userGoal, this.buildOrchestrationContext());
     }
 
-    this.pendingOrchestrationApprovals = execution.approvalRequests
-      .filter((request) => request.status === "pending")
-      .map((request) => ({
-        ...request,
-        planGoal: plan.userGoal
-      }));
-
-    return { execution, reflector };
+    return { execution, reflector, rounds: round };
   }
 
   /** 给 /review slash builtin 用 */
@@ -1105,7 +1142,8 @@ class LocalQueryEngine implements QueryEngine {
       ].join("\n");
     }
 
-    const { execution, reflector } = await this.executePlanWithSideEffects(plan);
+    // /review 是 read-only，永远单轮（多轮对 review lane 没有语义）
+    const { execution, reflector } = await this.executePlanWithSideEffects(plan, { maxRounds: 1 });
     return this.buildReviewReply(plan, execution, reflector);
   }
 
