@@ -1,9 +1,13 @@
 /**
- * /fix v3 W4-02 · detectVerifyCmd 单测
+ * /fix v3 W4-02/03 · detectVerifyCmd 单测
  *
- * 覆盖 package.json 嗅探的全部分支：
- *   - 缺失文件 / 解析失败 / 字段缺失 / 空字符串 / placeholder
- *   - 有效 scripts.test → 返回 "npm test"
+ * 覆盖：
+ *   - npm（package.json）：缺失/解析失败/字段缺失/placeholder/类型错/有效
+ *   - pytest（pyproject.toml | pytest.ini）：单独命中
+ *   - cargo（Cargo.toml）：命中
+ *   - go（go.mod）：命中
+ *   - 优先级：npm > pytest > cargo > go（polyglot 仓库取最高优先）
+ *   - 全空目录：null
  */
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -29,6 +33,17 @@ function mkWorkspace(pkgContent: string | null): string {
     writeFileSync(path.join(dir, "package.json"), pkgContent, "utf8");
   }
   return dir;
+}
+
+/** 创建空 workspace 后随手撒几个标志文件（多语言探测用） */
+function mkEmpty(): string {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "codeclaw-verify-multi-"));
+  tempDirs.push(dir);
+  return dir;
+}
+
+function touch(dir: string, name: string, content = ""): void {
+  writeFileSync(path.join(dir, name), content, "utf8");
 }
 
 describe("detectVerifyCmd", () => {
@@ -97,5 +112,69 @@ describe("detectVerifyCmd", () => {
 
   it("workspace 路径不存在 → null（不抛）", () => {
     expect(detectVerifyCmd("/nonexistent/path/codeclaw-fake-12345")).toBeNull();
+  });
+
+  // ───── W4-03 多语言探测 ─────
+
+  it("Python · pyproject.toml → pytest", () => {
+    const dir = mkEmpty();
+    touch(dir, "pyproject.toml", "[project]\nname='x'\n");
+    expect(detectVerifyCmd(dir)).toBe("pytest");
+  });
+
+  it("Python · pytest.ini → pytest", () => {
+    const dir = mkEmpty();
+    touch(dir, "pytest.ini", "[pytest]\n");
+    expect(detectVerifyCmd(dir)).toBe("pytest");
+  });
+
+  it("Rust · Cargo.toml → cargo test", () => {
+    const dir = mkEmpty();
+    touch(dir, "Cargo.toml", "[package]\nname='x'\n");
+    expect(detectVerifyCmd(dir)).toBe("cargo test");
+  });
+
+  it("Go · go.mod → go test ./...", () => {
+    const dir = mkEmpty();
+    touch(dir, "go.mod", "module example.com/x\n");
+    expect(detectVerifyCmd(dir)).toBe("go test ./...");
+  });
+
+  it("空目录 → null", () => {
+    expect(detectVerifyCmd(mkEmpty())).toBeNull();
+  });
+
+  // ───── 优先级测试（polyglot 仓库）─────
+
+  it("优先级：npm > pytest（同时存在 package.json 与 pyproject.toml）", () => {
+    const dir = mkEmpty();
+    touch(dir, "package.json", JSON.stringify({ scripts: { test: "vitest" } }));
+    touch(dir, "pyproject.toml", "[project]\n");
+    expect(detectVerifyCmd(dir)).toBe("npm test");
+  });
+
+  it("优先级：pytest > cargo（pyproject.toml 与 Cargo.toml 共存）", () => {
+    const dir = mkEmpty();
+    touch(dir, "pyproject.toml", "[project]\n");
+    touch(dir, "Cargo.toml", "[package]\n");
+    expect(detectVerifyCmd(dir)).toBe("pytest");
+  });
+
+  it("优先级：cargo > go（Cargo.toml 与 go.mod 共存）", () => {
+    const dir = mkEmpty();
+    touch(dir, "Cargo.toml", "[package]\n");
+    touch(dir, "go.mod", "module x\n");
+    expect(detectVerifyCmd(dir)).toBe("cargo test");
+  });
+
+  it("npm placeholder 不阻塞 fallback：placeholder 时让 pytest 接手", () => {
+    const dir = mkEmpty();
+    touch(
+      dir,
+      "package.json",
+      JSON.stringify({ scripts: { test: 'echo "Error: no test specified" && exit 1' } })
+    );
+    touch(dir, "pyproject.toml", "[project]\n");
+    expect(detectVerifyCmd(dir)).toBe("pytest");
   });
 });

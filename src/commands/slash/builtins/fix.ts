@@ -30,8 +30,10 @@ export default defineCommand({
     "v2: pre/post verify_broken/verify_fixed via the cmd, plus git diff --stat.\n" +
     "v3 diff_scope: if the resulting diff exceeds 5 files OR 300 lines, the\n" +
     "    reply ends with 'diff-scope: ABORT' (no auto-rollback; you decide).\n" +
-    "v3 auto-verify: when --verify is omitted, scripts.test from package.json\n" +
-    "    is auto-detected (npm placeholder is skipped).",
+    "v3 auto-verify: when --verify is omitted, the workspace is probed for\n" +
+    "    a verify cmd in this order: package.json scripts.test → npm test;\n" +
+    "    pyproject.toml | pytest.ini → pytest; Cargo.toml → cargo test;\n" +
+    "    go.mod → go test ./... .",
   async handler(ctx) {
     if (!isHolder(ctx.queryEngine)) {
       return reply("fix command unavailable: runtime missing runFixCommand");

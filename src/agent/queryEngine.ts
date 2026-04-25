@@ -156,13 +156,20 @@ export function parseDiffStatSummary(
  * 空 diff（找不到 summary 行）视为 ok（不 abort，但调用方会显式标 "no changes"）。
  */
 /**
- * /fix v3 W4-02：从 workspace/package.json 嗅探 verify cmd。
- * 仅当 scripts.test 存在、非空、非 npm init 默认 placeholder 时返回 "npm test"。
+ * /fix v3 W4-02/03：从 workspace 嗅探 verify cmd。
  *
- * Placeholder 跳过：`echo "Error: no test specified" && exit 1` 跑必然 fail，
- * 不应当真做 verify（会浪费 plan/execute 一整轮然后必败）。
+ * 探测器优先级（找到第一个就用）：
+ *   1. package.json 含有效 scripts.test → "npm test"
+ *   2. pyproject.toml 或 pytest.ini      → "pytest"
+ *   3. Cargo.toml                        → "cargo test"
+ *   4. go.mod                            → "go test ./..."
+ *
+ * polyglot 仓库（如 Node + Python）按上面顺序选第一个；用户仍可
+ * 通过 `-- verify "<cmd>"` 显式覆盖。npm placeholder 跳过避免必败。
  */
-export function detectVerifyCmd(workspace: string): string | null {
+type VerifyDetector = (workspace: string) => string | null;
+
+const detectNpmTest: VerifyDetector = (workspace) => {
   try {
     const pkgPath = path.join(workspace, "package.json");
     if (!existsSync(pkgPath)) return null;
@@ -175,6 +182,37 @@ export function detectVerifyCmd(workspace: string): string | null {
   } catch {
     return null;
   }
+};
+
+const detectPytest: VerifyDetector = (workspace) => {
+  if (
+    existsSync(path.join(workspace, "pyproject.toml")) ||
+    existsSync(path.join(workspace, "pytest.ini"))
+  ) {
+    return "pytest";
+  }
+  return null;
+};
+
+const detectCargoTest: VerifyDetector = (workspace) =>
+  existsSync(path.join(workspace, "Cargo.toml")) ? "cargo test" : null;
+
+const detectGoTest: VerifyDetector = (workspace) =>
+  existsSync(path.join(workspace, "go.mod")) ? "go test ./..." : null;
+
+const VERIFY_DETECTORS: VerifyDetector[] = [
+  detectNpmTest,
+  detectPytest,
+  detectCargoTest,
+  detectGoTest,
+];
+
+export function detectVerifyCmd(workspace: string): string | null {
+  for (const detector of VERIFY_DETECTORS) {
+    const cmd = detector(workspace);
+    if (cmd) return cmd;
+  }
+  return null;
 }
 
 export function evaluateDiffScope(
@@ -1405,13 +1443,12 @@ class LocalQueryEngine implements QueryEngine {
    *   - 超过 max_files / max_lines 时 reply 末尾标 "diff-scope: ABORT"
    *   - 不自动 rollback；让用户决策是否保留
    *
-   * v3 verify auto-detect（task #66）：
-   *   - 未显式给 -- verify 时，从 workspace/package.json 嗅探 scripts.test
-   *   - 找到则自动用 "npm test"；reply 里标注 (auto-detected)
-   *   - 找不到回退 v1（不跑 verify）
-   *
-   * 仍未做（v4+）：
-   *   - 多语言 verify 模板（task #67）：pyproject.toml / Cargo.toml 等
+   * v3 verify auto-detect（task #66/#67）：
+   *   - 未显式给 -- verify 时，从 workspace 嗅探多语言项目模板：
+   *     package.json → npm test / pyproject.toml | pytest.ini → pytest /
+   *     Cargo.toml → cargo test / go.mod → go test ./...
+   *   - 优先级固定（npm > pytest > cargo > go），polyglot 仓库取最高优先
+   *   - 找到则自动用，reply 里标注 (auto-detected)；找不到回退 v1（不跑 verify）
    */
   public async runFixCommand(prompt: string): Promise<string> {
     const stripped = prompt.replace("/fix", "").trim();
