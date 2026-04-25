@@ -32,6 +32,7 @@ import {
   handleDeleteSession,
   handleListSessions,
   handleMessage,
+  handleProviders,
   handleStream,
   type HandlerDeps,
 } from "./handlers";
@@ -136,6 +137,10 @@ async function dispatch(
   if (url.pathname === "/v1/web/messages" && method === "POST") {
     return handleMessage(req, res, deps);
   }
+  // GET /v1/web/providers  #70-B
+  if (url.pathname === "/v1/web/providers" && method === "GET") {
+    return handleProviders(req, res, deps);
+  }
   // GET /v1/web/cost?sessionId=<id>  #70-A
   if (url.pathname === "/v1/web/cost" && method === "GET") {
     const sessionId = url.searchParams.get("sessionId") ?? "";
@@ -206,7 +211,15 @@ export function startWebServer(opts: StartWebServerOptions): Promise<WebServerHa
       // singleton 冲突或文件不可用 → 静默降级
     }
   }
-  const deps: HandlerDeps = { store, auth, dataDb };
+  const deps: HandlerDeps = {
+    store,
+    auth,
+    dataDb,
+    providers: {
+      current: opts.engineDefaults.currentProvider ?? null,
+      fallback: opts.engineDefaults.fallbackProvider ?? null,
+    },
+  };
   const staticRoot = opts.staticRoot === "" ? "" : opts.staticRoot ?? defaultStaticRoot();
 
   const server = http.createServer((req, res) => {

@@ -82,6 +82,89 @@ header h1 {
 }
 .cost.hidden { display: none; }
 
+.settings-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-right: 0.5rem;
+  font-size: 0.95rem;
+}
+.settings-btn:hover { background: var(--border); }
+.settings-btn.hidden { display: none; }
+
+.settings-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(380px, 90vw);
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  box-shadow: -4px 0 16px rgba(0,0,0,0.08);
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+  transform: translateX(0);
+  transition: transform 0.18s ease;
+}
+.settings-panel.hidden { transform: translateX(100%); pointer-events: none; }
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.settings-header h2 { font-size: 1rem; margin: 0; }
+
+.icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 1.4rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.settings-body {
+  padding: 0.75rem 1rem;
+  overflow-y: auto;
+  flex: 1;
+}
+.settings-body .provider-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.6rem;
+}
+.settings-body .provider-card .role {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.settings-body .provider-card .name {
+  font-weight: 600;
+  margin-top: 0.1rem;
+}
+.settings-body .provider-card dl {
+  margin: 0.4rem 0 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 0.6rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.settings-body .provider-card dt { color: var(--muted); }
+.settings-body .provider-card dd { margin: 0; word-break: break-all; color: var(--text); }
+.settings-body .provider-card .available-yes { color: #059669; }
+.settings-body .provider-card .available-no { color: var(--error-fg); }
+.muted { color: var(--muted); font-size: 0.85rem; }
+
 .auth-bar {
   display: flex;
   gap: 0.5rem;

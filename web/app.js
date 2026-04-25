@@ -29,6 +29,10 @@ const els = {
   sendBtn: $("send-btn"),
   status: $("status"),
   cost: $("cost"),
+  settingsBtn: $("settings-btn"),
+  settingsPanel: $("settings-panel"),
+  settingsClose: $("settings-close"),
+  settingsBody: $("settings-body"),
 };
 
 const state = {
@@ -111,6 +115,7 @@ async function connect() {
     els.chat.classList.remove("hidden");
     els.logoutBtn.classList.remove("hidden");
     els.cost.classList.remove("hidden");
+    els.settingsBtn.classList.remove("hidden");
     refreshCost();
     state.costTimer = setInterval(refreshCost, 5000);
     openStream();
@@ -225,6 +230,65 @@ function renderEvent(ev) {
   }
 }
 
+// ───────────── 设置中心 #70-B ─────────────
+
+function escapeHtml(s) {
+  const div = document.createElement("div");
+  div.textContent = s == null ? "" : String(s);
+  return div.innerHTML;
+}
+
+function renderProviderCard(role, p) {
+  if (!p) {
+    return `<div class="provider-card"><div class="role">${role}</div><div class="muted">未配置</div></div>`;
+  }
+  const availClass = p.available ? "available-yes" : "available-no";
+  const availLabel = p.available ? "✓ 可用" : "✗ 不可用";
+  return `
+    <div class="provider-card">
+      <div class="role">${role}</div>
+      <div class="name">${escapeHtml(p.displayName)} <span class="${availClass}">${availLabel}</span></div>
+      <dl>
+        <dt>type</dt><dd>${escapeHtml(p.type)} (${escapeHtml(p.kind)})</dd>
+        <dt>model</dt><dd>${escapeHtml(p.model)}</dd>
+        <dt>baseUrl</dt><dd>${escapeHtml(p.baseUrl)}</dd>
+        ${p.reason ? `<dt>状态</dt><dd>${escapeHtml(p.reason)}</dd>` : ""}
+      </dl>
+    </div>
+  `;
+}
+
+async function refreshSettings() {
+  els.settingsBody.innerHTML = '<p class="muted">加载中...</p>';
+  try {
+    const r = await fetch("/v1/web/providers", {
+      headers: { Authorization: "Bearer " + state.token },
+    });
+    if (!r.ok) {
+      els.settingsBody.innerHTML = `<p class="muted">加载失败：HTTP ${r.status}</p>`;
+      return;
+    }
+    const data = await r.json();
+    els.settingsBody.innerHTML =
+      renderProviderCard("当前 provider", data.current) +
+      renderProviderCard("fallback", data.fallback) +
+      `<p class="muted" style="margin-top:1rem;">配置位于 <code>~/.codeclaw/config.yaml</code> + <code>providers.json</code>。<br>修改后需 restart codeclaw web。</p>`;
+  } catch (err) {
+    els.settingsBody.innerHTML = `<p class="muted">异常：${escapeHtml(String(err))}</p>`;
+  }
+}
+
+function openSettings() {
+  els.settingsPanel.classList.remove("hidden");
+  els.settingsPanel.setAttribute("aria-hidden", "false");
+  refreshSettings();
+}
+
+function closeSettings() {
+  els.settingsPanel.classList.add("hidden");
+  els.settingsPanel.setAttribute("aria-hidden", "true");
+}
+
 // ───────────── Cost dashboard #70-A ─────────────
 
 async function refreshCost() {
@@ -287,6 +351,8 @@ function logout() {
   els.logoutBtn.classList.add("hidden");
   els.cost.classList.add("hidden");
   els.cost.textContent = "";
+  els.settingsBtn.classList.add("hidden");
+  closeSettings();
   els.messages.innerHTML = "";
   setStatus("已登出", false);
 }
@@ -295,6 +361,8 @@ function logout() {
 
 els.connectBtn.addEventListener("click", connect);
 els.logoutBtn.addEventListener("click", logout);
+els.settingsBtn.addEventListener("click", openSettings);
+els.settingsClose.addEventListener("click", closeSettings);
 
 els.composer.addEventListener("submit", (e) => {
   e.preventDefault();

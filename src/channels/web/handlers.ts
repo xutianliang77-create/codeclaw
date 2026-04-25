@@ -11,6 +11,7 @@ import type { SessionStore } from "./sessionStore";
 import { validateBearer, type WebAuthConfig } from "./auth";
 import { checkAndRegister, recordDelivery } from "../../ingress/dedupStore";
 import { summarizeBySession, summarizeToday, formatUsd } from "../../provider/costTracker";
+import type { ProviderStatus } from "../../provider/types";
 
 export interface HandlerDeps {
   store: SessionStore;
@@ -22,6 +23,11 @@ export interface HandlerDeps {
    * 不注入则相关功能（ingress dedup / cost dashboard）静默禁用。
    */
   dataDb?: Database.Database;
+  /** server 启动时快照的 provider 配置（设置中心只读视图） */
+  providers?: {
+    current: ProviderStatus | null;
+    fallback: ProviderStatus | null;
+  };
 }
 
 function jsonResponse(res: ServerResponse, status: number, body: unknown): void {
@@ -173,6 +179,33 @@ export async function handleMessage(
     });
   }
   jsonResponse(res, 202, { accepted: true });
+}
+
+// GET /v1/web/providers   #70-B 设置中心只读快照
+export async function handleProviders(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+  const sanitize = (p: ProviderStatus | null): Record<string, unknown> | null =>
+    p
+      ? {
+          type: p.type,
+          displayName: p.displayName,
+          kind: p.kind,
+          model: p.model,
+          baseUrl: p.baseUrl,
+          available: p.available,
+          reason: p.reason,
+          // 故意不返 apiKey / envVars / fileConfig（避免泄露）
+        }
+      : null;
+  jsonResponse(res, 200, {
+    current: sanitize(deps.providers?.current ?? null),
+    fallback: sanitize(deps.providers?.fallback ?? null),
+  });
 }
 
 // GET /v1/web/cost?sessionId=<id>   #70-A

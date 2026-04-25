@@ -239,6 +239,22 @@ describe("Web server · 路由 misc", () => {
     expect(r.status).toBe(400);
   });
 
+  // ───────── #70-B 设置中心 ─────────
+  it("GET /v1/web/providers · 默认无 provider 注入 → current/fallback 都为 null", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/providers`, { headers: authHeaders() });
+    expect(r.status).toBe(200);
+    const body = await r.json() as { current: unknown; fallback: unknown };
+    expect(body.current).toBeNull();
+    expect(body.fallback).toBeNull();
+  });
+
+  it("GET /v1/web/providers 错 token → 401", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/providers`, {
+      headers: { Authorization: "Bearer wrong" },
+    });
+    expect(r.status).toBe(401);
+  });
+
   // ───────── #70-A cost dashboard ─────────
   it("GET /v1/web/cost 缺 sessionId → 400", async () => {
     const r = await fetch(`${baseUrl}/v1/web/cost`, { headers: authHeaders() });
@@ -264,6 +280,50 @@ describe("Web server · 路由 misc", () => {
       headers: { Authorization: "Bearer wrong" },
     });
     expect(r.status).toBe(401);
+  });
+
+  it("GET /v1/web/providers · 注入 provider 时返 sanitized 字段（不含 apiKey）", async () => {
+    const customHandle = await startWebServer({
+      port: 0,
+      auth: { bearerToken: TOKEN },
+      engineDefaults: {
+        currentProvider: {
+          type: "openai",
+          displayName: "OpenAI",
+          kind: "cloud",
+          enabled: true,
+          requiresApiKey: true,
+          baseUrl: "https://api.openai.com/v1",
+          model: "gpt-4.1-mini",
+          timeoutMs: 30000,
+          apiKey: "sk-secret-redacted",
+          apiKeyEnvVar: "OPENAI_API_KEY",
+          envVars: ["OPENAI_API_KEY"],
+          fileConfig: {} as never,
+          configured: true,
+          available: true,
+          reason: "configured",
+        },
+        fallbackProvider: null,
+        permissionMode: "plan",
+        workspace: process.cwd(),
+      },
+    });
+    try {
+      const url = `http://${customHandle.host}:${customHandle.port}`;
+      const r = await fetch(`${url}/v1/web/providers`, { headers: authHeaders() });
+      expect(r.status).toBe(200);
+      const body = await r.json() as { current: Record<string, unknown> | null; fallback: unknown };
+      expect(body.current).not.toBeNull();
+      expect(body.current!.model).toBe("gpt-4.1-mini");
+      expect(body.current!.baseUrl).toBe("https://api.openai.com/v1");
+      // 关键：apiKey / envVars / fileConfig 不应外泄
+      expect(JSON.stringify(body)).not.toContain("sk-secret-redacted");
+      expect(JSON.stringify(body)).not.toContain("OPENAI_API_KEY");
+      expect(body.fallback).toBeNull();
+    } finally {
+      await customHandle.close();
+    }
   });
 
   it("无 CODECLAW_WEB_TOKEN env → startWebServer reject", async () => {

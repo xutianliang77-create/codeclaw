@@ -15,8 +15,19 @@
   <header>
     <h1>CodeClaw <span class="version">web</span></h1>
     <div id="cost" class="cost hidden" title="LLM 调用成本（本会话 / 今日跨会话）"></div>
+    <button id="settings-btn" class="settings-btn hidden" title="Provider 配置 / 设置">⚙</button>
     <div id="status" class="status disconnected">未连接</div>
   </header>
+
+  <aside id="settings-panel" class="settings-panel hidden" aria-hidden="true">
+    <div class="settings-header">
+      <h2>设置</h2>
+      <button id="settings-close" class="icon-btn" aria-label="关闭">×</button>
+    </div>
+    <div id="settings-body" class="settings-body">
+      <p class="muted">加载中...</p>
+    </div>
+  </aside>
 
   <section id="auth-bar" class="auth-bar">
     <input id="token-input" type="password" placeholder="CODECLAW_WEB_TOKEN" autocomplete="off" />
