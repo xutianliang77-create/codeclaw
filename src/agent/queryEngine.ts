@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { clearPendingApprovals, loadPendingApprovals, savePendingApprovals } from "../approvals/store";
@@ -154,6 +155,28 @@ export function parseDiffStatSummary(
  * 判断 fix 产生的 diff 是否超过 scope 阈值。
  * 空 diff（找不到 summary 行）视为 ok（不 abort，但调用方会显式标 "no changes"）。
  */
+/**
+ * /fix v3 W4-02：从 workspace/package.json 嗅探 verify cmd。
+ * 仅当 scripts.test 存在、非空、非 npm init 默认 placeholder 时返回 "npm test"。
+ *
+ * Placeholder 跳过：`echo "Error: no test specified" && exit 1` 跑必然 fail，
+ * 不应当真做 verify（会浪费 plan/execute 一整轮然后必败）。
+ */
+export function detectVerifyCmd(workspace: string): string | null {
+  try {
+    const pkgPath = path.join(workspace, "package.json");
+    if (!existsSync(pkgPath)) return null;
+    const text = readFileSync(pkgPath, "utf8");
+    const pkg = JSON.parse(text) as { scripts?: { test?: unknown } };
+    const test = pkg?.scripts?.test;
+    if (typeof test !== "string" || !test.trim()) return null;
+    if (/no test specified/i.test(test)) return null;
+    return "npm test";
+  } catch {
+    return null;
+  }
+}
+
 export function evaluateDiffScope(
   stat: string,
   opts?: { maxFiles?: number; maxLines?: number }
@@ -1382,9 +1405,13 @@ class LocalQueryEngine implements QueryEngine {
    *   - 超过 max_files / max_lines 时 reply 末尾标 "diff-scope: ABORT"
    *   - 不自动 rollback；让用户决策是否保留
    *
+   * v3 verify auto-detect（task #66）：
+   *   - 未显式给 -- verify 时，从 workspace/package.json 嗅探 scripts.test
+   *   - 找到则自动用 "npm test"；reply 里标注 (auto-detected)
+   *   - 找不到回退 v1（不跑 verify）
+   *
    * 仍未做（v4+）：
-   *   - 自动从 package.json 嗅探 verify cmd（task #66）
-   *   - 多语言 verify 模板（task #67）
+   *   - 多语言 verify 模板（task #67）：pyproject.toml / Cargo.toml 等
    */
   public async runFixCommand(prompt: string): Promise<string> {
     const stripped = prompt.replace("/fix", "").trim();
@@ -1393,7 +1420,7 @@ class LocalQueryEngine implements QueryEngine {
     }
 
     // 解析 -- verify "<cmd>"（v2）
-    const { goal: fixGoal, verifyCmd } = parseFixArgs(stripped);
+    const { goal: fixGoal, verifyCmd: explicitVerify } = parseFixArgs(stripped);
     if (!fixGoal) {
       return "Usage: /fix <bug description> [-- verify \"<test cmd>\"]";
     }
@@ -1414,6 +1441,16 @@ class LocalQueryEngine implements QueryEngine {
 
     const cwd = this.options.workspace;
 
+    // v3 W4-02：未显式给 -- verify 时，从 package.json 嗅探 scripts.test
+    // vitest 环境下禁用 auto-detect 避免递归——CodeClaw 根目录 scripts.test=vitest，
+    // 在测试里再跑会导致整个 vitest 套件被重新触发。
+    const isVitest = !!process.env.VITEST;
+    const detectedVerify = !explicitVerify && !isVitest ? detectVerifyCmd(cwd) : null;
+    const verifyCmd: string | undefined = explicitVerify ?? detectedVerify ?? undefined;
+    const verifyCmdLabel = verifyCmd
+      ? `verify-cmd: ${verifyCmd}${detectedVerify && !explicitVerify ? " (auto-detected from package.json)" : ""}`
+      : "";
+
     // v2 跑前 verify_broken
     let preVerify: { ok: boolean; stdout: string; stderr: string; code: number | null } | null = null;
     if (verifyCmd) {
@@ -1422,7 +1459,7 @@ class LocalQueryEngine implements QueryEngine {
         return [
           "Fix",
           `goal: ${fixGoal}`,
-          `verify-cmd: ${verifyCmd}`,
+          verifyCmdLabel,
           "verify-broken: no (already passing)",
           "skipping fix attempt — nothing to fix.",
         ].join("\n");
@@ -1444,7 +1481,7 @@ class LocalQueryEngine implements QueryEngine {
         : `diff-scope: ok (${scope.files} files, ${scope.lines} lines; max ${DIFF_SCOPE_MAX_FILES}/${DIFF_SCOPE_MAX_LINES})`;
       reply += "\n\n" + [
         "--- verify ---",
-        `verify-cmd: ${verifyCmd}`,
+        verifyCmdLabel,
         `verify-broken (pre): yes`,
         `verify-fixed (post): ${postVerify.ok ? "yes" : "no"}`,
         ...(!postVerify.ok && postVerify.stderr.trim()
