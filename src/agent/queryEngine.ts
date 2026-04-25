@@ -19,6 +19,8 @@ import {
   saveMemoryDigest,
   type ForgetOptions,
 } from "../memory/sessionMemory/store";
+import { forgetAllSessions, forgetSession } from "../storage/forget";
+import { homedir } from "node:os";
 import { recallRecent } from "../memory/sessionMemory/recaller";
 import {
   createProviderSummarizer,
@@ -1666,16 +1668,54 @@ class LocalQueryEngine implements QueryEngine {
   }
 
   /**
-   * L2 Session Memory · /forget 命令主入口：清除已保存的摘要。
-   * 支持 --all / --session=<id> / --since=<ms>。
+   * /forget · 跨表 + 跨文件物理清理（W3-16）
+   *   - --all：清所有 session 的 user-facing 数据 + 文件目录
+   *   - --session <id>：清单一 session（跨表 + 文件目录）
+   *   - --since <ms>：仅清 memory_digest（其他表/文件按时间过滤实现复杂，留 P1）
+   *
+   * audit_events **故意保留**——不可篡改的审计 trail；reply 里透明告知数量。
    */
   public runForgetCommand(opts: ForgetOptions): string {
     if (!this.dataDb) {
       return "Memory not enabled (dataDbPath disabled / vitest env).";
     }
-    const removed = forgetMemoryDigests(this.dataDb, opts);
-    const what = opts.all ? "all" : opts.sessionId ? `session ${opts.sessionId}` : `since ${opts.since}`;
-    return `Forgot ${removed} digest(s) (${what}).`;
+    const sessionsDir = this.options.sessionsDir ?? path.join(homedir(), ".codeclaw", "sessions");
+
+    if (opts.all) {
+      const r = forgetAllSessions(this.dataDb, null, sessionsDir);
+      const totalRows = r.results.reduce(
+        (sum, x) => sum + Object.values(x.tableRowsDeleted).reduce((s, n) => s + n, 0),
+        0
+      );
+      const filesRemoved = r.results.filter((x) => x.fileRemoved).length;
+      return [
+        `Forgot ${r.totalSessions} session(s) (all).`,
+        `  rows deleted across tables: ${totalRows}`,
+        `  session dirs removed: ${filesRemoved}`,
+        `  audit_events preserved (compliance): see ~/.codeclaw/audit.db`,
+      ].join("\n");
+    }
+
+    if (opts.sessionId) {
+      const r = forgetSession(this.dataDb, null, sessionsDir, opts.sessionId);
+      const totalRows = Object.values(r.tableRowsDeleted).reduce((s, n) => s + n, 0);
+      return [
+        `Forgot session ${opts.sessionId}.`,
+        `  rows deleted: ${totalRows} (${Object.entries(r.tableRowsDeleted)
+          .filter(([, n]) => n > 0)
+          .map(([t, n]) => `${t}=${n}`)
+          .join(", ") || "none"})`,
+        `  session dir removed: ${r.fileRemoved}`,
+      ].join("\n");
+    }
+
+    if (opts.since !== undefined) {
+      // since 模式仅清 memory_digest（其他表按时间清需要更细设计）
+      const removed = forgetMemoryDigests(this.dataDb, { since: opts.since });
+      return `Forgot ${removed} digest(s) (since ${opts.since}). Note: --since only clears memory_digest in P0; cross-table since cleanup留 P1.`;
+    }
+
+    return "Forgot 0 (no opts given).";
   }
 
   /** 给 /orchestrate slash builtin 用 */

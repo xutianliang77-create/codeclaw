@@ -159,7 +159,10 @@ describe("QueryEngine L2 Memory · /forget 流程", () => {
     // 走 public 接口：
     // @ts-expect-error LocalQueryEngine 实例方法在 QueryEngine 接口未声明
     const result = engine.runForgetCommand({ all: true });
-    expect(result).toContain("Forgot 2 digest");
+    // W3-16 跨表清理后输出格式："Forgot N session(s) (all)."
+    // 我们的 predef digest 没建 sessions 表行，走孤儿摘要路径——也算 1 个
+    expect(result).toContain("Forgot");
+    expect(result).toContain("session(s)");
 
     // 验证 db 真清空
     const handle = openDataDb({ path: dataDbPath, singleton: false });
@@ -183,7 +186,10 @@ describe("QueryEngine L2 Memory · /forget 流程", () => {
     });
 
     // @ts-expect-error LocalQueryEngine 实例方法在 QueryEngine 接口未声明
-    expect(engine.runForgetCommand({ sessionId: "s1" })).toContain("Forgot 1 digest");
+    const r = engine.runForgetCommand({ sessionId: "s1" });
+    // 输出格式："Forgot session s1.\n  rows deleted: N (memory_digest=1)"
+    expect(r).toContain("Forgot session s1");
+    expect(r).toContain("memory_digest=1");
 
     const handle = openDataDb({ path: dataDbPath, singleton: false });
     const remaining = loadRecentDigests(handle.db, "cli", "alice");

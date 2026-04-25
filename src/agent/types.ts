@@ -84,6 +84,8 @@ export interface QueryEngineOptions {
   /** L2 Memory 召回需要 (channel, userId) 隔离；不传时不启用 L2 */
   channel?: import("../channels/channelAdapter").ChannelType;
   userId?: string;
+  /** /forget 清理时要删的会话文件根；不传走 ~/.codeclaw/sessions */
+  sessionsDir?: string;
   fetchImpl?: typeof fetch;
   wechat?: {
     tokenFile?: string;
