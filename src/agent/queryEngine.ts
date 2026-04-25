@@ -122,8 +122,8 @@ async function runShellCommand(
 }
 
 /**
- * /fix v3 diff_scope 默认阈值。fix 一个 bug 通常 1-3 文件 / <100 行；
- * 超过这个规模说明 LLM 越权或题目本身不是单 bug 修复——abort 让用户审视。
+ * diff_scope 默认阈值。单 bug 修复通常 1-3 文件 / <100 行；
+ * 超过即视为 LLM 越权或题目不是单 bug，让用户审视。
  */
 export const DIFF_SCOPE_MAX_FILES = 5;
 export const DIFF_SCOPE_MAX_LINES = 300;
@@ -152,11 +152,7 @@ export function parseDiffStatSummary(
 }
 
 /**
- * 判断 fix 产生的 diff 是否超过 scope 阈值。
- * 空 diff（找不到 summary 行）视为 ok（不 abort，但调用方会显式标 "no changes"）。
- */
-/**
- * /fix v3 W4-02/03：从 workspace 嗅探 verify cmd。
+ * 多语言 verify cmd 嗅探：从 workspace 探测第一个匹配的项目模板。
  *
  * 探测器优先级（找到第一个就用）：
  *   1. package.json 含有效 scripts.test → "npm test"
@@ -166,6 +162,9 @@ export function parseDiffStatSummary(
  *
  * polyglot 仓库（如 Node + Python）按上面顺序选第一个；用户仍可
  * 通过 `-- verify "<cmd>"` 显式覆盖。npm placeholder 跳过避免必败。
+ *
+ * 注：reply 里的 "(auto-detected from package.json)" 字面量沿用 npm 措辞，
+ * cargo/pytest/go 命中时也会显示该串——口径绑定测试，留待后续统一调整。
  */
 type VerifyDetector = (workspace: string) => string | null;
 
@@ -215,6 +214,10 @@ export function detectVerifyCmd(workspace: string): string | null {
   return null;
 }
 
+/**
+ * 判断 fix 产生的 diff 是否超过 scope 阈值。
+ * 空 diff（找不到 summary 行）视为 ok（不 abort，但调用方会显式标 "no changes"）。
+ */
 export function evaluateDiffScope(
   stat: string,
   opts?: { maxFiles?: number; maxLines?: number }
@@ -1427,28 +1430,28 @@ class LocalQueryEngine implements QueryEngine {
 
   /** 给 /review slash builtin 用 */
   /**
-   * 给 /fix slash builtin 用（task #58 v2）：fix-intent 编排 + 可选 verify 闭环。
+   * 给 /fix slash builtin 用：fix-intent 编排 + 可选 verify 闭环。
    *
    * 输入形态：
-   *   /fix <goal>                          v1 行为：plan/execute/reflect 后返回
-   *   /fix <goal> -- verify "<cmd>"        v2：跑前/跑后跑 cmd 自动判定 broken→fixed
+   *   /fix <goal>                          plan/execute/reflect 后返回
+   *   /fix <goal> -- verify "<cmd>"        跑前/跑后跑 cmd 自动判定 broken→fixed
    *
-   * v2 verify 行为：
+   * verify 行为：
    *   - 跑前：执行 cmd（exit 0 = 已修，abort）
    *   - 跑后：再执行 cmd（exit 0 = 修好，否则附 stderr）
    *   - 末尾附 git diff --stat 信息
    *
-   * v3 diff_scope（task #65）：
+   * diff_scope 校验：
    *   - 跑后用 evaluateDiffScope 校验 git diff 范围
    *   - 超过 max_files / max_lines 时 reply 末尾标 "diff-scope: ABORT"
    *   - 不自动 rollback；让用户决策是否保留
    *
-   * v3 verify auto-detect（task #66/#67）：
+   * verify 自动嗅探：
    *   - 未显式给 -- verify 时，从 workspace 嗅探多语言项目模板：
    *     package.json → npm test / pyproject.toml | pytest.ini → pytest /
    *     Cargo.toml → cargo test / go.mod → go test ./...
    *   - 优先级固定（npm > pytest > cargo > go），polyglot 仓库取最高优先
-   *   - 找到则自动用，reply 里标注 (auto-detected)；找不到回退 v1（不跑 verify）
+   *   - 找到则自动用，reply 里标注 (auto-detected)；找不到则不跑 verify
    */
   public async runFixCommand(prompt: string): Promise<string> {
     const stripped = prompt.replace("/fix", "").trim();
@@ -1478,14 +1481,14 @@ class LocalQueryEngine implements QueryEngine {
 
     const cwd = this.options.workspace;
 
-    // v3 W4-02：未显式给 -- verify 时，从 package.json 嗅探 scripts.test
-    // vitest 环境下禁用 auto-detect 避免递归——CodeClaw 根目录 scripts.test=vitest，
-    // 在测试里再跑会导致整个 vitest 套件被重新触发。
+    // 未显式给 -- verify 时，从 workspace 嗅探。vitest 环境下禁用避免自递归
+    // ——CodeClaw 根目录 scripts.test=vitest，在测试里再跑会重新触发整个套件。
     const isVitest = !!process.env.VITEST;
     const detectedVerify = !explicitVerify && !isVitest ? detectVerifyCmd(cwd) : null;
     const verifyCmd: string | undefined = explicitVerify ?? detectedVerify ?? undefined;
+    const autoDetected = !!detectedVerify && !explicitVerify;
     const verifyCmdLabel = verifyCmd
-      ? `verify-cmd: ${verifyCmd}${detectedVerify && !explicitVerify ? " (auto-detected from package.json)" : ""}`
+      ? `verify-cmd: ${verifyCmd}${autoDetected ? " (auto-detected from package.json)" : ""}`
       : "";
 
     // v2 跑前 verify_broken
