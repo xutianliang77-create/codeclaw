@@ -707,6 +707,7 @@ class LocalQueryEngine implements QueryEngine {
           text: output,
           source: "local"
         });
+        this.notifyListeners();
         yield this.phaseEvent("completed");
         return;
       }
@@ -1079,7 +1080,37 @@ class LocalQueryEngine implements QueryEngine {
       plan = buildOrchestrationPlan(plan.userGoal, this.buildOrchestrationContext());
     }
 
+    // 修 review H1：显式按 reflector decision 落 halt，避免外层 phaseEvent("completed")
+    // 把 escalated / approval-required 误标成 completed/success
+    this.finalizeOrchestrationHalt(reflector);
+
     return { execution, reflector, rounds: round };
+  }
+
+  /**
+   * 把 reflector decision 翻译成 FSM halt 状态，确保 /cost / /status / 审计读到的
+   * lastHalt 能精确反映"这一轮工作以什么方式结束"。
+   *   - escalated → halt(completed, partial)：自然结束，但目标未达成，用户应当干预
+   *   - approval-required → halt(approval-required, blocked)：等审批
+   *   - complete / replan：不在此 halt，留给外层 phaseEvent("completed") 或多轮已 halt 的 max-turns
+   *
+   * 注意：调用前若 fsm 已 halted（max-turns 路径），此函数为 no-op（FSM 内部 isHalted 守卫）。
+   */
+  private finalizeOrchestrationHalt(reflector: ReflectorResult): void {
+    if (this.fsm.isHalted()) return;
+    switch (reflector.decision) {
+      case "escalated":
+        this.fsm.halt("completed", "partial", {
+          message: "reflector escalated: repeated gap",
+        });
+        break;
+      case "approval-required":
+        this.fsm.halt("approval-required", "blocked", {
+          message: "reflector requested user approval",
+        });
+        break;
+      // "complete" / "replan" → 留给外层 phaseEvent 处理或已被 max-turns halt
+    }
   }
 
   /** 给 /review slash builtin 用 */

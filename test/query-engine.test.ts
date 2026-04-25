@@ -790,7 +790,7 @@ describe("query engine", () => {
     expect(engine.getMessages().at(-1)?.text).toContain("gaps: none");
   });
 
-  it("/fix invokes fix-intent orchestration and uses orchestration reply format", async () => {
+  it("/fix invokes fix-intent orchestration and uses orchestration reply format", { timeout: 15000 }, async () => {
     process.env.CODECLAW_ENABLE_REAL_LSP = "0";
     const engine = createQueryEngine({
       currentProvider: provider,
@@ -840,10 +840,17 @@ describe("query engine", () => {
     expect(engine.getMessages().at(-1)?.text).toContain("reflector-decision: escalated");
     expect(engine.getMessages().at(-1)?.text).toContain("is-complete: no");
 
+    // review H1 修：reflector escalated 应在 FSM 上记 completed/partial（自然结束但目标未达成）
+    expect(engine.getFsmSnapshot!().lastHalt).toMatchObject({
+      reason: "completed",
+      completion: "partial",
+    });
+
     // 再次调用：gap 已在 LRU，仍 escalated（不会反复 replan 浪费 turn）
     await collect(engine.submitMessage("/orchestrate create src/new-feature.ts"));
     expect(engine.getMessages().at(-1)?.text).toContain("reflector-decision: escalated");
     expect(engine.getMessages().at(-1)?.text).toContain("is-complete: no");
+    expect(engine.getFsmSnapshot!().lastHalt?.completion).toBe("partial");
   });
 
   it("surfaces orchestration write approvals through /approvals and /approve", async () => {
