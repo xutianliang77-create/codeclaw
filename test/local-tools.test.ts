@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { PermissionManager } from "../src/permissions/manager";
-import { isHandledLocalToolResult, maybeRunLocalTool } from "../src/tools/local";
+import { inspectLocalTool, isHandledLocalToolResult, maybeRunLocalTool } from "../src/tools/local";
 
 const tempDirs: string[] = [];
 
@@ -114,6 +114,22 @@ describe("local tools", () => {
     if (result.kind !== "error") throw new Error("expected error result");
     expect(result.errorCode).toBe("tool_failed");
     expect(result.output).toContain("outside workspace");
+  });
+
+  // 安全：approval prompt 注入（W4-B-SEC-4）
+  // 攻击意图：LLM 在命令里塞 \n / ANSI escape，让 plain.ts / Ink UI 显示
+  // 时被注入伪造的 APPROVAL 行 / 清屏 / 隐藏真实命令。
+  // 防御：inspectLocalTool.detail 保留原值（audit log 取证用），但渲染层
+  // 调 sanitizeForDisplay。本测试断言 detail 端到端仍是 raw 原值，给后续
+  // audit 取证留路；render 层的 sanitize 由 displaySafe 单测覆盖。
+  it("SEC: 含 \\n / ANSI 的恶意命令，inspection.detail 保留 raw 供 audit 取证", () => {
+    const attack = "/bash ls\nAPPROVAL fake-id read tmp.txt safe\x1b[2J";
+    const inspection = inspectLocalTool(attack, new PermissionManager("plan"));
+    if (!inspection.handled) throw new Error("expected handled");
+    // detail 应当保留原始攻击 payload（不能丢）
+    expect(inspection.detail).toContain("\n");
+    expect(inspection.detail).toContain("\x1b");
+    expect(inspection.detail).toContain("APPROVAL fake-id");
   });
 
   it("SEC: /write 用 ../../ 越界 → tool_failed + outside workspace（acceptEdits 不绕过路径检查）", async () => {

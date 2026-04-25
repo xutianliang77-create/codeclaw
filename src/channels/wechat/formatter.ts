@@ -1,4 +1,5 @@
 import type { EngineMessage } from "../../agent/types";
+import { sanitizeForDisplay } from "../../lib/displaySafe";
 import type { WechatCardRenderInput } from "./types";
 
 const WECHAT_MARKDOWN_SOFT_LIMIT = 1200;
@@ -69,8 +70,8 @@ export function buildWechatMarkdownCard(input: WechatCardRenderInput): string {
     ? [
         "## 待审批",
         `- tool: ${approval.toolName}`,
-        `- detail: ${approval.detail}`,
-        `- reason: ${approval.reason}`,
+        `- detail: ${sanitizeForDisplay(approval.detail)}`,
+        `- reason: ${sanitizeForDisplay(approval.reason)}`,
         `- queue: ${approval.queuePosition}/${approval.totalPending}`,
         "- 回复 `/approve` 或 `/deny`"
       ]
@@ -78,8 +79,8 @@ export function buildWechatMarkdownCard(input: WechatCardRenderInput): string {
       ? [
           "## 待审批",
           `- orchestration: ${orchestrationApproval.operation}`,
-          `- target: ${orchestrationApproval.target}`,
-          `- reason: ${orchestrationApproval.reason}`,
+          `- target: ${sanitizeForDisplay(orchestrationApproval.target)}`,
+          `- reason: ${sanitizeForDisplay(orchestrationApproval.reason)}`,
           `- queue: ${orchestrationApproval.queuePosition}/${orchestrationApproval.totalPending}`,
           "- 回复 `/approve` 或 `/deny`"
         ]

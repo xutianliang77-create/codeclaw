@@ -5,6 +5,7 @@ import { clearPendingApprovals, loadPendingApprovals, savePendingApprovals } fro
 import type { StoredPendingApproval } from "../approvals/store";
 import { runDoctor } from "../commands/doctor";
 import type { PermissionMode } from "../lib/config";
+import { sanitizeForDisplay } from "../lib/displaySafe";
 import { callMcpTool, listMcpResources, listMcpServers, listMcpTools, readMcpResource } from "../mcp/service";
 import { SlashRegistry, loadBuiltins } from "../commands/slash";
 import { EngineFsm } from "../fsm";
@@ -709,7 +710,7 @@ class LocalQueryEngine implements QueryEngine {
         text:
           this.pendingApprovals.length === 1
             ? `Recovered pending approval for ${nextApproval.toolName}. Run /approve or /deny.`
-            : `Recovered ${this.pendingApprovals.length} pending approvals. Next: ${nextApproval.toolName} ${nextApproval.detail}. Run /approve or /deny.`,
+            : `Recovered ${this.pendingApprovals.length} pending approvals. Next: ${nextApproval.toolName} ${sanitizeForDisplay(nextApproval.detail)}. Run /approve or /deny.`,
         source: "local"
       });
     }
@@ -1094,7 +1095,7 @@ class LocalQueryEngine implements QueryEngine {
           output =
             this.pendingApprovals.length === 1
               ? `Approval required for ${inspection.toolName}: ${inspection.decision.reason}\nRun /approve or /deny.`
-              : `Approval queued for ${inspection.toolName}: ${inspection.decision.reason}\nPending approvals: ${this.pendingApprovals.length}. Next up: ${activeApproval.toolName} ${activeApproval.detail}.\nRun /approve or /deny to process the queue.`;
+              : `Approval queued for ${inspection.toolName}: ${inspection.decision.reason}\nPending approvals: ${this.pendingApprovals.length}. Next up: ${activeApproval.toolName} ${sanitizeForDisplay(activeApproval.detail)}.\nRun /approve or /deny to process the queue.`;
           yield {
             type: "approval-request",
             approvalId: activeApproval.id,
@@ -1682,11 +1683,11 @@ class LocalQueryEngine implements QueryEngine {
       `pending approvals: ${this.pendingApprovals.length + this.pendingOrchestrationApprovals.length}`,
       ...this.pendingApprovals.map(
         (approval, index) =>
-          `${index + 1}. ${approval.id}  ${approval.toolName}  ${approval.detail}  ${approval.reason}`
+          `${index + 1}. ${approval.id}  ${approval.toolName}  ${sanitizeForDisplay(approval.detail)}  ${sanitizeForDisplay(approval.reason)}`
       ),
       ...this.pendingOrchestrationApprovals.map(
         (approval, index) =>
-          `${this.pendingApprovals.length + index + 1}. ${approval.id}  orchestration:${approval.operation}  ${approval.target}  ${approval.reason}`
+          `${this.pendingApprovals.length + index + 1}. ${approval.id}  orchestration:${approval.operation}  ${sanitizeForDisplay(approval.target)}  ${sanitizeForDisplay(approval.reason)}`
       )
     ].join("\n");
   }

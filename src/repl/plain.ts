@@ -3,6 +3,7 @@ import process from "node:process";
 import type { QueryEngine } from "../agent/types";
 import { createCliIngressMessage } from "../channels/cli/adapter";
 import type { IngressGateway } from "../ingress/gateway";
+import { sanitizeForDisplay } from "../lib/displaySafe";
 
 type PlainBootInfo = {
   providerLabel: string;
@@ -121,13 +122,13 @@ export async function runPlainRepl(options: {
 
           if (event.type === "approval-request") {
             printLine(
-              `APPROVAL ${event.approvalId} ${event.toolName} ${event.detail} ${event.reason}`
+              `APPROVAL ${event.approvalId} ${event.toolName} ${sanitizeForDisplay(event.detail)} ${sanitizeForDisplay(event.reason)}`
             );
             continue;
           }
 
           if (event.type === "tool-start") {
-            printLine(`TOOL ${event.toolName} running ${event.detail}`);
+            printLine(`TOOL ${event.toolName} running ${sanitizeForDisplay(event.detail)}`);
             continue;
           }
 

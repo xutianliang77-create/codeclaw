@@ -4,6 +4,7 @@ import { SafeTextInput } from "./SafeTextInput";
 import type { EngineMessage, EnginePhase, PendingApprovalView, QueryEngine } from "../agent/types";
 import { createCliIngressMessage } from "../channels/cli/adapter";
 import type { IngressGateway } from "../ingress/gateway";
+import { sanitizeForDisplay } from "../lib/displaySafe";
 import { feature } from "../lib/feature";
 
 type AppBootInfo = {
@@ -87,8 +88,8 @@ function ApprovalPanel({ pendingApproval }: { pendingApproval: PendingApprovalSt
       </Text>
       <Text>id: {pendingApproval.id}</Text>
       <Text>tool: {pendingApproval.toolName}</Text>
-      <Text>detail: {pendingApproval.detail}</Text>
-      <Text>reason: {pendingApproval.reason}</Text>
+      <Text>detail: {sanitizeForDisplay(pendingApproval.detail)}</Text>
+      <Text>reason: {sanitizeForDisplay(pendingApproval.reason)}</Text>
       <Text color="gray">Use `/approve`, `/deny`, or target a specific item with `/approve &lt;id&gt;`.</Text>
     </Box>
   );
