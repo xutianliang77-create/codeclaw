@@ -790,6 +790,40 @@ describe("query engine", () => {
     expect(engine.getMessages().at(-1)?.text).toContain("gaps: none");
   });
 
+  it("/fix invokes fix-intent orchestration and uses orchestration reply format", async () => {
+    process.env.CODECLAW_ENABLE_REAL_LSP = "0";
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd()
+    });
+
+    await collect(engine.submitMessage("/fix wrong return type in queryEngine.ts"));
+
+    const lastText = engine.getMessages().at(-1)?.text ?? "";
+    // 复用 buildOrchestrationReply → 输出仍以 "Orchestration" 起头；intent 字段在头部
+    expect(lastText).toContain("Orchestration");
+    // user goal 前缀加了 "fix "
+    expect(lastText).toContain("fix wrong return type in queryEngine.ts");
+    expect(lastText).toContain("checks-run:");
+    expect(lastText).toContain("reflector-decision:");
+  });
+
+  it("/fix without args returns usage hint", async () => {
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd()
+    });
+
+    await collect(engine.submitMessage("/fix"));
+
+    const lastText = engine.getMessages().at(-1)?.text ?? "";
+    expect(lastText).toContain("Usage: /fix");
+  });
+
   it("escalates repeated orchestration gaps instead of self-claiming success", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-query-"));
     tempDirs.push(workspace);

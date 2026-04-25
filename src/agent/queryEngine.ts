@@ -1046,6 +1046,45 @@ class LocalQueryEngine implements QueryEngine {
   }
 
   /** 给 /review slash builtin 用 */
+  /**
+   * 给 /fix slash builtin 用：以"修 bug"为意图跑一轮编排（task #58 v1）。
+   *
+   * v1 设计（最小可用）：
+   *   - 把 user goal 前缀加 "fix "，让 planner 走 fix 意图
+   *   - 若 skillRegistry 注册了 "fix" skill，会按其 allowedTools 限制工具集；
+   *     未注册则走默认 (与 /orchestrate 等价但意图不同)
+   *   - 复用 buildOrchestrationReply 渲染（暂不单独做 buildFixReply）
+   *   - 复用 executePlanWithSideEffects（execute → reflect → gap → pendingApproval）
+   *
+   * v1 不做（v2 起逐步加）：
+   *   - 接入 Golden FIX runner 的 verify_broken / post_verify 自动判定
+   *   - diff_scope 的 max_files / max_lines 强制
+   *   - reflector "replan" 时多轮重试（依赖 task #59 落地）
+   */
+  public async runFixCommand(prompt: string): Promise<string> {
+    const fixGoal = prompt.replace("/fix", "").trim();
+    if (!fixGoal) {
+      return "Usage: /fix <bug description or failing test name>";
+    }
+
+    const fixSkill = this.skillRegistry.get("fix");
+    const plan = buildOrchestrationPlan(`fix ${fixGoal}`, this.buildOrchestrationContext());
+    const disallowedSkillTools = this.getDisallowedSkillToolsForPlan(plan, fixSkill);
+
+    if (disallowedSkillTools.length > 0) {
+      return [
+        "Fix",
+        `goal: ${fixGoal}`,
+        `skill: ${fixSkill?.name ?? "fix"}`,
+        `blocked-tools: ${disallowedSkillTools.join(", ")}`,
+        `reason: fix lane only allows ${fixSkill?.allowedTools.join(", ") ?? "default tools"}`
+      ].join("\n");
+    }
+
+    const { execution, reflector } = await this.executePlanWithSideEffects(plan);
+    return this.buildOrchestrationReply(plan, execution, reflector);
+  }
+
   public async runReviewCommand(prompt: string): Promise<string> {
     const reviewGoal = prompt.replace("/review", "").trim();
     if (!reviewGoal) {
