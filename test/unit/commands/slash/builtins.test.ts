@@ -277,17 +277,33 @@ describe("delegating builtins · duck-type pattern", () => {
     expect(out.result.text).toContain("unavailable");
   });
 
-  it("/ask delegates to runAskCommand and forwards rawPrompt", async () => {
+  it("/ask v2 with inline question returns rewrite (newPrompt = question)", async () => {
     const reg = new SlashRegistry();
     loadBuiltins(reg);
+    const calls: string[] = [];
     const askHolder = {
-      runAskCommand: (p: string) => `ASK_OUT:${p}`,
+      runAskCommand: (p: string) => {
+        calls.push(p);
+        return `ASK_OUT:${p}`;
+      },
     };
     const out = await reg.dispatch("/ask why is x null", askHolder);
     expect(out?.result).toEqual({
-      kind: "reply",
-      text: "ASK_OUT:/ask why is x null",
+      kind: "rewrite",
+      newPrompt: "why is x null",
     });
+    // 副作用：runAskCommand 仍被调用一次（用于装弹 plan mode）
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toBe("/ask why is x null");
+  });
+
+  it("/ask v2 without args returns reply (v1 fallback path)", async () => {
+    const reg = new SlashRegistry();
+    loadBuiltins(reg);
+    const askHolder = { runAskCommand: () => "stub" };
+    const out = await reg.dispatch("/ask", askHolder);
+    if (out?.result.kind !== "reply") throw new Error("expected reply");
+    expect(out.result.text).toContain("Plan mode armed");
   });
 
   it("/ask degrades when runAskCommand missing", async () => {

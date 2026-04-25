@@ -531,7 +531,8 @@ class LocalQueryEngine implements QueryEngine {
   }
 
   async *submitMessage(prompt: string, options?: QuerySubmitOptions): AsyncGenerator<EngineEvent> {
-    const trimmed = prompt.trim();
+    // /ask v2 可能在 dispatch 后改写 trimmed（rewrite SlashResult），故用 let
+    let trimmed = prompt.trim();
     if (!trimmed) {
       return;
     }
@@ -570,14 +571,34 @@ class LocalQueryEngine implements QueryEngine {
     let output = "";
     let assistantMessageSource: EngineMessageSource = "local";
     const approveTargetId = parseApprovalCommand(trimmed, "/approve");
-    const denyTargetId = parseApprovalCommand(trimmed, "/deny");
+    let denyTargetId = parseApprovalCommand(trimmed, "/deny");
+    let approveTargetIdMutable = approveTargetId;
+    void approveTargetIdMutable; // 占位避免 unused 警告（rewrite 路径不影响 approve/deny）
     // P0 W2 · ADR-003：新注册表前置于旧 resolveBuiltinReply。
-    //   - 命中且返回 reply → 走 builtinReply 分支（老下游无感知）
+    //   - 命中 reply → 走 builtinReply 分支（老下游无感知）
+    //   - 命中 rewrite → 用 newPrompt 替换 trimmed 同 turn 走 LLM 路径（W2-12 /ask v2）
     //   - 命中 noop/passthrough 或未命中 → 继续走旧路径
     const slashDispatch = await this.slashRegistry.dispatch(trimmed, this);
-    const slashReply = slashDispatch?.result.kind === "reply"
-      ? slashDispatch.result.text
-      : null;
+    let slashReply: string | null = null;
+    if (slashDispatch?.result.kind === "reply") {
+      slashReply = slashDispatch.result.text;
+    } else if (slashDispatch?.result.kind === "rewrite") {
+      // /ask v2: 把 inline question 当作真正 prompt 走非 slash 路径
+      trimmed = slashDispatch.result.newPrompt.trim();
+      // 修正本轮 user message：text → newPrompt，source command → user
+      const lastUserMsg = [...this.messages].reverse().find((m) => m.role === "user");
+      if (lastUserMsg) {
+        lastUserMsg.text = trimmed;
+        lastUserMsg.source = "user";
+      }
+      // 重算 approve/deny target（newPrompt 里若含 /approve /deny 也应识别；通常不会）
+      denyTargetId = parseApprovalCommand(trimmed, "/deny");
+      // 同 turn 内本就装弹了 ask mode，question 跑完应当 restore
+      if (this.askModePending) {
+        this.askModeShouldRestoreAtEnd = true;
+      }
+      this.lastEstimatedTokens = estimateMessageTokens(this.messages);
+    }
     const builtinReply = slashReply !== null ? slashReply : this.resolveBuiltinReply(trimmed);
     const commandReply = builtinReply === null ? await this.resolveCommandReply(trimmed) : undefined;
     const localToolName = builtinReply === null ? detectLocalTool(trimmed) : null;

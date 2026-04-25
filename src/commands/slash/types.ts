@@ -50,7 +50,13 @@ export type SlashResult =
   /** 无操作（比如命令故意静默，或者已由 handler 自己副作用完） */
   | { kind: "noop" }
   /** handler 明确放弃处理，让 runtime fall through 到下一条路径 */
-  | { kind: "passthrough" };
+  | { kind: "passthrough" }
+  /**
+   * 同 turn 内重写 prompt：runtime 把 newPrompt 当作 user 输入继续走非 slash 分发
+   * （resolveBuiltinReply / detectLocalTool / LLM）。slash registry 不再二次 dispatch
+   * 同一 prompt（防递归）。/ask v2 用此实现"自动注入下一轮问题"。
+   */
+  | { kind: "rewrite"; newPrompt: string };
 
 export type SlashHandler = (
   ctx: SlashContext

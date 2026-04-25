@@ -96,21 +96,61 @@ describe("query engine", () => {
     expect(engine.getRuntimeState().permissionMode).toBe("default");
   });
 
-  it("/ask with question echoes the question for copy/paste, still arms plan mode", async () => {
+  it("/ask v2: with inline question, rewrites prompt + auto-runs in same turn + mode restores", async () => {
+    const fetchImpl = async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Answer"}}]}\n')
+            );
+            controller.enqueue(new TextEncoder().encode("data: [DONE]\n"));
+            controller.close();
+          },
+        })
+      );
+
     const engine = createQueryEngine({
       currentProvider: provider,
       fallbackProvider: null,
       permissionMode: "auto",
       workspace: process.cwd(),
+      fetchImpl: fetchImpl as typeof fetch,
     });
 
-    const events = await collect(engine.submitMessage("/ask why does X fail?"));
+    await collect(engine.submitMessage("/ask why does X fail?"));
+
+    // 1. user message 被改写为 question 自身（不是原始 "/ask ..."）
+    const userMsg = [...engine.getMessages()].reverse().find((m) => m.role === "user");
+    expect(userMsg?.text).toBe("why does X fail?");
+    expect(userMsg?.source).toBe("user"); // 不再是 command
+
+    // 2. 模型有机会处理 question（mock fetch 返回 "Answer"）
+    const lastAssistant = engine.getMessages().at(-1);
+    expect(lastAssistant?.role).toBe("assistant");
+    expect(lastAssistant?.text).toContain("Answer");
+
+    // 3. 同 turn 内 mode 已 restore 回 auto（不是 plan）
+    expect(engine.getRuntimeState().permissionMode).toBe("auto");
+  });
+
+  it("/ask without args (v1 fallback): does NOT rewrite, only arms plan mode", async () => {
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "default",
+      workspace: process.cwd(),
+    });
+
+    await collect(engine.submitMessage("/ask"));
+
+    // user message 仍是 "/ask"（无 inline 不 rewrite）
+    const userMsg = [...engine.getMessages()].reverse().find((m) => m.role === "user");
+    expect(userMsg?.text).toBe("/ask");
+    expect(userMsg?.source).toBe("command");
+
+    // mode 切到 plan，等下一轮
     expect(engine.getRuntimeState().permissionMode).toBe("plan");
-    const lastMessage = engine.getMessages().at(-1);
-    expect(lastMessage?.text).toContain("Plan mode armed");
-    expect(lastMessage?.text).toContain("why does X fail?");
-    // void to satisfy unused-var lint
-    void events;
   });
 
   it("/ask twice without intervening turn does not overwrite the saved mode", async () => {
@@ -123,15 +163,14 @@ describe("query engine", () => {
     await collect(engine.submitMessage("/ask"));
     expect(engine.getRuntimeState().permissionMode).toBe("plan");
 
-    // 重复 /ask 不应覆盖 askModePending（否则会把 "plan" 当原 mode 卡死）
-    const events2 = await collect(engine.submitMessage("/ask second time"));
-    const reply = engine.getMessages().at(-1);
-    expect(reply?.text).toContain("already armed");
+    // 重复 /ask（无参，走 v1 fallback）不应覆盖 askModePending：
+    // 否则会把 "plan" 当原 mode 保存，restore 时会 restore 到 plan 而非 auto
+    await collect(engine.submitMessage("/ask"));
+    expect(engine.getRuntimeState().permissionMode).toBe("plan");
 
-    // 接下来用一轮 /status 触发 restore，应回到 auto（不是 plan）
+    // 用 /status（builtin reply，不走 LLM）触发 restore，应回到 auto（不是 plan）
     await collect(engine.submitMessage("/status"));
     expect(engine.getRuntimeState().permissionMode).toBe("auto");
-    void events2;
   });
 
   it("drives FSM through one full turn (planning → executing → halted=completed)", async () => {
