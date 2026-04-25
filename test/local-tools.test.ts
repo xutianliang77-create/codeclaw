@@ -95,6 +95,47 @@ describe("local tools", () => {
     expect(result.errorCode).toBe("approval_required");
   });
 
+  // 安全：path traversal 端到端（W4-B-SEC-3）
+  // 攻击意图：用 ../ 或绝对路径越界读/写 workspace 之外的文件（如 ~/.ssh/id_rsa）。
+  // 防御：resolveWorkspacePath 强制 absolutePath 必须在 workspace 内，否则抛错；
+  // 工具层 catch 后返回 tool_failed + 含 "outside workspace" 提示。
+  it("SEC: /read 越界（绝对路径）→ tool_failed + outside workspace", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-tools-"));
+    tempDirs.push(workspace);
+
+    const result = await maybeRunLocalTool("/read /etc/passwd", {
+      workspace,
+      permissions: new PermissionManager("plan"),
+    });
+
+    expect(result.handled).toBe(true);
+    if (!isHandledLocalToolResult(result)) throw new Error("expected handled result");
+    expect(result.kind).toBe("error");
+    if (result.kind !== "error") throw new Error("expected error result");
+    expect(result.errorCode).toBe("tool_failed");
+    expect(result.output).toContain("outside workspace");
+  });
+
+  it("SEC: /write 用 ../../ 越界 → tool_failed + outside workspace（acceptEdits 不绕过路径检查）", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-tools-"));
+    tempDirs.push(workspace);
+
+    const result = await maybeRunLocalTool(
+      "/write ../../escape.txt :: pwned",
+      {
+        workspace,
+        permissions: new PermissionManager("acceptEdits"),
+      }
+    );
+
+    expect(result.handled).toBe(true);
+    if (!isHandledLocalToolResult(result)) throw new Error("expected handled result");
+    expect(result.kind).toBe("error");
+    if (result.kind !== "error") throw new Error("expected error result");
+    expect(result.errorCode).toBe("tool_failed");
+    expect(result.output).toContain("outside workspace");
+  });
+
   it("matches workspace files with glob", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-tools-"));
     tempDirs.push(workspace);
