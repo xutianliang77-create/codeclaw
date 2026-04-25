@@ -1,0 +1,25 @@
+id: ASK-061
+version: 1
+category: debug
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  装完 codeclaw 跑 `codeclaw doctor`，shell 报 `command not found: codeclaw`。
+  请按"全局装 vs 本地装 vs PATH 配置"列出 3 类可能根因 + 各自一条最快验证命令。
+expected:
+  must_mention:
+    - npm 或 npx
+    - PATH 或 path 或 路径
+    - bin
+    - 全局 或 -g 或 global
+  must_not_mention:
+    - 重启系统
+    - sudo apt install
+  rubric: |
+    答出：
+    1. 全局未装：`npm list -g --depth=0 | grep codeclaw` 看是否在；不在 → `npm install -g .` 或 `npm link`
+    2. 本地装但忘 link：`npm bin` 看 bin 路径；用 `npx codeclaw` 直接跑
+    3. PATH 漏：`echo $PATH` 看是否含 npm global bin；没有 → 加到 .bashrc/.zshrc
+    不应建议"重启系统 / sudo apt install"。
+  answer_key: ASK-061.md

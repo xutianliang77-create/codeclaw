@@ -1,0 +1,27 @@
+id: ASK-076
+version: 1
+category: architecture
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  CodeClaw 用 SQLite 而不是 PostgreSQL / MySQL 的核心理由是什么？给出至少 3 条。
+expected:
+  must_mention:
+    - 单文件 或 单进程 或 单机 或 嵌入
+    - 部署 或 依赖 或 安装
+    - 跨平台 或 备份 或 文件
+  must_not_mention:
+    - 高并发写
+    - 分布式
+  rubric: |
+    SQLite 的合适性（任 3）：
+    1. 单进程嵌入：codeclaw 是 CLI，无服务端；SQLite 与进程同生命周期，零部署
+    2. 单文件：data.db / audit.db 各一个文件，备份/迁移直接 cp
+    3. 跨平台：linux / macOS / Windows 二进制都有
+    4. 事务支持：足够 codeclaw 的写规模（几条/秒）
+    5. WAL 模式：读写混合下不会互相阻塞
+    6. 适配 codeclaw "本地优先" 设计哲学
+    PostgreSQL/MySQL 适合多进程并发 / 跨主机 / 高并发写场景，codeclaw 不需要。
+    不应说"高并发写更好" —— 这反而是 SQLite 的弱点（不是用它的理由）。
+  answer_key: ASK-076.md

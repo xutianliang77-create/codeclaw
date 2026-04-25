@@ -1,0 +1,25 @@
+id: ASK-059
+version: 1
+category: code-understanding
+difficulty: hard
+requires:
+  tools: []
+prompt: |
+  CodeClaw Skill SDK 的 manifest 里 `signature` 字段当前是怎么处理的？
+  是真做了密码学验签吗？哪些字段是预留？loader 检查到 signature 时会怎么决定接受/拒绝？
+expected:
+  must_mention:
+    - 占位 或 placeholder 或 未实现 或 预留
+    - algo 或 publicKey 或 value
+    - 完整性 或 完整 或 三字段
+  must_not_mention:
+    - x509
+    - openssl 验签
+  rubric: |
+    答出：
+    - 当前是**占位**（未真验签），但 schema 已 reserve：`signature: { algo, publicKey, value }`
+    - loader 的"完整性检查"是：三字段必须**同时**存在；只有 algo 没 value 或 反之即 reject
+    - 这相当于"声明协议位"：将来加真验签（如 ed25519）时不破坏 schema
+    - 当前 P1 不做真验签的原因：(a) skill 只在本机 install (b) install 阶段已可读 manifest 校验 (c) 远端 registry 是 P2 才上
+    不应说成"已用 X.509 / openssl 真验签"。
+  answer_key: ASK-059.md

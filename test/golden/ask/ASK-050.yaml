@@ -1,0 +1,23 @@
+id: ASK-050
+version: 1
+category: code-understanding
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 storage/migrate.ts 在扫描 migrations 目录时，文件名必须满足什么正则？
+  如果文件名不匹配会怎样？
+expected:
+  must_mention:
+    - 数字 或 \\d 或 NNN 或 编号
+    - sql
+    - 抛错 或 throw 或 报错 或 error
+  must_not_mention:
+    - 任意命名
+    - 跳过即可
+  rubric: |
+    答出：
+    - 文件名形如 `NNN_<name>.sql`，正则约 `^(\d+)_(.+)\.sql$`
+    - 不匹配会 throw `bad migration filename: <file>`，启动失败
+    - 不能"宽松跳过"——版本号是 schema 演进的契约
+  answer_key: ASK-050.md

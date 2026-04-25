@@ -1,0 +1,30 @@
+id: ASK-081
+version: 1
+category: tool-choice
+difficulty: easy
+requires:
+  tools:
+    - grep
+    - symbol
+    - read
+prompt: |
+  我想知道一个 TypeScript 函数 `validateManifest` 在项目里都被哪些地方调用了。
+  CodeClaw 给我 grep / symbol（LSP）/ read 工具。请说明优先用哪个、为什么。
+expected:
+  must_mention:
+    - symbol 或 LSP 或 reference 或 references
+    - grep 或 ripgrep 或 rg
+    - 类型 或 typed 或 准确
+    - 字符串 或 substring 或 子串
+  must_not_mention:
+    - cat 整文件
+    - 找不到就放弃
+  rubric: |
+    优先用 symbol（LSP find references）：
+    - 类型驱动，区分函数定义 / 字符串字面量 / 注释；不会误匹配同名变量
+    - 跨文件追全 import 链
+    grep 是次优：
+    - 快但不区分语义；同名字符串 / 注释会误命中
+    - 适合 LSP 不可用 / 跨语言 / 看注释中提及
+    read 不适合："找谁调用我"是搜索任务，read 用于"看具体某文件"。
+  answer_key: ASK-081.md

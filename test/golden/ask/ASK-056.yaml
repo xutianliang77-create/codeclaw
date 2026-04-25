@@ -1,0 +1,27 @@
+id: ASK-056
+version: 1
+category: code-understanding
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  Web channel 的 SessionStore 与 QueryEngine 是什么关系？
+  什么时候创建 emitter？为什么 stream handler 与 message handler 解耦？
+expected:
+  must_mention:
+    - SessionStore
+    - QueryEngine
+    - emitter
+    - SSE 或 stream
+    - createSession 或 创建 或 sessionId
+  must_not_mention:
+    - websocket
+    - express middleware
+  rubric: |
+    答出：
+    - SessionStore 在内存维护 sessionId → {engine, emitter} 的映射
+    - 每次 POST /v1/web/sessions 时 storeFactory 用 createQueryEngine 起一个 engine + 关联 emitter
+    - SSE handler 仅订阅 emitter（GET /v1/web/stream），不直接调 engine
+    - message handler（POST /v1/web/messages）调 engine.handleInput，engine 把 chunk emit 出来
+    - 解耦让"前端先 connect SSE，再 POST 触发"和"刷新页保留 emitter"都成为可能
+  answer_key: ASK-056.md

@@ -1,0 +1,25 @@
+id: ASK-070
+version: 1
+category: cli-usage
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  在 CodeClaw 对话中输入 /cost 会看到什么？哪个数据是"本会话累计"，哪个是"今日累计"？
+expected:
+  must_mention:
+    - session 或 会话
+    - today 或 今日 或 今天
+    - usd 或 USD 或 美元
+    - token
+  must_not_mention:
+    - 全局总计
+    - 月度费用
+  rubric: |
+    /cost 输出包含：
+    - 本会话累计：input/output tokens、USD
+    - 今日累计：跨 session 当天总计 tokens、USD
+    - 各 provider 分项（如有多 provider 调用）
+    - 当前 budget 阈值与剩余比例（如配了 budget）
+    不应给"全局总计"或"月度费用"——当前不持久化跨日聚合。
+  answer_key: ASK-070.md

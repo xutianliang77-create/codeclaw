@@ -1,0 +1,26 @@
+id: ASK-066
+version: 1
+category: debug
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  `.codeclaw/backups/` 目录吃掉了 50 GB，我想清理但不破坏当天的备份。
+  请给出安全清理方案 + 一条命令可清掉 N 天前的所有 batch dir。
+expected:
+  must_mention:
+    - mtime 或 atime 或 修改时间 或 -mtime
+    - find
+    - rm 或 删除
+    - 当天 或 今天 或 最近 或 跳过
+  must_not_mention:
+    - rm -rf .codeclaw
+    - 删除整个 backups
+  rubric: |
+    答案模板：
+    - 看大小分布：`du -sh .codeclaw/backups/*/ | sort -rh | head -20`
+    - 删 N 天前（如 7 天）：`find .codeclaw/backups/ -maxdepth 1 -type d -mtime +7 -exec rm -rf {} +`
+    - 干 run 先跑 `find ... -mtime +7 -print` 看清单
+    - 不要直接 `rm -rf .codeclaw` 或 `rm -rf .codeclaw/backups`：会破坏 sessions / data.db / 当天 batch
+    - 长期：在 nightly 加 prune 任务（plan §15.5 / TODO）
+  answer_key: ASK-066.md

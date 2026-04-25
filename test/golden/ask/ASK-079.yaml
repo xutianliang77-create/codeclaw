@@ -1,0 +1,31 @@
+id: ASK-079
+version: 1
+category: architecture
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  CodeClaw 用了 better-sqlite3 而不是 sqlite3 / sql.js。简单说说三者的差异，
+  以及为什么 codeclaw 的同步 + 嵌入场景更适合 better-sqlite3。
+expected:
+  must_mention:
+    - 同步 或 sync 或 synchronous
+    - native 或 c++ 或 binding
+    - api
+    - performance 或 性能 或 速度
+  must_not_mention:
+    - 浏览器原生支持
+    - sql.js 性能更高
+  rubric: |
+    差异：
+    - better-sqlite3：原生 C++ binding，**同步 API**（不是异步），单进程 SQLite 直读直写
+    - sqlite3：传统 callback 风格异步 API，C 绑定但用 worker / thread pool
+    - sql.js：纯 JS / WASM 实现，**全部内存**，无原生依赖（浏览器友好）
+    codeclaw 选 better-sqlite3 的理由：
+    - 同步 API 让 CLI 流程自然（不用每次 await db.run）
+    - 单进程嵌入，无 worker 调度开销
+    - 性能：写入 ~100k tps（远超 codeclaw 实际需要），但比 sql.js 快百倍
+    - 不需要跨平台 WASM；codeclaw 都跑 Node，prebuilt binary 覆盖三大平台
+    sql.js 不适合的原因：纯 JS 内存数据库，落盘要手动 export，对于"持久存储"场景不合适。
+    不应说"sql.js 性能更高"。
+  answer_key: ASK-079.md

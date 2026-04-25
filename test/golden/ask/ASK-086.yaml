@@ -1,0 +1,34 @@
+id: ASK-086
+version: 1
+category: tool-choice
+difficulty: hard
+requires:
+  tools:
+    - bash
+    - read
+    - grep
+prompt: |
+  一个 ML 训练脚本（PyTorch）跑了 6 小时无任何输出，CPU 利用率 100%、GPU 利用率 0%。
+  CodeClaw 给我 bash / read / grep 工具。请给出 6 步定位流程，每步明确用什么工具，怎么判断"是否要进下一步"。
+expected:
+  must_mention:
+    - py-spy 或 strace 或 ps 或 pid
+    - data loader 或 dataloader 或 IO
+    - print 或 logging 或 stderr
+    - GPU 或 cuda
+    - num_workers 或 worker
+  must_not_mention:
+    - 直接 kill -9
+    - 重启机器
+  rubric: |
+    建议步骤：
+    1. bash `ps aux | grep python` —— 找 PID + nproc 看进程数
+       判断：如果 fork 了几十个 worker → DataLoader num_workers 卡死可能
+    2. bash `nvidia-smi` —— 确认 GPU 真闲；CPU 100% + GPU 0% = 数据 pipeline 卡前向传播之前
+    3. bash `py-spy dump --pid <PID>` —— 抓 Python stack；看主线程在哪行
+       判断：如停在 dataloader → IO/CPU 瓶颈；停在 cuda 同步 → GPU 通信
+    4. bash `strace -p <PID> -f -e trace=read,openat 2>&1 | head -100` —— 看是否狂读某个文件 / IO 阻塞
+    5. read 训练脚本看 num_workers / pin_memory 设置；grep 找 print / logging 调用看为什么没输出（可能 buffer 没 flush）
+    6. 干预：在脚本头部加 `import sys; sys.stdout.flush()` 或环境 `PYTHONUNBUFFERED=1` 跑一次小数据集复现
+    不应直接 `kill -9` 或重启机器（损失已跑的部分模型 + 不知根因）。
+  answer_key: ASK-086.md

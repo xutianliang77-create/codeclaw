@@ -1,0 +1,27 @@
+id: ASK-053
+version: 1
+category: code-understanding
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  `src/lib/redactPrompt.ts` 的 `redactSecretsInText` 在替换命中时，
+  为什么要按 index 倒序 splice？正序写一遍会出什么问题？
+expected:
+  must_mention:
+    - 偏移 或 offset 或 索引 或 index
+    - 长度 或 length 或 length 变化
+    - 倒序 或 后向前 或 desc
+  must_not_mention:
+    - 性能更快
+    - 多线程
+  rubric: |
+    倒序 splice 的根因是**索引偏移问题**：
+    - 替换 `[REDACTED:xxx]` 与原 secret 长度通常不同
+    - 如果从前往后替换，前面的替换会改变后续 finding 的 index
+    - 倒序 (desc by index) 替换时，未处理的 finding 都在前面，索引不变
+    正序写法会让后面的 splice 用错位 index，导致：
+    - 替换 sliced 出错段（中间字符被截）
+    - 替换跨越不匹配字节边界
+    与"性能 / 多线程"无关。
+  answer_key: ASK-053.md

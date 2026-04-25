@@ -1,0 +1,49 @@
+id: ASK-099
+version: 1
+category: snippet
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  写 SQL（PostgreSQL 14+）：给定 events 表（user_id, event_ts），
+  统计 2026-04-01 注册的用户里，有多少在第 7 天（2026-04-08）仍有任意活动。
+  返回单值（百分比，保留 2 位）。一定要走 set-based 写法，不要循环。
+expected:
+  must_mention:
+    - WITH 或 CTE
+    - JOIN 或 EXISTS
+    - DATE 或 ::date
+    - COUNT
+    - 100.0 或 ROUND
+  must_not_mention:
+    - LOOP
+    - PL/pgSQL
+    - cursor
+  rubric: |
+    可接受：
+
+      WITH d0 AS (
+        SELECT DISTINCT user_id
+        FROM events
+        WHERE event_ts::date = DATE '2026-04-01'
+      ),
+      d7 AS (
+        SELECT DISTINCT user_id
+        FROM events
+        WHERE event_ts::date = DATE '2026-04-08'
+      )
+      SELECT
+        ROUND(
+          100.0 * COUNT(DISTINCT d7.user_id) / NULLIF(COUNT(DISTINCT d0.user_id), 0),
+          2
+        ) AS d7_retention_pct
+      FROM d0
+      LEFT JOIN d7 USING (user_id);
+
+    要点：
+    - 两个 CTE 分别取 d0 / d7 用户集
+    - LEFT JOIN 保留 d0 全集，统计有多少在 d7 出现
+    - NULLIF 防 d0 为 0 时除零
+    - 保留 2 位小数 ROUND(_, 2)
+    不应用 LOOP / PL/pgSQL cursor。
+  answer_key: ASK-099.md

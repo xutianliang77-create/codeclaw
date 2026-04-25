@@ -1,0 +1,25 @@
+id: ASK-073
+version: 1
+category: cli-usage
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 /forget 命令支持哪些子命令？请按"业务清理 / 审计验证 / 局部撤销"三类各列至少一个。
+expected:
+  must_mention:
+    - --all 或 all
+    - verify-chain 或 verify
+    - session 或 sid
+    - tombstone 或 audit
+  must_not_mention:
+    - --hard
+    - destroy db
+  rubric: |
+    答出至少：
+    - 业务清理：`/forget --all` 跨表清空；`/forget --session <sid>` 单会话清；
+    - 审计验证：`/forget verify-chain` 走完整 hash 链校验；可选 --verbose 看每条 event
+    - 局部撤销：`/forget --kind dedup` 等只清某一表（如有实现）；
+      或 `/forget approval <id>` 撤销单条审批
+    无 --hard / destroy（保护审计的设计）。
+  answer_key: ASK-073.md

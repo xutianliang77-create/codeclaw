@@ -1,0 +1,79 @@
+id: ASK-049
+version: 1
+category: snippet
+difficulty: hard
+requires:
+  tools: []
+prompt: |
+  写 TypeScript：实现一个 `parseSseStream(input: ReadableStream<Uint8Array>, signal?: AbortSignal): AsyncIterable<{event: string, data: string}>`。
+  要求：
+  - 支持 SSE 协议：按 "data:"、"event:" 行解析；以空行作为消息边界
+  - 接收 AbortSignal，被 abort 时立即停止迭代（不要等下一个 chunk）
+  - 处理 chunk 半截（一条消息跨多个 chunk）
+  - tsx 直跑、不依赖第三方库（除 Node 内置 ReadableStream / TextDecoder）
+expected:
+  must_mention:
+    - AsyncIterable 或 async function*
+    - TextDecoder
+    - AbortSignal 或 abort
+    - data:
+    - event:
+    - buffer 或 缓冲 或 partial 或 余下
+  must_not_mention:
+    - eventsource-parser
+    - require(
+  rubric: |
+    可接受范例：
+
+      export async function* parseSseStream(
+        input: ReadableStream<Uint8Array>,
+        signal?: AbortSignal,
+      ): AsyncIterable<{ event: string; data: string }> {
+        const reader = input.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        let curEvent = "message";
+        const lines: string[] = [];
+
+        const onAbort = () => reader.cancel().catch(() => {});
+        signal?.addEventListener("abort", onAbort);
+
+        try {
+          while (true) {
+            if (signal?.aborted) return;
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            // 拆 line + 空行边界
+            let idx;
+            while ((idx = buf.indexOf("\n")) !== -1) {
+              const line = buf.slice(0, idx).replace(/\r$/, "");
+              buf = buf.slice(idx + 1);
+              if (line === "") {
+                if (lines.length > 0) {
+                  const data = lines.filter(l => l.startsWith("data:")).map(l => l.slice(5).trim()).join("\n");
+                  yield { event: curEvent, data };
+                  lines.length = 0;
+                  curEvent = "message";
+                }
+              } else if (line.startsWith("event:")) {
+                curEvent = line.slice(6).trim();
+              } else if (line.startsWith("data:")) {
+                lines.push(line);
+              }
+            }
+          }
+        } finally {
+          signal?.removeEventListener("abort", onAbort);
+          reader.releaseLock();
+        }
+      }
+
+    要点：
+    - async function*（generator）实现 AsyncIterable
+    - TextDecoder({ stream: true }) 处理 UTF-8 多字节 chunk 边界
+    - buf 累计 partial line
+    - signal.aborted check 在每次 read 前；被 abort 时 reader.cancel()
+    - 空行作为消息边界
+    不依赖 eventsource-parser / 第三方库。不应用 require(（要 ESM）。
+  answer_key: ASK-049.md

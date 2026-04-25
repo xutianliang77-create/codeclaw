@@ -1,0 +1,26 @@
+id: ASK-075
+version: 1
+category: architecture
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的"channel"是什么概念？目前实现了哪些 channel？它们和 QueryEngine 是什么关系？
+expected:
+  must_mention:
+    - 通道 或 channel 或 入口 或 客户端
+    - tui 或 cli 或 终端
+    - web
+    - wechat 或 微信
+    - QueryEngine 或 query engine
+  must_not_mention:
+    - websocket only
+    - 单一通道
+  rubric: |
+    Channel = 与用户交互的入口形态。当前 channel：
+    - tui / cli（终端 ink + SafeTextInput）
+    - web（HTTP + SSE）
+    - wechat（微信公众号）
+    每个 channel 自己处理协议层（解析输入 / 渲染输出 / 鉴权），统一调用 QueryEngine。
+    QueryEngine 与 channel 解耦 → 同一逻辑可走任意通道；新加 Slack/Discord 等只需新通道适配。
+  answer_key: ASK-075.md

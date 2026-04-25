@@ -1,0 +1,35 @@
+id: ASK-042
+version: 1
+category: tool-choice
+difficulty: medium
+requires:
+  tools:
+    - grep
+    - edit
+    - bash
+prompt: |
+  我要把项目里一个变量 `processOrder` 重命名为 `handleOrder`，估计涉及 100 个文件、200+ 处出现。
+  CodeClaw 提供 grep / edit / bash 工具。请给出最高效的执行顺序，并说明每一步用什么工具、风险点是什么。
+expected:
+  must_mention:
+    - grep 或 ripgrep 或 rg
+    - edit 或 replace_all
+    - 词边界 或 \b 或 boundary
+    - 字符串 或 注释 或 string
+    - lsp 或 类型 或 typecheck 或 编译
+  must_not_mention:
+    - sed -i 全替换 没确认
+    - rm -rf
+  rubric: |
+    建议顺序：
+    1. grep（rg）先全量定位：`rg -l '\bprocessOrder\b'` 统计文件数 / `rg '\bprocessOrder\b'` 看每处用法
+    2. 排查"假阳性"：注释 / 字符串字面量 / 子串包含（如 `processOrderTotal`）
+    3. 用 LSP 重构（如能拿到）— 类型驱动，最安全
+    4. 退而求其次：edit replace_all 配合精确 old_string（含足够上下文 / 词边界）
+    5. 最后跑 tsc/eslint/test 确认没漏改
+    风险点：
+    - 字面量字符串里的 `processOrder` 不应被替换（如 SQL '...processOrder...'）
+    - 注释里的可改可不改，但要前后一致
+    - 子串误匹配：`processOrderItem` 不应被改成 `handleOrderItem`（除非用户也想改）
+    不应直接 `sed -i 's/processOrder/handleOrder/g' **/*.ts` 不带词边界一刀切。
+  answer_key: ASK-042.md

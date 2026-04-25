@@ -1,0 +1,31 @@
+id: ASK-085
+version: 1
+category: tool-choice
+difficulty: medium
+requires:
+  tools:
+    - bash
+    - read
+prompt: |
+  我准备把 codeclaw 0.5.0 发布到 npm。release 前最后 5 分钟做哪 5 件事？
+  每件给具体命令。
+expected:
+  must_mention:
+    - npm test 或 vitest
+    - typecheck 或 tsc
+    - npm pack 或 dry-run
+    - version 或 package.json
+    - changelog 或 CHANGELOG
+  must_not_mention:
+    - skip tests
+    - npm publish --force
+  rubric: |
+    建议 5 件：
+    1. typecheck + 全套 test：`npm run typecheck && npm test`
+    2. build：`npm run build` 看是否 dist/ 完整（含 migrations）
+    3. version 同步：`grep '"version"' package.json` 与 CHANGELOG.md 最新条目对得上
+    4. dry-run pack：`npm pack --dry-run` 看 npm publish 会带哪些文件
+    5. README / migrations 文件入包：`tar -tf codeclaw-0.5.0.tgz | head -30`
+    然后才 `npm publish` 或 `npm publish --otp=...`。
+    不应 skip test / --force。
+  answer_key: ASK-085.md

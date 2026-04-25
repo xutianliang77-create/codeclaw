@@ -1,0 +1,30 @@
+id: ASK-033
+version: 1
+category: code-understanding
+difficulty: hard
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 Provider chain（src/provider/chain.ts）把 LLM 调用错误分为几类？
+  每一类分别走什么策略（retry / fallback 到下一个 provider / 直接抛错 / 中断）？
+  请按代码里的实际定义答。
+expected:
+  must_mention:
+    - transient
+    - auth
+    - content
+    - abort
+    - retry 或 重试
+    - fallback 或 切换
+  must_not_mention:
+    - panic
+    - sigterm
+  rubric: |
+    `ProviderErrorClass` 共 5 种：
+    - `transient`（5xx / 429 / 408 / 425 / 网络抖动 ECONNRESET 等）→ 同 provider 内 retry（默认最多 2 次，指数退避）
+    - `auth`（401/403）→ 不 retry，立即 fallback 到下一个 provider
+    - `content`（413/422，请求本身有问题）→ 不 retry 不 fallback，直接抛错
+    - `abort`（用户主动 ctrl-c / AbortSignal）→ 直接抛出 AbortError，不再尝试
+    - `unknown`（无法分类）→ 兜底 retry 一次，仍失败则 fallback
+    一旦某 provider 已经 produced 了任何内容（即开始 streaming），就不允许 retry/fallback（避免重复输出）。
+  answer_key: ASK-033.md

@@ -1,0 +1,27 @@
+id: ASK-058
+version: 1
+category: code-understanding
+difficulty: hard
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 nightly job（scripts/nightly.mjs）会检查 `.gitignore` 里必须包含哪些 pattern？
+  漏哪一项会导致什么风险？请按风险等级排序。
+expected:
+  must_mention:
+    - node_modules
+    - .codeclaw
+    - .env
+    - 密钥 或 secret 或 token 或 凭据
+  must_not_mention:
+    - .git/
+    - readme.md
+  rubric: |
+    REQUIRED_GITIGNORE_PATTERNS = ["node_modules", ".codeclaw", "doc", ".env"]
+    风险排序（高→低）：
+    1. **.env 漏 ignore**：API key / DB 密码直接 commit，最高危
+    2. **.codeclaw 漏 ignore**：sessions.jsonl / data.db 含完整对话 + 用户输入（含潜在敏感信息）+ provider key 缓存
+    3. **node_modules 漏 ignore**：仓库膨胀，git clone 极慢；含 native 二进制不跨平台；偶尔含 token cache
+    4. **doc 漏 ignore**：项目本地文档（含设计决策 / runbook），用户明示不入库
+    nightly 检查后给 STDOUT 警告 + 退出码标记，不直接修改 .gitignore（避免误判覆盖用户配置）。
+  answer_key: ASK-058.md

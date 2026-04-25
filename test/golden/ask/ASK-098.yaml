@@ -1,0 +1,67 @@
+id: ASK-098
+version: 1
+category: snippet
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  写一个 TypeScript hook 风格的工厂 `createDebouncedSearch<T>(fetcher: (q: string) => Promise<T>, ms: number)`：
+  - 返回 `{ search(q: string): Promise<T>, cancel(): void }`
+  - 连续调用 search()，只有"距上次调用 ms 毫秒内无新调用" 才真正发 fetcher
+  - 同时 cancel 之前 in-flight 的 fetch（用 AbortController）
+  - cancel() 立即终止当前 pending
+expected:
+  must_mention:
+    - setTimeout 或 timer
+    - clearTimeout
+    - AbortController
+    - signal 或 abort
+    - Promise
+  must_not_mention:
+    - lodash.debounce
+    - rxjs
+  rubric: |
+    可接受：
+
+      export function createDebouncedSearch<T>(
+        fetcher: (q: string, signal: AbortSignal) => Promise<T>,
+        ms: number,
+      ) {
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        let controller: AbortController | null = null;
+        let pendingResolve: ((v: T) => void) | null = null;
+        let pendingReject: ((e: unknown) => void) | null = null;
+
+        const cancel = () => {
+          if (timer) clearTimeout(timer);
+          timer = null;
+          controller?.abort();
+          controller = null;
+          if (pendingReject) pendingReject(new Error("cancelled"));
+          pendingResolve = pendingReject = null;
+        };
+
+        const search = (q: string): Promise<T> => {
+          cancel();
+          return new Promise<T>((resolve, reject) => {
+            pendingResolve = resolve;
+            pendingReject = reject;
+            timer = setTimeout(() => {
+              controller = new AbortController();
+              fetcher(q, controller.signal).then(
+                (v) => pendingResolve?.(v),
+                (e) => pendingReject?.(e),
+              );
+            }, ms);
+          });
+        };
+
+        return { search, cancel };
+      }
+
+    要点：
+    - search 时先 cancel 上一次 → clearTimeout + abort + reject 旧 promise
+    - 用 AbortController 把 signal 传给 fetcher，让 fetch in-flight 也能被取消
+    - cancel 公开给调用方
+    不依赖 lodash / rxjs。
+  answer_key: ASK-098.md

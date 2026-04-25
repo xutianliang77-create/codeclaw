@@ -1,0 +1,28 @@
+id: ASK-062
+version: 1
+category: debug
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  我跑 codeclaw 时 chain attempts 数组报：
+    [{ provider: "openai", attemptNo: 1, ok: false, errorClass: "auth", errorMessage: "401 Unauthorized" },
+     { provider: "anthropic", attemptNo: 1, ok: true }]
+  最终也成功了。但日志说"应避免 fallback 频繁触发"。怎么彻底修第一条？
+expected:
+  must_mention:
+    - api key 或 apiKey 或 token 或 OPENAI_API_KEY
+    - 过期 或 expired 或 rotate 或 revoke
+    - .env 或 providers.json 或 配置
+    - rotate 或 重新生成 或 换新
+  must_not_mention:
+    - 删除 audit
+    - 关闭 fallback
+  rubric: |
+    答出：
+    - errorClass=auth 是 401/403，几乎肯定是 OpenAI api key 错 / 过期 / revoke / 余额用尽
+    - 验证：`echo $OPENAI_API_KEY | head -c 10` 看前缀对不对；用 curl 测 /v1/models
+    - 修复：去 OpenAI dashboard rotate key；改 ~/.codeclaw/providers.json 的 apiKeyEnvVar / .env 文件
+    - 不要"关 fallback"——应该让 chain 兜底；只是同时把第一个 provider 修好
+    不应建议"删审计/关 fallback"。
+  answer_key: ASK-062.md

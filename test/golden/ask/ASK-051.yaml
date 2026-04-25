@@ -1,0 +1,23 @@
+id: ASK-051
+version: 1
+category: code-understanding
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  CodeClaw CLI 的输入框组件叫什么名字？为什么不直接用 ink-text-input？
+expected:
+  must_mention:
+    - SafeTextInput
+    - ink-text-input 或 ink text-input
+    - 互扰 或 冲突 或 兼容 或 backspace 或 多次按键
+  must_not_mention:
+    - readline
+    - blessed
+  rubric: |
+    答出：
+    - 自实现叫 `SafeTextInput`
+    - 替换原因：ink + ink-text-input 在某些终端把多次按键合并为一个事件，
+      导致 backspace 失效 / 输入字符乱跳；ink 的 key.flag 也不可靠（要兜底用 raw \\x7f / \\x08）
+    - 不该说成"用 readline"或"换 blessed"（与项目无关）
+  answer_key: ASK-051.md

@@ -1,0 +1,45 @@
+id: ASK-096
+version: 1
+category: snippet
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  写一个 TypeScript 函数 `deepMerge<T>(target: T, source: Partial<T>): T`：
+  - 递归合并 source 到 target 的副本
+  - 如果两边都是 plain object 就深合并；否则 source 覆盖 target
+  - 不修改原 target / source（pure）
+  - 不依赖 lodash
+expected:
+  must_mention:
+    - typeof 或 instanceof
+    - object 或 Object
+    - 递归 或 recursion 或 recursive
+    - spread 或 Object.assign 或 三点
+  must_not_mention:
+    - lodash
+    - merge from
+  rubric: |
+    可接受：
+
+      export function deepMerge<T>(target: T, source: Partial<T>): T {
+        const isPlainObj = (v: unknown): v is Record<string, unknown> =>
+          typeof v === "object" && v !== null && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
+
+        if (!isPlainObj(target) || !isPlainObj(source)) {
+          return (source !== undefined ? source : target) as T;
+        }
+        const out: Record<string, unknown> = { ...target };
+        for (const k of Object.keys(source)) {
+          const sv = (source as Record<string, unknown>)[k];
+          const tv = out[k];
+          out[k] = isPlainObj(tv) && isPlainObj(sv) ? deepMerge(tv, sv as never) : sv;
+        }
+        return out as T;
+      }
+
+    要点：
+    - 用 isPlainObj 区分 object 与 array / Date / null
+    - 不修改原对象（spread 复制）
+    - 数组直接覆盖（不合并）—— deepMerge 通常不该合并数组
+  answer_key: ASK-096.md

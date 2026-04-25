@@ -1,0 +1,28 @@
+id: ASK-082
+version: 1
+category: tool-choice
+difficulty: easy
+requires:
+  tools:
+    - read
+    - grep
+prompt: |
+  用户给你一个文件 `src/foo/bar.ts`，问"它依赖了项目里哪些其他模块"。
+  你应该用 read 还是 grep？怎么提取 import 列表？
+expected:
+  must_mention:
+    - read 或 Read
+    - import
+    - 头部 或 顶部 或 首行 或 前 N 行
+    - relative 或 ./ 或 ../
+  must_not_mention:
+    - grep 全文件
+    - 跑 tsc 编译
+  rubric: |
+    答出：
+    - 用 read 看顶部 30-50 行（imports 几乎都在头部）
+    - 提取以 `import` 开头的行；relative path（`./`、`../`）= 项目内依赖
+    - 包名（无 `./` 前缀）= 第三方依赖（看 package.json）
+    - grep 也能用：`rg "^import" src/foo/bar.ts`，但 read 更直接看上下文
+    - 不需要 tsc / madge 等重工具，看 import 头就够
+  answer_key: ASK-082.md

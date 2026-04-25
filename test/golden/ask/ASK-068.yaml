@@ -1,0 +1,32 @@
+id: ASK-068
+version: 1
+category: debug
+difficulty: hard
+requires:
+  tools: []
+prompt: |
+  Nightly 报告显示：audit chain 在 event_id=01HX3F... 处 BROKEN。
+  这台机器上昨天有断电事件。请按"鉴别真实篡改 vs 自然损坏"给出 5 步定位流程，
+  以及在每一步发现的不同情况下，应该怎么修。
+expected:
+  must_mention:
+    - prev_hash 或 hash
+    - timestamp 或 时间 或 系统日志 或 dmesg 或 journal
+    - 备份 或 backup
+    - 重建 或 重置 或 reset 或 fork 或 重新建立
+    - 篡改 或 tamper
+  must_not_mention:
+    - 直接关闭审计
+    - 删除 audit.db
+  rubric: |
+    定位流程：
+    1. 看断点前后的事件 hash + prev_hash 对应关系（sqlite3）。一致但 hash 算错 → 内容被改；不一致 → prev_hash 损坏
+    2. 比对 timestamp 单调性：断点处 ts 是否回拨 / 跳大间隔（断电 / NTP）
+    3. 看系统日志 `journalctl --since='昨天 18:00' | grep -E 'kernel|fs'` 找 fsck / panic / IO error
+    4. 比对 backup（如有 `.codeclaw/backups/audit-...`）：断点前后哪段不一致
+    5. /forget verify-chain 详细输出帮 isolate 哪条 event 出错
+    修复策略：
+    - 自然损坏（fs 部分写）：从最近备份恢复 audit.db；如无备份，从断点处 fork 一条新链（记录 admin reset 事件）
+    - 真实篡改：保留 audit.db 作为证物，启动响应（看 sessions log / 同时段 ssh login / who 上线）
+    不应"删 audit.db / 关闭审计"。
+  answer_key: ASK-068.md

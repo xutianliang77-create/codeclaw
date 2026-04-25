@@ -1,0 +1,25 @@
+id: ASK-031
+version: 1
+category: code-understanding
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 .codeclaw/ 目录里默认会落哪些子目录或文件？请说明各自职责。
+expected:
+  must_mention:
+    - sessions 或 session
+    - data.db 或 data
+    - audit.db 或 audit
+    - observations 或 observation
+  must_not_mention:
+    - .git
+    - node_modules
+  rubric: |
+    .codeclaw/ 目录通常包含：
+    - sessions/{sid}/ 单会话的 jsonl 流（含 messages.jsonl / events.jsonl 等）
+    - data.db：dedup / cost / approvals 等业务数据
+    - audit.db：审计链（hash chain）
+    - observations/{sid}/ 溢出的大体观测数据（>100KB）
+    回答里不该把 .git / node_modules 当作 .codeclaw/ 子目录。
+  answer_key: ASK-031.md

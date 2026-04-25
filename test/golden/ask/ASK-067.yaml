@@ -1,0 +1,29 @@
+id: ASK-067
+version: 1
+category: debug
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  我跑了 `/forget --all`，但去 `.codeclaw/sessions/` 看还有目录在。
+  这是 bug 吗？请说明 /forget --all 的实际清理范围和不动哪些。
+expected:
+  must_mention:
+    - data.db 或 dedup 或 cost
+    - audit
+    - sessions
+    - 链 或 chain 或 forget tombstone 或 软删 或 标记
+  must_not_mention:
+    - rm -rf 整个 .codeclaw
+    - 物理删除审计
+  rubric: |
+    答出：
+    - /forget --all 跨表清理 dedup / cost / approvals / sessions metadata 的 row（在 data.db）
+    - audit.db **不会被物理删除**：审计链是 append-only，hash 链不能断
+      → forget 实际上写一条 "forget tombstone" 事件到 audit.db，可被 verify-chain 看到
+    - sessions/<id>/ 文件目录是否清，取决于实现：可能保留（避免误删用户外部 link 的资源）
+      或软删（rename 为 .deleted/）
+    所以"目录还在"不一定是 bug，是 audit + sessions 的设计选择；
+    /forget 目的是"业务侧不可访问"，而非"硬盘上抹除"。
+    不应建议 `rm -rf .codeclaw` 强删。
+  answer_key: ASK-067.md

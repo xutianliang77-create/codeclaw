@@ -1,0 +1,29 @@
+id: ASK-039
+version: 1
+category: architecture
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 Web channel（HTTP + SSE）是基于哪个 HTTP 库实现的？
+  为什么不用 Express / Koa / Fastify？请说出至少两个理由。
+expected:
+  must_mention:
+    - node 或 内置 或 built-in
+    - http 或 createServer
+    - 依赖 或 dependency 或 零依赖 或 体积
+  must_not_mention:
+    - 实际使用了 express
+    - 用 express 实现
+    - app.use(
+    - fastify(
+  rubric: |
+    - 实现：基于 Node 内置 `node:http`（`http.createServer`），不引入第三方框架
+    - 理由（任 2）：
+      1. 零额外依赖：CodeClaw 是 CLI，依赖越少越易分发 + 安全面更小
+      2. 路由极简：只有 6-8 条路由，不需要中间件/插件生态
+      3. SSE 直接 res.write 控制更精细，框架反而多一层抽象
+      4. 启动快：无 framework 初始化开销
+      5. 安全：第三方 framework 历史 CVE 多
+    模型回答里可以出现 "express / koa / fastify" 作为对比，但不应说"实际用了 express"或写出 `app.use(...)` 这种代码 → 命中 must_not_mention 即答错。
+  answer_key: ASK-039.md

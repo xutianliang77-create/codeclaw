@@ -1,0 +1,45 @@
+id: ASK-048
+version: 1
+category: snippet
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  写一段 Python 3.10+：用 `contextlib.contextmanager` 实现一个 `timed_section(name)`，
+  在 with 块进入时记录时间，退出时（无论正常 or 异常）打印 "section <name> took <ms> ms"。
+  代码要能直接 python3 跑（含 demo 用法），异常时也要打印耗时再 re-raise。
+expected:
+  must_mention:
+    - contextmanager
+    - yield
+    - try 或 finally
+    - perf_counter 或 time.time 或 monotonic
+    - raise 或 except
+  must_not_mention:
+    - __enter__
+    - __exit__
+    - import threading
+  rubric: |
+    可接受范例：
+
+      from contextlib import contextmanager
+      import time
+
+      @contextmanager
+      def timed_section(name: str):
+          start = time.perf_counter()
+          try:
+              yield
+          finally:
+              elapsed_ms = (time.perf_counter() - start) * 1000
+              print(f"section {name} took {elapsed_ms:.1f} ms")
+
+      with timed_section("demo"):
+          time.sleep(0.05)
+
+    要点：
+    - 用 @contextmanager 装饰器，不应手写 __enter__ / __exit__ class
+    - try/finally 确保异常路径也打印
+    - 用 perf_counter（高精度），不用 time.time（精度差）也可接受
+    - 异常会被 re-raise（finally 不吞异常）
+  answer_key: ASK-048.md

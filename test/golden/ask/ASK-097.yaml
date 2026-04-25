@@ -1,0 +1,49 @@
+id: ASK-097
+version: 1
+category: snippet
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  写 Python 3.10+ async：实现 `bounded_gather(coros, limit=5)`：
+  - 输入一个 coroutine 列表（已 awaitable，未 await）
+  - 用 asyncio.Semaphore 限制最多 N 个并发
+  - 返回 list 结果，顺序与输入一致
+  - 任意 coro 抛错时，**不**取消其他 in-flight，整体抛 ExceptionGroup（含所有错）
+expected:
+  must_mention:
+    - asyncio
+    - Semaphore
+    - gather
+    - return_exceptions 或 ExceptionGroup
+    - async with 或 acquire
+  must_not_mention:
+    - threading
+    - multiprocessing
+  rubric: |
+    可接受：
+
+      import asyncio
+      from typing import Awaitable, TypeVar
+      T = TypeVar("T")
+
+      async def bounded_gather(coros: list[Awaitable[T]], limit: int = 5) -> list[T]:
+          sem = asyncio.Semaphore(limit)
+
+          async def _run(c: Awaitable[T]) -> T:
+              async with sem:
+                  return await c
+
+          results = await asyncio.gather(*[_run(c) for c in coros], return_exceptions=True)
+          errs = [r for r in results if isinstance(r, BaseException)]
+          if errs:
+              raise ExceptionGroup("bounded_gather", errs)
+          return results  # type: ignore
+
+    要点：
+    - Semaphore 限并发
+    - return_exceptions=True 让 gather 不立刻取消其他任务
+    - 收集所有错后用 ExceptionGroup 抛（Py 3.11+）；否则用普通 Exception 包一层
+    - 顺序与输入一致（gather 保序）
+    不应用 threading / multiprocessing。
+  answer_key: ASK-097.md

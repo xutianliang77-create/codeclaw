@@ -1,0 +1,49 @@
+id: ASK-095
+version: 1
+category: snippet
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  写一个 Python 函数 `load_env(path: str) -> dict[str, str]`：
+  - 读 .env 风格文件（每行 KEY=VALUE，# 注释，空行跳过）
+  - 支持 VALUE 两侧带单/双引号的剥离
+  - 返回 dict
+  - 不依赖 python-dotenv
+expected:
+  must_mention:
+    - open
+    - strip 或 lstrip
+    - 注释 或 跳过
+    - split 或 partition
+    - 等号 或 partition
+    - quote 或 引号
+  must_not_mention:
+    - dotenv
+    - load_dotenv
+  rubric: |
+    可接受：
+
+      def load_env(path: str) -> dict[str, str]:
+          out: dict[str, str] = {}
+          with open(path, "r", encoding="utf-8") as f:
+              for raw in f:
+                  line = raw.strip()
+                  if not line or line.startswith("#"):
+                      continue
+                  if "=" not in line:
+                      continue
+                  k, _, v = line.partition("=")
+                  k = k.strip()
+                  v = v.strip()
+                  if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"'):
+                      v = v[1:-1]
+                  out[k] = v
+          return out
+
+    要点：
+    - 用 partition (不是 split) 防 VALUE 内含 = 时拆错
+    - 注释 + 空行跳过
+    - 引号 strip 只在双侧成对时
+    - 不引入 dotenv
+  answer_key: ASK-095.md

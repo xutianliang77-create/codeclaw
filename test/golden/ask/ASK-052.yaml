@@ -1,0 +1,24 @@
+id: ASK-052
+version: 1
+category: code-understanding
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  CodeClaw 把数据分到 `data.db` 和 `audit.db` 两个 SQLite 文件。
+  各装什么？为什么不合并到同一个 db？
+expected:
+  must_mention:
+    - dedup 或 cost 或 approval 或 业务
+    - 审计 或 audit 或 hash 或 链
+    - 篡改 或 tamper 或 完整性 或 隔离
+  must_not_mention:
+    - 性能优化
+    - 速度更快
+  rubric: |
+    - data.db：业务数据（dedup / cost / approvals / providers cache 等可读可写）
+    - audit.db：审计 hash 链（append-only，每条 prev_hash + payload_hash 串起来）
+    - 分两个的核心理由是**完整性隔离**：data.db 即使被改写或损坏，audit.db 不受影响；
+      audit.db 也独立可备份/校验，任何对它的篡改都会断 hash 链。
+    不应把"性能"当主要理由（不是分库的根本动机）。
+  answer_key: ASK-052.md

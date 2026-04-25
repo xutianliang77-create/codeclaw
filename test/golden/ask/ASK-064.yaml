@@ -1,0 +1,27 @@
+id: ASK-064
+version: 1
+category: debug
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  跑 `codeclaw web` 报错：
+    "CODECLAW_WEB_TOKEN not set; Web channel requires explicit token to start"
+  请解释为什么 Web channel 强制要 token、应该怎么生成、放哪里、token 泄露后怎么 rotate。
+expected:
+  must_mention:
+    - bearer 或 Bearer
+    - rotate 或 重新生成 或 新 token
+    - 环境变量 或 env
+    - 强随机 或 random 或 openssl 或 uuid
+  must_not_mention:
+    - 改成可选
+    - 注释掉检查
+  rubric: |
+    答出：
+    - Web 默认监听 127.0.0.1，但浏览器 / curl 都要 Bearer token；不强制等于"裸跑 → 内网任何进程都能访问"
+    - 生成：`openssl rand -hex 32` 或 `uuidgen` 或 `node -e "console.log(crypto.randomUUID())"`
+    - 放在 env：`export CODECLAW_WEB_TOKEN=<value>` 或写进 `.env`（必须在 .gitignore）
+    - rotate：换 env 值 + 重启 web 进程；旧 token 立即失效
+    不应说"改成可选 / 注释检查"。
+  answer_key: ASK-064.md

@@ -1,0 +1,34 @@
+id: ASK-080
+version: 1
+category: architecture
+difficulty: hard
+requires:
+  tools: []
+prompt: |
+  Threat Model T1-T19 中，哪几条是"模型本身被滥用"vs"系统外围被滥用"？
+  请按这两类各举 3 条 T 编号 + 一句话说明。
+expected:
+  must_mention:
+    - T1 或 T2 或 T3
+    - 注入 或 injection 或 prompt
+    - 命令 或 bash 或 path
+    - 密钥 或 token 或 secret
+  must_not_mention:
+    - 物理攻击
+    - 社工
+  rubric: |
+    模型本身滥用（用户/数据让 LLM 做坏事）：
+    - T1 prompt injection（用户输入注入）
+    - T2 文档投毒（loader / 历史消息里的恶意 prompt）
+    - T3 sender 假冒（wechat 等多用户通道，恶意 sender 试图绕过其他用户的指令）
+    系统外围滥用（与 LLM 内容无关的系统层）：
+    - T4 命令注入（bash 工具）
+    - T5 路径穿越（read/write 工具）
+    - T8 prompt 中夹敏感数据（向 LLM 传 secrets）
+    - T11 token 文件权限（凭据明文 + 0644）
+    - T13 bash 缺沙箱
+    - T16 写冲突（备份 / 锁）
+    - T18 .gitignore 错配
+    - T19 doctor 安全 banner
+    模型滥用 vs 外围滥用维度：前者是 LLM 推理过程中的安全（输入边界），后者是工具 / 文件 / 协议层（执行边界）。
+  answer_key: ASK-080.md

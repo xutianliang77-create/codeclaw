@@ -1,0 +1,26 @@
+id: ASK-071
+version: 1
+category: cli-usage
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  我已经在 ~/.codeclaw/providers.json 里配了 openai / anthropic / lmstudio 三个 provider。
+  当前 active 是 openai。我想临时切到 lmstudio 跑一段对话再切回去，最简单怎么做？
+expected:
+  must_mention:
+    - /provider 或 provider 命令 或 web 设置
+    - lmstudio
+    - current
+    - 重启 或 set 或 切换
+  must_not_mention:
+    - 改源码
+    - 重新编译
+  rubric: |
+    答出至少一种：
+    - 在对话里输入 `/provider use lmstudio`（如支持热切）
+    - 或临时改 ~/.codeclaw/providers.json 的 `current` 字段为 lmstudio，重启 codeclaw
+    - Web UI（codeclaw web）有 provider 切换面板，PATCH /v1/web/providers/lmstudio
+    - 切回去同理
+    不应建议"改源码 / 重编"。
+  answer_key: ASK-071.md

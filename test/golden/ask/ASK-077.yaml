@@ -1,0 +1,30 @@
+id: ASK-077
+version: 1
+category: architecture
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  Observation 体积超过 100KB 时为什么要落到独立文件，而不是直接存进 messages.jsonl？
+  这种设计权衡是什么？
+expected:
+  must_mention:
+    - jsonl
+    - 行 或 line
+    - 解析 或 parse 或 stream
+    - 内存 或 memory 或 撑满 或 缓冲
+    - body_inline
+  must_not_mention:
+    - 加密分离
+    - 防止合并
+  rubric: |
+    答出：
+    - jsonl 一行一对象，需要按行流式解析；单行过长（如 5MB 工具输出）会让任何 reader 撑爆 buffer
+    - 100KB 阈值（OBSERVATION_OVERFLOW_THRESHOLD）是 trade-off：足够装绝大多数工具输出，又不会让单行变畸形
+    - 大于阈值的 observation 落到 sessions/{sid}/observations/{stepId}.jsonl 独立文件，主流 messages.jsonl 仍轻量
+    - db 用 body_inline 字段标记是否溢出（0=外置，1=合并）
+    权衡：
+    - 优势：流式 reader 友好；主 jsonl 不被一个巨型条目拖累；按需 lazy load
+    - 代价：观测数据"分两处"，需 reader 跟着 body_inline 决定是否打开外置文件
+    与"加密分离"无关。
+  answer_key: ASK-077.md

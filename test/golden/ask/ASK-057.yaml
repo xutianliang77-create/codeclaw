@@ -1,0 +1,25 @@
+id: ASK-057
+version: 1
+category: code-understanding
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 backupFileIfExists（src/tools/backup.ts）每次进程内启动时怎么决定 batch dir 名字？
+  workspace 外的目标文件备份到哪？
+expected:
+  must_mention:
+    - 时间戳 或 timestamp 或 yyyymmdd 或 日期
+    - 同一进程 或 一次启动 或 cachedBatchDir
+    - _outside_ 或 workspace 外
+  must_not_mention:
+    - 每次都新建
+    - 随机 uuid
+  rubric: |
+    答出：
+    - batch dir 命名形如 `yyyymmdd-HHMMSS-rand4`（时间戳 + 4 位随机后缀）
+    - 同一进程内 cachedBatchDir 缓存这个名字 —— 同次运行多次写都进同一个 batch
+    - workspace 外的目标加 `_outside_/` 前缀（避免相对路径碰撞）
+    - 跨进程不同；resetBackupBatch() 用于测试
+    不应说成"每次写都新建 batch"或"用随机 uuid"。
+  answer_key: ASK-057.md

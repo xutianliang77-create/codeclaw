@@ -1,0 +1,33 @@
+id: ASK-065
+version: 1
+category: debug
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  我跑 `npm run golden:ask -- --mock` 100% pass，但加 `--real` 跑实际 LLM 时 0% pass，
+  连最简单的 ASK-001 都不通过。请按"配置 / 模型 / 解析"三层各列两条假设。
+expected:
+  must_mention:
+    - provider 或 providers.json
+    - reasoning 或 reasoning_content
+    - max_tokens 或 ctx 或 上下文
+    - empty 或 空 或 0 字符
+  must_not_mention:
+    - 卸载重装
+    - 关掉网络
+  rubric: |
+    分层假设：
+    **配置**：
+    - providers.json 没配 / current 指向不存在的 provider
+    - api key / baseUrl 错（curl 一下能立即验证）
+    **模型**：
+    - LM Studio 模型未 load（curl /v1/models 看是否空）
+    - 选了 reasoning 模型（GPT-5 / Qwen3 reasoning），content 为空全跑到 reasoning_content；
+      codeclaw 已修 fallback（commit 0e45b9d），但模型必须真已 load 才看得到 chunk
+    **解析**：
+    - max_tokens 太小，输出截断（0e45b9d 之前默认 1024 在小 ctx 模型有问题；用户调 ctx 后修复）
+    - SSE 流末尾 chunk 解析错，answer 全空
+    - scoring 走 string scorer 但模型回答语言不一致（中英文）
+    不应建议"卸载重装 / 关网"。
+  answer_key: ASK-065.md

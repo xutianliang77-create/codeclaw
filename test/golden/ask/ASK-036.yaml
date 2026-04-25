@@ -1,0 +1,35 @@
+id: ASK-036
+version: 1
+category: debug
+difficulty: hard
+requires:
+  tools: []
+prompt: |
+  Web channel 部署在 127.0.0.1:7180 后，浏览器开 SSE 连接，开发者工具里看 EventSource 一直是 OPEN（没断），
+  服务器日志也没有任何报错，但前端就是收不到任何消息。
+  请按"前端 → 网络层 → 服务端"三层各列出 2 个最可能的根因，附最快的验证手段。
+expected:
+  must_mention:
+    - sse 或 EventSource
+    - heartbeat 或 心跳 或 keepalive
+    - sessionId 或 session
+    - bearer 或 token 或 auth
+    - buffer 或 缓冲 或 nodelay 或 flush
+  must_not_mention:
+    - 重启电脑
+    - 重装浏览器
+  rubric: |
+    分层根因（每层 ≥ 2）：
+    **前端**：
+    - EventSource 监听了错误的事件名（默认 `message`，但服务端用了具名 event 如 `event: chunk`，前端没 addEventListener）
+    - sessionId 不对 / 拼接错（query 串没编码、串了别的 session）
+    **网络层**：
+    - 中间代理（nginx / caddy）开了 buffer，SSE chunk 没 flush（要 `proxy_buffering off`）
+    - keep-alive 心跳没发，被 idle 反向代理 30s 超时关链（codeclaw 默认 20s 心跳）
+    **服务端**：
+    - rewrite 后的路径不匹配 dispatch 的 `/v1/web/stream`，但 SSE 已升级前 200，浏览器以为 OK
+    - bearer token 未带 / 错误 → 401 在 SSE 阶段表现可能怪（取决于客户端实现）
+    - 该 sessionId 还没绑定到 emitter（先打开 stream 再 POST /messages 创会话）
+    最快验证：curl -N 看 chunk 是否返；F12 Network 看 EventSource raw bytes；服务端 attach debug log 看 emitter listener 数量。
+    不应建议"重启电脑 / 重装浏览器"。
+  answer_key: ASK-036.md

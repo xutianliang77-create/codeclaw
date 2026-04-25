@@ -1,0 +1,33 @@
+id: ASK-032
+version: 1
+category: code-understanding
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 Skill manifest 里 commands 字段有什么作用？写一个最小例子，说明 manifest 这样声明后，
+  用户在对话里输入哪个命令会触发 skill，以及 handler 等价于什么。
+expected:
+  must_mention:
+    - commands
+    - / 或 slash
+    - skills use 或 use
+    - manifest
+  must_not_mention:
+    - shell exec
+    - bash
+  rubric: |
+    Skill manifest 的 commands 字段是 SkillSlashCommand[]，每条 name 必须以 "/" 开头。
+    一旦声明，loader 注册该 slash 名到 slash registry，命令处理等价于 `/skills use <skill-name>`，
+    即用该 skill 启动一次会话。
+    最小例子：
+      name: lint-fix
+      version: 1.0.0
+      description: ...
+      prompt: ...
+      commands:
+        - name: /lint
+          description: 触发 lint-fix skill
+    输入 `/lint` ↔ `/skills use lint-fix`。
+    不应混淆为"执行 shell 命令"或"bash 调用"。
+  answer_key: ASK-032.md

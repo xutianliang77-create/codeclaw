@@ -1,0 +1,30 @@
+id: ASK-083
+version: 1
+category: tool-choice
+difficulty: medium
+requires:
+  tools:
+    - bash
+    - read
+prompt: |
+  我有 .codeclaw/data.db，想跑一段 SQL：
+    SELECT session_id, sum(amount) FROM cost GROUP BY session_id ORDER BY 2 DESC LIMIT 10;
+  请说明 codeclaw 给我 bash + read 这两个工具，应该怎么跑这条 SQL，怎么查看结果。
+expected:
+  must_mention:
+    - sqlite3
+    - bash
+    - .codeclaw/data.db 或 data.db
+    - 输出 或 stdout
+  must_not_mention:
+    - 装 mysql
+    - sql server
+  rubric: |
+    答出：
+    - bash 跑 `sqlite3 .codeclaw/data.db "SELECT ..."`
+    - 加 `-header -column` 或 `-csv` 调输出格式
+    - 结果直接进 stdout，bash 工具会回返
+    - 不需要 read 工具（结果不在文件里）
+    - 也可以 `--echo` 看 SQL，方便确认
+    不应建议装 mysql / sql server。
+  answer_key: ASK-083.md

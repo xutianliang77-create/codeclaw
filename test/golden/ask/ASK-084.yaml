@@ -1,0 +1,28 @@
+id: ASK-084
+version: 1
+category: tool-choice
+difficulty: medium
+requires:
+  tools:
+    - bash
+    - read
+    - grep
+prompt: |
+  我刚改了一个 patch，想在 push 前快速判断"我改的代码会不会破坏现有 test"。
+  按"先 / 中 / 后"三段，每段说明工具选择。
+expected:
+  must_mention:
+    - git diff 或 diff
+    - typecheck 或 tsc
+    - test 或 vitest 或 npm test
+    - 影响范围 或 grep 或 reference
+  must_not_mention:
+    - 直接 push
+    - skip ci
+  rubric: |
+    建议三段：
+    1. 先：`git diff --stat` 看改了哪些文件 + `git diff` 看具体行；read 关键文件
+    2. 中：`npm run typecheck` 排除明显类型错误 + grep / symbol find-refs 看改的函数 / 类型谁还在用
+    3. 后：`npm test` 跑全套；如果只改了某模块，可 `npm test -- <path>` 局部跑加速
+    不应"直接 push" / "[skip ci]"。
+  answer_key: ASK-084.md

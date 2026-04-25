@@ -1,0 +1,25 @@
+id: ASK-054
+version: 1
+category: code-understanding
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 chain.ts 在分类 LLM 调用错误时，对 `ProviderRequestError` 和普通 `Error` 处理方式不同。
+  对普通 Error 是怎么判断 transient 的？给出至少 3 个 message 关键词。
+expected:
+  must_mention:
+    - ECONNRESET 或 ETIMEDOUT 或 ENOTFOUND 或 ECONNREFUSED
+    - socket hang up 或 fetch failed 或 network
+    - 正则 或 regex 或 match
+  must_not_mention:
+    - 把所有 Error 都标为 transient
+    - 直接 throw 不分类
+  rubric: |
+    答出：
+    - ProviderRequestError 走 status code 路径（401/403=auth；408/425/429/5xx=transient；413/422=content）
+    - 普通 Error 没有 status code，只能用 message 关键词正则匹配：
+      `ECONNRESET | ETIMEDOUT | ENOTFOUND | ECONNREFUSED | EAI_AGAIN | socket hang up | fetch failed | network`
+    - 命中即归 transient；都不匹配则 unknown（兜底 retry 一次）
+    回答必须给出 ≥ 3 个 message 关键词。
+  answer_key: ASK-054.md

@@ -1,0 +1,30 @@
+id: ASK-078
+version: 1
+category: architecture
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 PermissionManager 在 ask / decide / record 三步链路上分别做什么？
+  为什么把 record 单独抽出来而不是在 ask 函数末尾直接写 db？
+expected:
+  must_mention:
+    - ask 或 询问 或 prompt
+    - decide 或 决策 或 用户
+    - record 或 记录 或 audit
+    - 解耦 或 separation 或 测试 或 mock
+  must_not_mention:
+    - 性能优化
+    - 减少代码量
+  rubric: |
+    三步：
+    - ask：构造一个 PermissionRequest（含工具 / 参数 / 风险等级 / token），呈给用户决策（TUI 弹窗 / web approval card / 自动模式直接 yes）
+    - decide：用户选 yes/no（或 dontAsk / acceptEdits 等模式自动决策）
+    - record：把决策写 audit.db + data.db approvals 表
+    解耦原因：
+    - 测试可独立 mock 每一步（不必启动 TUI）
+    - 模式切换灵活：dontAsk / auto / plan 等模式可在 decide 阶段插入策略
+    - 审计完整：record 总是被调用，不会因 ask 路径异常 skip
+    - 多 channel 可复用 record 逻辑
+    与"性能 / 代码量"无关，主要是 testability / auditability。
+  answer_key: ASK-078.md

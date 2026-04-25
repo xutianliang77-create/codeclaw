@@ -1,0 +1,24 @@
+id: ASK-069
+version: 1
+category: cli-usage
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 /clear 命令做什么？和 /forget 有什么区别？
+expected:
+  must_mention:
+    - 屏幕 或 显示 或 终端 或 视图
+    - 历史 或 上下文
+    - 保留 或 不会 或 不删
+    - forget
+  must_not_mention:
+    - 删除 audit
+    - 关闭进程
+  rubric: |
+    答出：
+    - /clear 只清屏 / 重置当前对话 buffer 视图，不删持久化数据
+    - 历史仍在 sessions/ 和 audit.db
+    - /forget --all 才是真正业务清理（dedup / cost / approvals）；audit 仍写 tombstone
+    所以 /clear 是"显示层"操作，/forget 是"数据层"操作。
+  answer_key: ASK-069.md

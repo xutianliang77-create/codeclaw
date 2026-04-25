@@ -1,0 +1,30 @@
+id: ASK-063
+version: 1
+category: debug
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  我尝试 `codeclaw skill install ./my-skill`，loader 抛错：
+    "manifest contains forbidden control character at offset 234"
+  请说明定位手段（不依赖 IDE，只能用 cat / xxd / hexdump / sed），并解释这个校验的目的。
+expected:
+  must_mention:
+    - xxd 或 hexdump 或 od
+    - control 或 0x1b 或 ANSI 或 escape 或 NUL
+    - prompt 或 description
+    - 注入 或 injection 或 安全
+  must_not_mention:
+    - 直接 force install
+    - 跳过 validate
+  rubric: |
+    定位：
+    - `xxd ./my-skill/manifest.yaml | head -30` 看十六进制
+    - `xxd manifest.yaml | grep -E '00|1b|0e'` 找 NUL / ANSI escape
+    - 或 `sed -n '/[\\x00-\\x1f]/p' manifest.yaml`（GNU sed）
+    - offset 234 用 `head -c 234 manifest.yaml | tail -c 50` 看周围内容
+    目的：
+    - 防 prompt injection（manifest prompt/description 字段会作为 system prompt 拼进去）
+    - 控制字符可被滥用：清屏 / 伪造 system prompt / Unicode bidi 反转语义
+    不应建议绕过 validate。
+  answer_key: ASK-063.md

@@ -1,0 +1,28 @@
+id: ASK-041
+version: 1
+category: tool-choice
+difficulty: easy
+requires:
+  tools:
+    - read
+    - bash
+prompt: |
+  用户给你一个 1 MB 的日志文件 `/var/log/app.log`，让你只看第 8000-9000 行。
+  CodeClaw 可用工具有：read（按行偏移）、bash（任意 shell）、grep。
+  你应该用哪个、参数怎么传？为什么不应该把全文读进来？
+expected:
+  must_mention:
+    - read 或 Read
+    - offset 或 行号 或 line
+    - 1000 或 limit
+    - 上下文 或 context 或 token
+  must_not_mention:
+    - cat 整文件
+    - 全文读取
+  rubric: |
+    应答：
+    - 用 `read`，参数 offset=8000、limit=1000
+    - 不应 `cat /var/log/app.log` / 不全文读取
+    - 理由：1MB 日志全读进来会撑满上下文 / 浪费 token / 单工具调用 token quota 上限风险
+    可选：bash + sed/awk + 行号过滤是次优方案（多一层 shell escape 风险，且没有结构化返回）。
+  answer_key: ASK-041.md

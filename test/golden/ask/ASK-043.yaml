@@ -1,0 +1,37 @@
+id: ASK-043
+version: 1
+category: tool-choice
+difficulty: hard
+requires:
+  tools:
+    - read
+    - grep
+    - bash
+prompt: |
+  用户给了一个陌生的 Node.js + Python 混合项目，让你"评估安全风险"，没给任何线索。
+  你只能用 read / grep / bash。请给出**前 5 个**调查动作的具体命令，并说明每个能识别什么风险类。
+  顺序要从"高信号低成本"递进。
+expected:
+  must_mention:
+    - package.json 或 dependency 或 依赖
+    - secret 或 token 或 密钥 或 .env
+    - eval 或 exec 或 spawn
+    - sql 或 注入 或 query
+    - dotfile 或 .env 或 .gitignore
+  must_not_mention:
+    - 静态扫描所有代码
+    - 跑全量测试
+  rubric: |
+    建议前 5 个动作（高信号低成本递进）：
+    1. `cat package.json + requirements.txt` —— 看依赖清单 / 已知 CVE 包（如 lodash<4.17.21、log4j 等价物）
+    2. `rg -i 'api[_-]?key|password|secret|token' --type-add 'all:*' -tall` —— 找硬编码密钥
+    3. `cat .env* 2>/dev/null && cat .gitignore` —— 看是否密钥在仓 / .env 是否 ignore
+    4. `rg -n 'eval\(|exec\(|spawn\(|child_process|os\.system|subprocess' src/` —— 命令注入面
+    5. `rg -n 'execute\(.*\$|raw\(|f"SELECT.*\{' --type py --type ts` —— SQL 拼接注入
+    高优补：
+    6. `rg 'CORS|Access-Control-Allow-Origin' .*` —— CORS 配
+    7. `rg 'http://' --type ts` —— 明文 HTTP
+    8. `git log --all --full-history -- '*.env'` —— 历史曾 commit 过密钥的痕迹
+    理由：先看依赖（1 命令覆盖大量已知 CVE）→ 看密钥泄露（最直接危害）→ 看代码注入面 → 看协议层。
+    不应一上来"静态扫描所有代码"或"跑全量测试"（高成本低信号）。
+  answer_key: ASK-043.md

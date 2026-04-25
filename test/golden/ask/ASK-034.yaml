@@ -1,0 +1,29 @@
+id: ASK-034
+version: 1
+category: debug
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  我跑了 10 轮对话，明显有 token 消耗，但 `/cost` 显示 0 USD / 0 tokens。
+  请列出至少 4 类可能根因，并说明每一类怎么快速验证。
+expected:
+  must_mention:
+    - data.db 或 data 数据库
+    - provider 或 provider 配置
+    - cost 或 计费
+    - usage 或 token usage
+    - 0 价格 或 价格 0 或 价格未配置 或 pricing
+  must_not_mention:
+    - 关闭审计
+    - 删除 data.db
+  rubric: |
+    可能根因（至少答 4 类）：
+    1. provider 没回 `usage`（许多本地 LLM / OpenAI 兼容服务不返 usage 字段）→ 抓一次实际 SSE 帧 / 看 stream 末尾 chunk
+    2. cost 表 (data.db) 写入失败：dataDb 连接异常 / WAL 模式权限问题 → sqlite3 直接查 SELECT * FROM cost
+    3. 该 provider 的 pricing 全为 0（pricing.json 未配） → 看 config / 启动日志 doctor 输出
+    4. /cost 查的是当前 sessionId，跑 dialog 落到了别的 session（dedup hit / sessionId 切换） → 看 session 列表
+    5. cost 累计但单位错（micro USD vs USD）→ 检查渲染器格式
+    定位手段：开 debug log、curl provider 看 usage、sqlite3 直查 cost 表、/cost --all 看跨 session。
+    不应给出"删除 data.db / 关闭审计"这类破坏性"修复"。
+  answer_key: ASK-034.md

@@ -1,0 +1,27 @@
+id: ASK-072
+version: 1
+category: cli-usage
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  我装了一个 user skill 叫 `lint-fix`，manifest 里声明了 `commands: [{name: /lint}]`。
+  请说明对话里这两种调用方式有什么区别（如果有的话）：
+  1. 输入 `/skills use lint-fix`
+  2. 输入 `/lint`
+expected:
+  must_mention:
+    - 等价 或 等同 或 一样 或 别名 或 alias
+    - commands 或 manifest
+    - registry 或 注册
+  must_not_mention:
+    - 完全不同
+    - shell 子进程
+  rubric: |
+    答出：
+    - 两者**等价**：loader 启动时 manifest commands[] 注册到 slash registry，
+      handler 等价于 `/skills use <skill-name>`
+    - `/lint` 是 `/skills use lint-fix` 的语法糖
+    - 优势：用户可以给常用 skill 起短命令，对话流更顺
+    - 限制：name 必须 `/^\/[a-z][a-z0-9_-]{0,30}$/i` 且不能与 builtin 重名
+  answer_key: ASK-072.md

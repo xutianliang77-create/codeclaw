@@ -1,0 +1,32 @@
+id: ASK-074
+version: 1
+category: cli-usage
+difficulty: hard
+requires:
+  tools: []
+prompt: |
+  我想把 codeclaw 集成到 GitHub Actions：每次 PR 跑一段固定 prompt 让 LLM review diff，输出 markdown 评论。
+  请给出：
+  1. workflow yaml 关键步骤（含 secret 注入、cost budget 限制）
+  2. 怎么确保 token 不泄露到 log
+  3. 失败 / 超时的兜底
+expected:
+  must_mention:
+    - secrets.OPENAI_API_KEY 或 secrets.
+    - CODECLAW_BUDGET 或 budget
+    - timeout 或 超时
+    - exit code 或 失败 或 fallback
+    - mask 或 redact 或 不打 log 或 ::add-mask::
+  must_not_mention:
+    - echo $OPENAI_API_KEY
+    - 直接 cat .env
+  rubric: |
+    workflow 关键点：
+    - `env: OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}` 注入
+    - 设 budget：`CODECLAW_BUDGET_SESSION_USD=0.5 CODECLAW_BUDGET_ON_EXCEEDED=block`
+    - 用 `timeout 600 codeclaw review-diff ...` 防卡死
+    - GitHub 默认会 mask secrets 里的值；不要 echo / cat 任何含 token 的文件
+    - 失败：`continue-on-error: true` + 后置步骤把错误也 post 评论；exit code 1 时 PR comment 标注 "review skipped"
+    - codeclaw 的 prompt redact（T8）也会作为兜底
+    不应建议 `echo $OPENAI_API_KEY` / `cat .env`（即使是 debug）。
+  answer_key: ASK-074.md

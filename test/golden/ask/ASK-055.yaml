@@ -1,0 +1,26 @@
+id: ASK-055
+version: 1
+category: code-understanding
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 skill loader 对用户 manifest 的 prompt / description 字段做了哪些"防控制字符注入"校验？
+  目的是防御什么？
+expected:
+  must_mention:
+    - 控制字符 或 control char
+    - prompt 或 description
+    - MAX_PROMPT_LEN 或 长度 或 length
+    - 注入 或 injection
+  must_not_mention:
+    - sql 注入
+    - xss
+  rubric: |
+    答出：
+    - 长度限制：MAX_PROMPT_LEN = 8000；MAX_DESCRIPTION_LEN = 500；超长 reject
+    - 字符过滤：FORBIDDEN_CONTROL_CHARS 正则禁止 ANSI escape / NUL / 多数 control 字节
+    - 目的：防 prompt injection（恶意 manifest 通过控制字符在终端伪造 system prompt 输出 / 隐藏指令）
+    - 也属于 T6（供应链污染：第三方 skill 被污染时，loader 是第一道闸）
+    应针对 prompt injection / supply chain，不应混淆为 SQL / XSS。
+  answer_key: ASK-055.md

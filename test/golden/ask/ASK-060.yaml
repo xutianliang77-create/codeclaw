@@ -1,0 +1,25 @@
+id: ASK-060
+version: 1
+category: debug
+difficulty: easy
+requires:
+  tools: []
+prompt: |
+  我在 git push 时被 pre-push gate 拦下来了，但终端只显示一个总数。
+  怎么定位具体哪个 test 挂了？
+expected:
+  must_mention:
+    - vitest 或 npm test
+    - --reporter 或 -t 或 直接跑
+    - 文件 或 路径 或 file
+  must_not_mention:
+    - rerun gate
+    - --no-verify
+  rubric: |
+    答出：
+    - 直接跑 `npm test`（或 `npx vitest run`）看完整 fail 列表
+    - 用 `npm test -- --reporter=verbose` 看每个 test 的状态
+    - 用 `npm test -- <path/to/file>` 跑单文件
+    - 用 `npm test -- -t "expect string"` 跑匹配的 test
+    不应推荐 `--no-verify`（绕开 gate 不解决问题）。
+  answer_key: ASK-060.md

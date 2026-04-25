@@ -1,0 +1,38 @@
+id: ASK-040
+version: 1
+category: architecture
+difficulty: medium
+requires:
+  tools: []
+prompt: |
+  CodeClaw 的 Cost Budget（src/provider/budget.ts）支持 USD 和 token 两种维度的限额。
+  这两种维度怎么协同评估？warnAt 阈值和 onExceeded 行为分别是什么含义？
+  请举一个 session_usd=2 / today_tokens=500000 / warnAt=0.8 / onExceeded=block 的例子，
+  说明在「session 累计 1.7 USD，今日累计 480000 tokens」时 evaluateBudget 返回的 status 应该是什么。
+expected:
+  must_mention:
+    - usd 或 USD
+    - token
+    - warn
+    - exceeded 或 超额 或 超阈值
+    - block
+    - "0.8 或 80%"
+  must_not_mention:
+    - 立即关闭进程
+    - 删除 cost 表
+  rubric: |
+    协同评估：
+    - 任一阈值（session USD / today USD / session tokens / today tokens）超过 → status='exceeded'
+    - 任一阈值 ≥ warnAt * limit（默认 0.8 = 80%）→ status='warn'
+    - 全部低于 warnAt → status='ok'
+    onExceeded:
+    - 'warn'：只打印 warning，继续调用
+    - 'block'：QueryEngine 在 chain 调用前拒绝，返 budget-exceeded 错
+    例题分析：
+    - session_usd: 1.7 / 2 = 85% ≥ 80% → 已触 warn
+    - today_tokens: 480000 / 500000 = 96% ≥ 80% → 已触 warn
+    - 两者都未超 100% → status='warn' (不是 exceeded)
+    - shouldBlock = false（exceeded 才 block）
+    回答 status='warn' 即正确；shouldBlock=false 是加分项。
+    不应给"立即关闭进程 / 删除 cost 表"等极端操作。
+  answer_key: ASK-040.md

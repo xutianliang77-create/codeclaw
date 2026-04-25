@@ -1,0 +1,31 @@
+id: ASK-035
+version: 1
+category: debug
+difficulty: hard
+requires:
+  tools: []
+prompt: |
+  全新机器第一次 `npm run start` 启动 CodeClaw，立即报错：
+    Error: bad migration filename: ... 或 ENOENT: no such file or directory ... migrations/data
+  请按"代码层 → 构建产物层 → 文件系统层"三层依次给出根因假设，并说明每层最快的验证 / 修复方法。
+expected:
+  must_mention:
+    - migration 或 迁移
+    - dist 或 build 或 构建
+    - cp 或 复制 或 拷贝
+    - src/storage/migrations 或 storage/migrations
+    - data 或 audit
+  must_not_mention:
+    - 跳过 migration
+    - sqlite3 命令缺失
+  rubric: |
+    三层假设：
+    1. **代码层**：`src/storage/migrate.ts` 期望从 `__dirname/migrations/{data,audit}/NNN_*.sql` 读 SQL；如果在源码里跑 tsx 直跑就走 src 路径，能找到。
+    2. **构建产物层（最常见）**：`dist/storage/migrate.js` 在打包后要求同目录下有 `dist/storage/migrations/`，但 `tsc/esbuild` 默认不拷贝非 .ts 文件。`scripts/build.mjs` 有显式 cp 步骤；如果跑了不走 build.mjs 的命令（如裸 `tsc`），SQL 就不会到 dist。
+    3. **文件系统层**：`migrations/data` 或 `migrations/audit` 命名不对（NNN_*.sql 正则不匹配）/ 子目录被 .gitignore 忽略 / 软链丢失。
+    验证：
+    - `ls dist/storage/migrations/data` —— 没有就是 build cp 漏了
+    - `ls src/storage/migrations` —— 没有是源码缺失
+    - 重跑 `npm run build` 看 cp 是否执行
+    修复：补 build.mjs 的 cp；不应"跳过 migration"或改 migrate.ts 容错（会让 schema 不一致）
+  answer_key: ASK-035.md

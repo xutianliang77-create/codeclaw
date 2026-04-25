@@ -1,0 +1,80 @@
+id: ASK-100
+version: 1
+category: snippet
+difficulty: hard
+requires:
+  tools: []
+prompt: |
+  写一个 TypeScript 类 `LRUCache<K, V>`：
+  - 容量上限 maxSize
+  - 每条 entry 可选 ttlMs（不传则永不过期）
+  - get(k) 命中时刷新到队尾（hot）；如果过期视为 miss，并删除
+  - set(k, v, ttlMs?) 满了就驱逐最 cold（队首）
+  - has(k) 不更新冷热顺序、不刷 TTL，但仍考虑过期
+  - 使用 Map 顺序特性，O(1) 复杂度
+expected:
+  must_mention:
+    - Map
+    - delete
+    - Date.now 或 performance.now 或 时间戳
+    - keys 或 first 或 next
+    - ttl 或 expireAt 或 过期
+  must_not_mention:
+    - linked list 手写
+    - WeakMap
+  rubric: |
+    可接受：
+
+      interface Entry<V> { value: V; expireAt: number | null; }
+
+      export class LRUCache<K, V> {
+        private map = new Map<K, Entry<V>>();
+        constructor(private maxSize: number) {
+          if (maxSize <= 0) throw new Error("maxSize must be > 0");
+        }
+
+        private isExpired(e: Entry<V>): boolean {
+          return e.expireAt !== null && e.expireAt <= Date.now();
+        }
+
+        get(k: K): V | undefined {
+          const e = this.map.get(k);
+          if (!e) return undefined;
+          if (this.isExpired(e)) { this.map.delete(k); return undefined; }
+          // 刷新到队尾
+          this.map.delete(k);
+          this.map.set(k, e);
+          return e.value;
+        }
+
+        has(k: K): boolean {
+          const e = this.map.get(k);
+          if (!e) return false;
+          if (this.isExpired(e)) { this.map.delete(k); return false; }
+          return true;
+        }
+
+        set(k: K, v: V, ttlMs?: number): void {
+          if (this.map.has(k)) this.map.delete(k);
+          while (this.map.size >= this.maxSize) {
+            const firstKey = this.map.keys().next().value;
+            if (firstKey === undefined) break;
+            this.map.delete(firstKey as K);
+          }
+          this.map.set(k, {
+            value: v,
+            expireAt: ttlMs != null ? Date.now() + ttlMs : null,
+          });
+        }
+
+        get size() { return this.map.size; }
+      }
+
+    要点：
+    - 利用 Map 插入顺序：迭代时按插入顺序，第一个 key = 最 cold
+    - get 时 delete + set 一次 → 移到队尾
+    - has 不刷顺序
+    - TTL 用 expireAt（绝对时间），避免计算每次的相对偏移
+    - O(1)：Map.delete / Map.set / Map.keys().next() 都是 O(1)
+    不应手写 linked list（Map 已带顺序）。
+  answer_key: ASK-100.md
