@@ -309,15 +309,20 @@ export function App({
       <TranscriptPane messages={messages} />
       <StatusBar phase={phase} toolStatus={toolStatus} />
       <ApprovalPanel pendingApproval={pendingApproval} />
-      <Box borderStyle="round" paddingX={1} marginTop={1}>
-        <Text color="cyan">{"> "}</Text>
-        <SafeTextInput
-          value={input}
-          onChange={setInput}
-          onSubmit={(value) => {
-            void handleSubmit(value);
-          }}
-        />
+      <Box borderStyle="round" paddingX={1} marginTop={1} flexDirection="column">
+        <Box>
+          <Text color="cyan">{"> "}</Text>
+          <SafeTextInput
+            value={input}
+            onChange={setInput}
+            onSubmit={(value) => {
+              void handleSubmit(value);
+            }}
+          />
+        </Box>
+        <Text color="gray" dimColor>
+          buffer: {input.length} chars · Backspace/←→ Ctrl+A=home Ctrl+E=end Ctrl+U=clear Ctrl+W=del-word Enter=send
+        </Text>
       </Box>
       <FooterHints />
     </Box>
