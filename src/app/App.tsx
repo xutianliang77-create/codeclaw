@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import TextInput from "ink-text-input";
+import { SafeTextInput } from "./SafeTextInput";
 import type { EngineMessage, EnginePhase, PendingApprovalView, QueryEngine } from "../agent/types";
 import { createCliIngressMessage } from "../channels/cli/adapter";
 import type { IngressGateway } from "../ingress/gateway";
@@ -311,7 +311,7 @@ export function App({
       <ApprovalPanel pendingApproval={pendingApproval} />
       <Box borderStyle="round" paddingX={1} marginTop={1}>
         <Text color="cyan">{"> "}</Text>
-        <TextInput
+        <SafeTextInput
           value={input}
           onChange={setInput}
           onSubmit={(value) => {

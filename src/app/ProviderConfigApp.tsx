@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import SelectInput from "ink-select-input";
-import TextInput from "ink-text-input";
+import { SafeTextInput } from "./SafeTextInput";
 import type { CodeClawConfig, ConfigPaths, ProviderFileEntry, ProviderType, ProvidersFileConfig } from "../lib/config";
 import { writeConfig, writeProvidersFile } from "../lib/config";
 
@@ -75,25 +75,17 @@ export function ProviderConfigApp({
       : "Interactive provider config ready."
   );
 
-  // Ctrl+C 永远生效
+  // Ctrl+C 全退；ESC 回主菜单（编辑屏也生效，因为 SafeTextInput 不再吞 ESC）
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
       exit();
+      return;
+    }
+    if (key.escape && screen !== "done") {
+      setScreen("main");
+      setBanner("Returned to main menu.");
     }
   });
-
-  // ESC 回主菜单；但编辑文本时禁用：与 ink-text-input 共抢按键 + setScreen
-  // 卸载 TextInput 会导致 backspace / arrow / 中段编辑失效（ink 5 + ink-text-input 6
-  // 已知互扰）。编辑时若想取消，按 Ctrl+C 退出，或 Enter 保存当前内容（包含空串）。
-  useInput(
-    (_input, key) => {
-      if (key.escape && screen !== "done") {
-        setScreen("main");
-        setBanner("Returned to main menu.");
-      }
-    },
-    { isActive: screen !== "field-input" }
-  );
 
   const mainItems = useMemo<MenuItem[]>(
     () => [
@@ -321,15 +313,15 @@ export function ProviderConfigApp({
             </Text>
             <Text color="gray">
               {selectedField === "timeoutMs"
-                ? "Enter a number or leave blank to clear. Enter saves; Ctrl+C exits."
-                : "Press Enter to save. Backspace/Arrow OK. Ctrl+C exits (no save)."}
+                ? "Number or blank. Enter saves; ESC cancels; Ctrl+C exits."
+                : "Backspace/←→ edit. Ctrl+A=home Ctrl+E=end Ctrl+U=clear Ctrl+W=del-word. Enter saves; ESC cancels."}
             </Text>
             <Text color="gray">
               buffer length: {fieldValue.length}
             </Text>
             <Box marginTop={1}>
               <Text color="cyan">{"> "}</Text>
-              <TextInput value={fieldValue} onChange={setFieldValue} onSubmit={submitField} />
+              <SafeTextInput value={fieldValue} onChange={setFieldValue} onSubmit={submitField} />
             </Box>
           </>
         ) : null}
