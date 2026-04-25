@@ -142,6 +142,7 @@ describe("loadBuiltins", () => {
       "/orchestrate",
       "/cost",
       "/commit",
+      "/ask",
     ]) {
       expect(reg.has(name)).toBe(true);
     }
@@ -252,6 +253,27 @@ describe("delegating builtins · duck-type pattern", () => {
     };
     const out = await reg.dispatch("/orchestrate add tests", holder);
     expect(out?.result).toEqual({ kind: "reply", text: "ORCH:/orchestrate add tests" });
+  });
+
+  it("/ask delegates to runAskCommand and forwards rawPrompt", async () => {
+    const reg = new SlashRegistry();
+    loadBuiltins(reg);
+    const askHolder = {
+      runAskCommand: (p: string) => `ASK_OUT:${p}`,
+    };
+    const out = await reg.dispatch("/ask why is x null", askHolder);
+    expect(out?.result).toEqual({
+      kind: "reply",
+      text: "ASK_OUT:/ask why is x null",
+    });
+  });
+
+  it("/ask degrades when runAskCommand missing", async () => {
+    const reg = new SlashRegistry();
+    loadBuiltins(reg);
+    const out = await reg.dispatch("/ask hello", {});
+    if (out?.result.kind !== "reply") throw new Error("expected reply");
+    expect(out.result.text).toContain("unavailable");
   });
 
   it("/cost delegates to runCostCommand", async () => {

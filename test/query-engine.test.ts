@@ -73,6 +73,67 @@ describe("query engine", () => {
     expect(messages.at(-1)?.text).toContain("Available commands");
   });
 
+  it("/ask arms one-shot plan mode and restores after the next non-/ask turn", async () => {
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "default",
+      workspace: process.cwd(),
+    });
+    expect(engine.getRuntimeState().permissionMode).toBe("default");
+
+    // Turn 1：装弹 /ask（不附 question）→ mode 切到 plan
+    await collect(engine.submitMessage("/ask"));
+    expect(engine.getRuntimeState().permissionMode).toBe("plan");
+
+    // Turn 2：用户问题（任何非 /ask prompt 都行，这里用一条 builtin 命令）
+    await collect(engine.submitMessage("/status"));
+    // 本轮跑完 → restore 回 default
+    expect(engine.getRuntimeState().permissionMode).toBe("default");
+
+    // 再来一轮 /status，mode 不应再变（已 disarmed）
+    await collect(engine.submitMessage("/status"));
+    expect(engine.getRuntimeState().permissionMode).toBe("default");
+  });
+
+  it("/ask with question echoes the question for copy/paste, still arms plan mode", async () => {
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "auto",
+      workspace: process.cwd(),
+    });
+
+    const events = await collect(engine.submitMessage("/ask why does X fail?"));
+    expect(engine.getRuntimeState().permissionMode).toBe("plan");
+    const lastMessage = engine.getMessages().at(-1);
+    expect(lastMessage?.text).toContain("Plan mode armed");
+    expect(lastMessage?.text).toContain("why does X fail?");
+    // void to satisfy unused-var lint
+    void events;
+  });
+
+  it("/ask twice without intervening turn does not overwrite the saved mode", async () => {
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "auto",
+      workspace: process.cwd(),
+    });
+    await collect(engine.submitMessage("/ask"));
+    expect(engine.getRuntimeState().permissionMode).toBe("plan");
+
+    // 重复 /ask 不应覆盖 askModePending（否则会把 "plan" 当原 mode 卡死）
+    const events2 = await collect(engine.submitMessage("/ask second time"));
+    const reply = engine.getMessages().at(-1);
+    expect(reply?.text).toContain("already armed");
+
+    // 接下来用一轮 /status 触发 restore，应回到 auto（不是 plan）
+    await collect(engine.submitMessage("/status"));
+    expect(engine.getRuntimeState().permissionMode).toBe("auto");
+    void events2;
+  });
+
   it("drives FSM through one full turn (planning → executing → halted=completed)", async () => {
     const engine = createQueryEngine({
       currentProvider: provider,

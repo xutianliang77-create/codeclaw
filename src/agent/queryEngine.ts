@@ -370,6 +370,16 @@ class LocalQueryEngine implements QueryEngine {
   private readonly slashRegistry = new SlashRegistry();
   private readonly fsm = new EngineFsm();
 
+  /**
+   * /ask 一次性 plan-mode 状态：
+   *   - askModePending：保存被 /ask 临时切走前的 mode；非 null 表示"已 armed"
+   *   - askModeShouldRestoreAtEnd：本轮结束时是否应执行 restore（在 submitMessage
+   *     起点根据 prompt 是否仍为 /ask 决定）
+   * 设计上"装弹一次只生效一轮"：/ask 起本轮不还，下一轮非 /ask 跑完再还。
+   */
+  private askModePending: { restore: PermissionMode } | null = null;
+  private askModeShouldRestoreAtEnd = false;
+
   /** 给 SlashCommand handler 通过 ctx.queryEngine 拿到 registry（供 /help 用） */
   public getSlashRegistry(): SlashRegistry {
     return this.slashRegistry;
@@ -409,6 +419,13 @@ class LocalQueryEngine implements QueryEngine {
           } else {
             this.fsm.halt("completed", "success");
           }
+        }
+        // /ask 装弹的一次性 plan mode：本轮结束 restore（仅在下一轮非 /ask 的 turn）
+        if (this.askModeShouldRestoreAtEnd && this.askModePending) {
+          this.permissionMode = this.askModePending.restore;
+          this.permissions.setMode(this.permissionMode);
+          this.askModePending = null;
+          this.askModeShouldRestoreAtEnd = false;
         }
         break;
       case "halted":
@@ -459,6 +476,11 @@ class LocalQueryEngine implements QueryEngine {
     const trimmed = prompt.trim();
     if (!trimmed) {
       return;
+    }
+
+    // /ask 装弹后的下一轮（且本轮不是 /ask 自己）→ 标记本轮末尾 restore
+    if (this.askModePending && !trimmed.startsWith("/ask")) {
+      this.askModeShouldRestoreAtEnd = true;
     }
 
     this.interrupted = false;
@@ -1541,6 +1563,40 @@ class LocalQueryEngine implements QueryEngine {
       "",
       "note: real provider usage (input/output tokens, USD) will be tracked once the",
       "      provider client surfaces usage; tracked in P0 W3.",
+    ].join("\n");
+  }
+
+  /**
+   * 给 /ask slash builtin 用：把 permission mode 一次性切到 plan 让用户做 read-only Q&A。
+   *
+   * 语义：
+   *   - 本次 /ask 调用本身不做 restore；下一轮非 /ask 的 turn 跑完后 restore 回原 mode。
+   *   - 已 armed 状态下重复 /ask 不重复保存（避免把"plan"当原 mode 保存导致永远卡 plan）。
+   *   - 限制（v1）：/ask <question> 形式不会自动注入问题，仍需用户在下一行重新输入；
+   *     提示里把问题原文回显给用户便于复制。
+   */
+  public runAskCommand(prompt: string): string {
+    const goal = prompt.replace(/^\/ask\s*/, "").trim();
+    if (this.askModePending) {
+      const restoreTo = this.askModePending.restore;
+      const tail = goal
+        ? `\nQuestion you typed: ${goal}\nJust hit enter / submit it as your next prompt.`
+        : "";
+      return `Plan-mode Q&A is already armed (will restore to "${restoreTo}").${tail}`;
+    }
+    this.askModePending = { restore: this.permissionMode };
+    this.permissionMode = "plan";
+    this.permissions.setMode("plan");
+    if (goal) {
+      return [
+        `Plan mode armed for read-only Q&A. Submit your question on the next line:`,
+        `  > ${goal}`,
+        `(Mode will restore to "${this.askModePending.restore}" after the next answer.)`,
+      ].join("\n");
+    }
+    return [
+      `Plan mode armed for read-only Q&A. Type your question on the next line.`,
+      `(Mode will restore to "${this.askModePending.restore}" after the next answer.)`,
     ].join("\n");
   }
 
