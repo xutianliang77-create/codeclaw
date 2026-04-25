@@ -242,6 +242,56 @@ describe("query engine", () => {
     expect(engine.getMessages().at(-1)?.text).toContain("[interrupted]");
   });
 
+  it("W3-04: /ask + 中途 interrupt 后 mode 延迟一轮 restore（已知行为，文档化）", { timeout: 15000 }, async () => {
+    // deep-review U1：phaseEvent("halted") 不走 askMode restore 块；
+    // 验证当前观察到的行为：interrupt 后 mode 仍 plan，**下一轮非 /ask** 跑完才 restore。
+    const fetchImpl = async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('data: {"choices":[{"delta":{"content":"partial"}}]}\n')
+            );
+            setTimeout(() => {
+              controller.enqueue(
+                new TextEncoder().encode('data: {"choices":[{"delta":{"content":" more"}}]}\n')
+              );
+              controller.close();
+            }, 5);
+          },
+        })
+      );
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "auto",
+      workspace: process.cwd(),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    // Turn 1：装弹 /ask（无参，走 v1 fallback）→ mode 切到 plan
+    await collect(engine.submitMessage("/ask"));
+    expect(engine.getRuntimeState().permissionMode).toBe("plan");
+
+    // Turn 2：发一条 LLM stream prompt，中途 interrupt
+    const stream = engine.submitMessage("explain the agent loop");
+    await stream.next();
+    await stream.next();
+    await stream.next();
+    await stream.next();
+    engine.interrupt();
+    for await (const _ of stream) {
+      void _;
+    }
+    // halted 路径不 restore（known issue U1，留追踪）→ mode 仍是 plan
+    expect(engine.getRuntimeState().permissionMode).toBe("plan");
+
+    // Turn 3：再发一条非 /ask prompt（用 /status 这个 builtin，走 registry 不进 LLM）
+    await collect(engine.submitMessage("/status"));
+    // 这一轮跑完 → askModeShouldRestoreAtEnd 在入口被标 true → 末尾 restore
+    expect(engine.getRuntimeState().permissionMode).toBe("auto");
+  });
+
   it("handles local read tool commands before provider calls", async () => {
     const engine = createQueryEngine({
       currentProvider: provider,
