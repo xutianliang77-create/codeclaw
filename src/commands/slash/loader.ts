@@ -44,6 +44,8 @@ import costCommand from "./builtins/cost";
 import commitCommand from "./builtins/commit";
 import askCommand from "./builtins/ask";
 import fixCommand from "./builtins/fix";
+import endCommand from "./builtins/end";
+import forgetCommand from "./builtins/forget";
 
 const BUILTINS: Array<SlashCommand | SlashCommand[]> = [
   helpCommand,
@@ -75,6 +77,8 @@ const BUILTINS: Array<SlashCommand | SlashCommand[]> = [
   debugToolCallCommand,
   mcpCommand,
   wechatCommand,
+  endCommand,
+  forgetCommand,
 ];
 
 export function loadBuiltins(registry: SlashRegistry): number {

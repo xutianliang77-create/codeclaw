@@ -13,6 +13,18 @@ import type { FsmSnapshot } from "../fsm";
 import { openAuditDb } from "../storage/audit";
 import { AuditLog } from "../storage/auditLog";
 import type { AuditDecision } from "../storage/auditLog";
+import { openDataDb } from "../storage/db";
+import {
+  forgetMemoryDigests,
+  saveMemoryDigest,
+  type ForgetOptions,
+} from "../memory/sessionMemory/store";
+import { recallRecent } from "../memory/sessionMemory/recaller";
+import {
+  createProviderSummarizer,
+  summarizeSession,
+} from "../memory/sessionMemory/summarizer";
+import type Database from "better-sqlite3";
 import QRCode from "qrcode";
 import {
   buildApprovedExecutionPlan,
@@ -550,6 +562,8 @@ class LocalQueryEngine implements QueryEngine {
   private readonly slashRegistry = new SlashRegistry();
   private readonly fsm = new EngineFsm();
   private readonly auditLog: AuditLog | null;
+  // L2 Session Memory：dataDb 句柄；channel/userId 都齐备时才启用 recall + 持久化
+  private readonly dataDb: Database.Database | null;
 
   /**
    * /ask 一次性 plan-mode 状态：
@@ -691,6 +705,23 @@ class LocalQueryEngine implements QueryEngine {
         this.auditLog = null;
       }
     }
+    // L2 Memory：与 audit 同套 vitest 保护规则。dataDbPath===null / vitest 默认禁用。
+    const shouldDisableData =
+      options.dataDbPath === null || (options.dataDbPath === undefined && isVitest);
+    if (shouldDisableData) {
+      this.dataDb = null;
+    } else {
+      try {
+        const handle = openDataDb({
+          path: options.dataDbPath ?? undefined,
+          singleton: false,
+        });
+        this.dataDb = handle.db;
+      } catch {
+        this.dataDb = null;
+      }
+    }
+
     this.messages = [
       {
         id: createId("msg"),
@@ -701,6 +732,24 @@ class LocalQueryEngine implements QueryEngine {
         source: "local"
       }
     ];
+
+    // L2 召回：dataDb 可用 + channel/userId 齐备时，把最近 5 条摘要拼成 system message
+    // 注入到 messages 头部（在 ready 消息之前），让 LLM 有跨 session 的上下文
+    if (this.dataDb && options.channel && options.userId) {
+      try {
+        const recall = recallRecent(this.dataDb, options.channel, options.userId);
+        if (recall.systemMessage) {
+          this.messages.unshift({
+            id: recall.systemMessage.id,
+            role: recall.systemMessage.role,
+            text: recall.systemMessage.text,
+            source: recall.systemMessage.source,
+          });
+        }
+      } catch {
+        // 召回失败不阻塞启动
+      }
+    }
 
     if (this.pendingApprovals.length > 0) {
       const nextApproval = this.pendingApprovals[0];
@@ -1561,6 +1610,51 @@ class LocalQueryEngine implements QueryEngine {
     // /review 是 read-only，永远单轮（多轮对 review lane 没有语义）
     const { execution, reflector } = await this.executePlanWithSideEffects(plan, { maxRounds: 1 });
     return this.buildReviewReply(plan, execution, reflector);
+  }
+
+  /**
+   * L2 Session Memory · /end 命令主入口：
+   *   - 跑 LLM 摘要当前对话
+   *   - 写入 memory_digest 表
+   *   - 返回供用户阅读的回执
+   * 数据 db / channel / userId / provider 任一缺失时返回提示性消息（不写）。
+   */
+  public async runEndCommand(): Promise<string> {
+    if (!this.dataDb) {
+      return "Memory not enabled (dataDbPath disabled / vitest env). Session ends without persisting digest.";
+    }
+    if (!this.options.channel || !this.options.userId) {
+      return "Memory requires channel + userId in QueryEngineOptions. Skipping digest.";
+    }
+    if (!this.currentProvider) {
+      return "No provider configured; cannot summarize. Skipping digest.";
+    }
+    const invoker = createProviderSummarizer(this.currentProvider);
+    const digest = await summarizeSession(invoker, this.messages, {
+      sessionId: this.sessionId,
+      channel: this.options.channel,
+      userId: this.options.userId,
+    });
+    saveMemoryDigest(this.dataDb, digest);
+    return [
+      "Session ended.",
+      `digest-id: ${digest.digestId}`,
+      `messages: ${digest.messageCount}`,
+      `summary: ${digest.summary}`,
+    ].join("\n");
+  }
+
+  /**
+   * L2 Session Memory · /forget 命令主入口：清除已保存的摘要。
+   * 支持 --all / --session=<id> / --since=<ms>。
+   */
+  public runForgetCommand(opts: ForgetOptions): string {
+    if (!this.dataDb) {
+      return "Memory not enabled (dataDbPath disabled / vitest env).";
+    }
+    const removed = forgetMemoryDigests(this.dataDb, opts);
+    const what = opts.all ? "all" : opts.sessionId ? `session ${opts.sessionId}` : `since ${opts.since}`;
+    return `Forgot ${removed} digest(s) (${what}).`;
   }
 
   /** 给 /orchestrate slash builtin 用 */

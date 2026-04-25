@@ -79,6 +79,11 @@ export interface QueryEngineOptions {
   approvalsDir?: string;
   /** 审计链 db 路径；不传走 ~/.codeclaw/audit.db。设为 null 显式禁用 audit。 */
   auditDbPath?: string | null;
+  /** L2 Session Memory 用的 data.db 路径；不传走 ~/.codeclaw/data.db。null 禁用 */
+  dataDbPath?: string | null;
+  /** L2 Memory 召回需要 (channel, userId) 隔离；不传时不启用 L2 */
+  channel?: import("../channels/channelAdapter").ChannelType;
+  userId?: string;
   fetchImpl?: typeof fetch;
   wechat?: {
     tokenFile?: string;
