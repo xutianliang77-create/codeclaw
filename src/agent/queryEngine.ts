@@ -501,6 +501,9 @@ class LocalQueryEngine implements QueryEngine {
     this.permissionMode = options.permissionMode;
     this.modelLabel = this.currentProvider?.model ?? "scaffold";
     this.permissions = new PermissionManager(this.permissionMode);
+    // W3-03：load 不按 sessionId 过滤（cross-session recovery 是预期使用场景，
+    // 用户重启 / 切换 session 时仍能拿到上次的 pending）。隔离仅在 save/clear 上做：
+    // session A 的 save 不会删 B 的 pending。这是对"覆盖"风险与"recovery 可见性"的折中。
     this.pendingApprovals = loadPendingApprovals(options.approvalsDir);
     loadBuiltins(this.slashRegistry);
     this.messages = [
@@ -2172,11 +2175,17 @@ class LocalQueryEngine implements QueryEngine {
 
   private persistPendingApprovals(): void {
     if (this.pendingApprovals.length === 0) {
-      clearPendingApprovals(this.options.approvalsDir);
+      clearPendingApprovals(this.options.approvalsDir, { sessionId: this.sessionId });
       return;
     }
 
-    savePendingApprovals(this.options.approvalsDir, this.pendingApprovals as StoredPendingApproval[]);
+    // W3-03：save 不显式传 sessionId — store 内部从 list 推断（list 内全部同 session
+    // 就按它过滤；recovery 后 list 混合 sessionId 就退回老的全删行为）。这一折中
+    // 在并发场景隔离、recovery 场景全集替换都是正确的，参见 store.ts 头部注释。
+    savePendingApprovals(
+      this.options.approvalsDir,
+      this.pendingApprovals as StoredPendingApproval[]
+    );
   }
 
   private getAutoCompactThreshold(): number {

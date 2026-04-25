@@ -176,45 +176,85 @@ function migrateLegacyIfNeeded(db: Database.Database, approvalsDir: string): voi
 
 // —— 公开 API（签名兼容） ————————————————————————————————————————————————
 
-export function loadPendingApprovals(approvalsDir?: string): StoredPendingApproval[] {
+/**
+ * W3-03（deep-review M2）：sessionId 可选过滤
+ *   - 传了 sessionId → DELETE/SELECT 按 session_id 过滤，避免不同 session 共享同 db 时
+ *     互相覆盖 pending
+ *   - 不传 → 老行为（全删 / 全 load），保持向后兼容
+ *
+ * sessionId === null 表示"仅 session_id IS NULL 的行"，与 undefined 区分开。
+ */
+export interface ApprovalsScopeOptions {
+  sessionId?: string | null;
+}
+
+function whereSessionScope(sessionId: string | null | undefined): {
+  clause: string;
+  params: unknown[];
+} {
+  if (sessionId === undefined) return { clause: "", params: [] };
+  if (sessionId === null) return { clause: "AND session_id IS NULL", params: [] };
+  return { clause: "AND session_id = ?", params: [sessionId] };
+}
+
+export function loadPendingApprovals(
+  approvalsDir?: string,
+  options: ApprovalsScopeOptions = {}
+): StoredPendingApproval[] {
   if (!approvalsDir) return [];
   const db = getDb(approvalsDir);
   migrateLegacyIfNeeded(db, approvalsDir);
 
   // 严格按插入顺序返回（ROWID 在 INSERT OR REPLACE 下单调递增）
   // 保留原 JSON 文件实现的"数组顺序 = 入队顺序"语义
-  // 严格按插入顺序返回（ROWID 在 INSERT OR REPLACE 下单调递增）
-  // 保留原 JSON 文件实现的"数组顺序 = 入队顺序"语义
+  const scope = whereSessionScope(options.sessionId);
   const rows = db
-    .prepare<[], ApprovalRow>(
+    .prepare<unknown[], ApprovalRow>(
       `SELECT approval_id, session_id, prompt, tool_name, detail, reason, status, created_at
        FROM approvals
-       WHERE status = 'pending'
+       WHERE status = 'pending' ${scope.clause}
        ORDER BY ROWID ASC`
     )
-    .all();
+    .all(...scope.params);
   return rows.map(rowToApproval);
 }
 
 export function savePendingApprovals(
   approvalsDir: string | undefined,
-  approvals: StoredPendingApproval[]
+  approvals: StoredPendingApproval[],
+  options: ApprovalsScopeOptions = {}
 ): void {
   if (!approvalsDir) return;
   const db = getDb(approvalsDir);
   migrateLegacyIfNeeded(db, approvalsDir);
 
+  // 推断 scope：
+  //   1. options.sessionId 显式传入 → 用它
+  //   2. 否则看 list 里所有 sessionId 是否都同一个 → 用它（自动隔离）
+  //   3. 否则 → undefined（全删，老行为）
+  let scopeId: string | null | undefined = options.sessionId;
+  if (scopeId === undefined && approvals.length > 0) {
+    const unique = new Set(approvals.map((a) => a.sessionId ?? null));
+    if (unique.size === 1) {
+      scopeId = approvals[0]!.sessionId ?? null;
+    }
+  }
+  const scope = whereSessionScope(scopeId);
+
   const tx = db.transaction((list: StoredPendingApproval[]) => {
-    // 全量替换：删除当前所有 pending，再按顺序 insert（保证 ROWID 递增 = 入队顺序）
-    db.prepare(`DELETE FROM approvals WHERE status = 'pending'`).run();
+    db.prepare(`DELETE FROM approvals WHERE status = 'pending' ${scope.clause}`).run(...scope.params);
     for (const a of list) upsertPending(db, a);
   });
   tx(approvals);
 }
 
-export function clearPendingApprovals(approvalsDir?: string): void {
+export function clearPendingApprovals(
+  approvalsDir?: string,
+  options: ApprovalsScopeOptions = {}
+): void {
   if (!approvalsDir) return;
   const db = getDb(approvalsDir);
   migrateLegacyIfNeeded(db, approvalsDir);
-  db.prepare(`DELETE FROM approvals WHERE status = 'pending'`).run();
+  const scope = whereSessionScope(options.sessionId);
+  db.prepare(`DELETE FROM approvals WHERE status = 'pending' ${scope.clause}`).run(...scope.params);
 }

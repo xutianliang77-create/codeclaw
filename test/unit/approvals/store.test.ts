@@ -142,22 +142,82 @@ describe("legacy JSON migration", () => {
 });
 
 describe("multiple approvalsDir isolation (test scenario)", () => {
-  it("different approvalsDir → different data.db, no cross contamination", () => {
+  it("W3-03：同 root 共享 data.db 时，传 sessionId 后两 session 完全隔离", () => {
+    // approvalsDir 不同但同 root → 物理上仍共享 data.db；W3-03 的修法是按 sessionId 过滤，
+    // 让它们逻辑上隔离不互相覆盖。
     const dirA = makeApprovalsDir("approvals-A");
     const dirB = makeApprovalsDir("approvals-B");
-    // 让 dirA / dirB 各自推断到独立的 data.db（inferDataDbPath = path.dirname(approvalsDir) + data.db）
-    // 两者父目录不同（因为 sub 不同但同 root） —— 我们改用两个 root
+    savePendingApprovals(
+      dirA,
+      [sampleApproval({ id: "from-A", sessionId: "sess-A" })],
+      { sessionId: "sess-A" }
+    );
+    savePendingApprovals(
+      dirB,
+      [sampleApproval({ id: "from-B", sessionId: "sess-B" })],
+      { sessionId: "sess-B" }
+    );
+
+    // sess-A 视角：只看到自己那条；sess-B 同理
+    expect(loadPendingApprovals(dirA, { sessionId: "sess-A" }).map((a) => a.id)).toEqual([
+      "from-A",
+    ]);
+    expect(loadPendingApprovals(dirB, { sessionId: "sess-B" }).map((a) => a.id)).toEqual([
+      "from-B",
+    ]);
+    // 不传 sessionId 看全集：两条都能看到（共用 db 的物理事实，未变）
+    expect(loadPendingApprovals(dirA).map((a) => a.id).sort()).toEqual(["from-A", "from-B"]);
   });
 
-  it("同 root 下两个不同 approvals 子目录复用同一个 data.db", () => {
-    // 验证设计决策：data.db 由 approvalsDir 的父目录决定；相同父目录下的 approvals-A/-B 共享 db
+  it("W3-03：sessionId 自动从 list 推断（list 内全部同 session 时）", () => {
     const dirA = makeApprovalsDir("approvals-A");
     const dirB = makeApprovalsDir("approvals-B");
-    savePendingApprovals(dirA, [sampleApproval({ id: "from-A" })]);
-    savePendingApprovals(dirB, [sampleApproval({ id: "from-B" })]);
-    // 由于父目录同 = root，两处走同一 data.db；并且 savePendingApprovals 会 DELETE WHERE status='pending' 再 INSERT
-    // 所以 B 的 save 会把 A 的数据覆盖掉
-    expect(loadPendingApprovals(dirA).map((a) => a.id)).toEqual(["from-B"]);
+    // 没显式传 options.sessionId，但 list 里所有 approvals 都 sessionId='auto-A' → 自动按它过滤
+    savePendingApprovals(dirA, [
+      sampleApproval({ id: "auto-A-1", sessionId: "auto-A" }),
+      sampleApproval({ id: "auto-A-2", sessionId: "auto-A" }),
+    ]);
+    savePendingApprovals(dirB, [sampleApproval({ id: "auto-B-1", sessionId: "auto-B" })]);
+
+    expect(loadPendingApprovals(dirA, { sessionId: "auto-A" }).map((a) => a.id)).toEqual([
+      "auto-A-1",
+      "auto-A-2",
+    ]);
+    expect(loadPendingApprovals(dirB, { sessionId: "auto-B" }).map((a) => a.id)).toEqual([
+      "auto-B-1",
+    ]);
+  });
+
+  it("W3-03：clearPendingApprovals 按 sessionId 只清自己的", () => {
+    const dir = makeApprovalsDir("approvals");
+    savePendingApprovals(
+      dir,
+      [sampleApproval({ id: "A-keep", sessionId: "sess-A" })],
+      { sessionId: "sess-A" }
+    );
+    savePendingApprovals(
+      dir,
+      [sampleApproval({ id: "B-clear", sessionId: "sess-B" })],
+      { sessionId: "sess-B" }
+    );
+    clearPendingApprovals(dir, { sessionId: "sess-B" });
+
+    expect(loadPendingApprovals(dir).map((a) => a.id)).toEqual(["A-keep"]);
+  });
+
+  it("不传 sessionId 时退回老行为（全删 / 全 load）", () => {
+    const dir = makeApprovalsDir("approvals");
+    savePendingApprovals(dir, [sampleApproval({ id: "X", sessionId: "sess-A" })], {
+      sessionId: "sess-A",
+    });
+    savePendingApprovals(dir, [sampleApproval({ id: "Y", sessionId: "sess-B" })], {
+      sessionId: "sess-B",
+    });
+    // 现在 db 里有两条
+    expect(loadPendingApprovals(dir)).toHaveLength(2);
+    // 不传 sessionId 的 clear → 全删
+    clearPendingApprovals(dir);
+    expect(loadPendingApprovals(dir)).toHaveLength(0);
   });
 
   it("两个不同 root 的 approvalsDir 完全隔离", () => {
