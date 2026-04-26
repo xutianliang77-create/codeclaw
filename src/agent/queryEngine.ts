@@ -642,6 +642,11 @@ class LocalQueryEngine implements QueryEngine {
   private activeSkill: SkillDefinition | null = null;
   /** M3-04：lifecycle hooks 配置（在 constructor 末尾从 options.settings 装入） */
   private hooksConfig: HookSettings = {};
+
+  /** D1：热重载 settings 时由 cli/SIGHUP 触发；下次 hook event 用新配置 */
+  setHooksConfig(next: HookSettings): void {
+    this.hooksConfig = next ?? {};
+  }
   // #86：成本预算配置（构造时从 options.budget ?? env 决定）
   private readonly budgetConfig: BudgetConfig;
   private readonly slashRegistry = new SlashRegistry();

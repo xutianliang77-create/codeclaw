@@ -212,4 +212,6 @@ export interface QueryEngine {
   getFsmSnapshot?(): import("../fsm").FsmSnapshot;
   /** 给测试 / 调试访问审计链（W3-01；可能 null：未开启或打开失败） */
   getAuditLog?(): import("../storage/auditLog").AuditLog | null;
+  /** D1：热重载 hooks 配置（SIGHUP 触发） */
+  setHooksConfig?(next: import("../hooks/settings").HookSettings): void;
 }

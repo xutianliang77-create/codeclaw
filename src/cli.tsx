@@ -177,15 +177,61 @@ async function main(): Promise<void> {
           prompt: configuredSpeechAsr.prompt
         })
       : undefined;
+  // M3-01：MCP manager 启动 + 优雅关闭。先于 wechat / web / queryEngine 创建，
+  // 让所有 channel 的 createQueryEngine factory 都能 capture mcpManager。
+  // 失败 server 不阻塞主进程；找不到配置就是空 manager（无 spawn）。
+  const workspace = runtime.config?.defaults.workspace ?? process.cwd();
+  const mcpManager = new McpManager();
+  try {
+    await mcpManager.start(loadMcpConfig(workspace));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`CodeClaw MCP manager startup failed (continuing without spawn servers): ${msg}`);
+  }
+  // process.on("exit") 是同步事件，async closeAll 不会被等待 → 子进程变 zombie；
+  // 改 SIGINT/SIGTERM/beforeExit（async-aware）。
+  let mcpClosingPromise: Promise<void> | null = null;
+  const shutdownMcp = async (): Promise<void> => {
+    if (!mcpClosingPromise) {
+      mcpClosingPromise = mcpManager.closeAll().catch(() => undefined);
+    }
+    return mcpClosingPromise;
+  };
+  process.on("beforeExit", () => {
+    void shutdownMcp();
+  });
+  for (const sig of ["SIGINT", "SIGTERM"] as const) {
+    process.on(sig, () => {
+      void shutdownMcp().finally(() => process.exit(0));
+    });
+  }
+
+  // M3-04：加载 settings.json（hooks + statusLine 配置）；解析失败不阻塞主进程。
+  // D1：支持 SIGHUP 触发热重载（settings 引用通过 reloadSettings 切换；queryEngine
+  // 持有的旧引用不会自动跟进，需用 setHooksConfig 同步给现有 engine）。
+  let settings = (() => {
+    try {
+      return loadSettings(workspace);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`CodeClaw settings load failed (continuing without hooks): ${msg}`);
+      return undefined;
+    }
+  })();
+
+  // A2：wechat / web 共用同一组 mcpManager + settings；factory 闭包延迟 capture，
+  // 每次 wechat 收到消息派生新 engine 时都注入这两个字段。
   const wechatService = createWechatBotService({
     createQueryEngine(overrides) {
       return createQueryEngine({
         currentProvider: runtime.selection?.current ?? null,
         fallbackProvider: runtime.selection?.fallback ?? null,
         permissionMode: runtime.config?.defaults.permissionMode ?? "plan",
-        workspace: runtime.config?.defaults.workspace ?? process.cwd(),
+        workspace,
         autoCompactThreshold: runtime.config?.memory.l1AutoCompactThreshold,
         approvalsDir: paths.approvalsDir,
+        mcpManager,
+        settings,
         ...overrides
       });
     },
@@ -236,43 +282,6 @@ async function main(): Promise<void> {
         }
       })
     : undefined;
-  // M3-01：启动 MCP manager（spawn ~/.codeclaw/mcp.json 或项目级 .mcp.json 中的所有
-  // enabled server），失败 server 不阻塞主进程；找不到配置就是空 manager（无 spawn）
-  const workspace = runtime.config?.defaults.workspace ?? process.cwd();
-  const mcpManager = new McpManager();
-  try {
-    await mcpManager.start(loadMcpConfig(workspace));
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`CodeClaw MCP manager startup failed (continuing without spawn servers): ${msg}`);
-  }
-  // M3-01：MCP 子进程优雅关闭。注意 process.on("exit") 是同步事件，async closeAll
-  // 不会被等待，子进程会变 zombie；改 SIGINT/SIGTERM/beforeExit（async-aware）。
-  let mcpClosingPromise: Promise<void> | null = null;
-  const shutdownMcp = async (): Promise<void> => {
-    if (!mcpClosingPromise) {
-      mcpClosingPromise = mcpManager.closeAll().catch(() => undefined);
-    }
-    return mcpClosingPromise;
-  };
-  process.on("beforeExit", () => {
-    void shutdownMcp();
-  });
-  for (const sig of ["SIGINT", "SIGTERM"] as const) {
-    process.on(sig, () => {
-      void shutdownMcp().finally(() => process.exit(0));
-    });
-  }
-
-  // M3-04：加载 settings.json（hooks + statusLine 配置）；解析失败不阻塞主进程
-  let settings;
-  try {
-    settings = loadSettings(workspace);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`CodeClaw settings load failed (continuing without hooks): ${msg}`);
-    settings = undefined;
-  }
 
   const queryEngine = createQueryEngine({
     currentProvider: runtime.selection?.current ?? null,
@@ -293,6 +302,21 @@ async function main(): Promise<void> {
     }
   });
   const ingressGateway = new IngressGateway(queryEngine);
+
+  // D1: SIGHUP 触发 settings 热重载（hooks + statusLine）。
+  // queryEngine 已暴露 setHooksConfig；wechat factory 闭包用 'settings' 变量在每个
+  // 后续 spawn 的 engine 自动 capture 新值（settings 改 let 引用即可）。
+  process.on("SIGHUP", () => {
+    try {
+      const next = loadSettings(workspace);
+      settings = next;
+      queryEngine.setHooksConfig?.(next.hooks);
+      console.log("CodeClaw settings reloaded (SIGHUP)");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`CodeClaw settings reload failed (keeping previous config): ${msg}`);
+    }
+  });
 
   if (command === "gateway") {
     const portFlagIndex = restArgs.findIndex((arg) => arg === "--port");
