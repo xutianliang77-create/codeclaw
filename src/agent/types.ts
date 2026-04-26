@@ -17,6 +17,18 @@ export interface EngineImageAttachment {
   sourceUrl?: string;
 }
 
+/** M2-05：非 image 附件（.pdf / .txt / .csv / .md / 等）；走 extractAttachmentText 提文本 */
+export interface EngineFileAttachment {
+  kind: "file";
+  localPath: string;
+  fileName?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+}
+
+/** M2-05：附件联合类型 */
+export type EngineAttachment = EngineImageAttachment | EngineFileAttachment;
+
 /** assistant 一轮调用的 tool_use 记录（M1-B/C） */
 export interface EngineToolCallRef {
   id: string;
@@ -29,7 +41,7 @@ export interface EngineMessage {
   role: EngineMessageRole;
   text: string;
   source?: EngineMessageSource;
-  attachments?: EngineImageAttachment[];
+  attachments?: EngineAttachment[];
   /** role: "tool" 时填；指向 assistant 上一轮的 toolCalls[].id */
   toolCallId?: string;
   /** role: "tool" 时填；冗余存名便于查询 */

@@ -141,21 +141,36 @@ async function toOpenAiContent(message: EngineMessage): Promise<string | Array<R
     return message.text;
   }
 
-  const imageParts = await Promise.all(
-    message.attachments.map(async (attachment) => ({
-      type: "image_url",
-      image_url: {
-        url: await toImageDataUrl(attachment.localPath, attachment.mimeType)
+  // M2-05：image 走 data URL；file 走 extractAttachmentText 拼成 text block
+  const { extractAttachmentText } = await import("../agent/attachments/extract");
+  const path = await import("node:path");
+
+  const parts = await Promise.all(
+    message.attachments.map(async (attachment) => {
+      if (attachment.kind === "image") {
+        return {
+          type: "image_url",
+          image_url: {
+            url: await toImageDataUrl(attachment.localPath, attachment.mimeType),
+          },
+        };
       }
-    }))
+      // file kind
+      const extracted = await extractAttachmentText(attachment.localPath);
+      const fileName = attachment.fileName ?? path.basename(attachment.localPath);
+      return {
+        type: "text",
+        text: `\n--- Attachment: ${fileName} ---\n${extracted}\n--- End ---\n`,
+      };
+    })
   );
 
   return [
     {
       type: "text",
-      text: message.text
+      text: message.text,
     },
-    ...imageParts
+    ...parts,
   ];
 }
 
@@ -164,17 +179,29 @@ async function toAnthropicContent(message: EngineMessage): Promise<string | Arra
     return message.text;
   }
 
-  const imageParts = await Promise.all(
+  const { extractAttachmentText } = await import("../agent/attachments/extract");
+  const path = await import("node:path");
+
+  const parts = await Promise.all(
     message.attachments.map(async (attachment) => {
-      const dataUrl = await toImageDataUrl(attachment.localPath, attachment.mimeType);
-      const [mediaType, base64] = parseDataUrl(dataUrl);
+      if (attachment.kind === "image") {
+        const dataUrl = await toImageDataUrl(attachment.localPath, attachment.mimeType);
+        const [mediaType, base64] = parseDataUrl(dataUrl);
+        return {
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: mediaType,
+            data: base64,
+          },
+        };
+      }
+      // file kind
+      const extracted = await extractAttachmentText(attachment.localPath);
+      const fileName = attachment.fileName ?? path.basename(attachment.localPath);
       return {
-        type: "image",
-        source: {
-          type: "base64",
-          media_type: mediaType,
-          data: base64
-        }
+        type: "text",
+        text: `\n--- Attachment: ${fileName} ---\n${extracted}\n--- End ---\n`,
       };
     })
   );
@@ -182,9 +209,9 @@ async function toAnthropicContent(message: EngineMessage): Promise<string | Arra
   return [
     {
       type: "text",
-      text: message.text
+      text: message.text,
     },
-    ...imageParts
+    ...parts,
   ];
 }
 
