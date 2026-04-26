@@ -86,9 +86,9 @@ function scanRepoInline() {
   const rules = [
     { name: "aws-access-key", pattern: /\bAKIA[0-9A-Z]{16}\b/g, severity: "high" },
     { name: "github-token", pattern: /\b(?:ghp|gho|ghu|ghs|ghr)_[0-9A-Za-z]{36}\b/g, severity: "high" },
-    { name: "anthropic-key", pattern: /\bsk-ant-[0-9A-Za-z_\-]{20,}\b/g, severity: "high" },
-    { name: "openai-key", pattern: /\bsk-(?!ant-)[0-9A-Za-z_\-]{20,}\b/g, severity: "high" },
-    { name: "google-api-key", pattern: /\bAIza[0-9A-Za-z_\-]{35,}\b/g, severity: "high" },
+    { name: "anthropic-key", pattern: /\bsk-ant-[0-9A-Za-z_-]{20,}\b/g, severity: "high" },
+    { name: "openai-key", pattern: /\bsk-(?!ant-)[0-9A-Za-z_-]{20,}\b/g, severity: "high" },
+    { name: "google-api-key", pattern: /\bAIza[0-9A-Za-z_-]{35,}\b/g, severity: "high" },
     { name: "private-key-header", pattern: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY( BLOCK)?-----/g, severity: "high" },
   ];
   const findings = [];

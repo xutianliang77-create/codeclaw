@@ -67,7 +67,7 @@ export function recordCall(
     );
     return { callId, usdCost };
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     console.warn("[costTracker] record failed:", err);
     return null;
   }

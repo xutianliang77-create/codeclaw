@@ -17,7 +17,7 @@
 
 import process from "node:process";
 import { loadAllAsk, GoldenLoaderError } from "./loader";
-import { MockLlmInvoker, FailingMockLlmInvoker, LlmInvoker, createRealInvoker } from "./provider";
+import { MockLlmInvoker, LlmInvoker, createRealInvoker } from "./provider";
 import { score, scoreWithJudge } from "./scorer";
 import { createRealJudge, MockLlmJudge, type LlmJudge } from "./llm-judge";
 import { defaultReportPath, printSummary, summarize, writeJsonlReport } from "./report";

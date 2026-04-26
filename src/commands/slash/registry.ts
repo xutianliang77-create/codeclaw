@@ -14,7 +14,6 @@
 import type {
   SlashCommand,
   SlashContext,
-  SlashHandler,
   SlashResult,
   RegisterConflictPolicy,
   SlashCategory,

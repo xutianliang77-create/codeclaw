@@ -65,7 +65,8 @@ describe("runSkillSubcommand · install", () => {
   });
 
   it("manifest 校验失败（与 builtin 重名）→ 2", () => {
-    const home = setupHome();
+    const _home = setupHome();
+    void _home;
     const dir = mkdtempSync(path.join(os.tmpdir(), "codeclaw-bad-name-"));
     tempDirs.push(dir);
     writeFileSync(

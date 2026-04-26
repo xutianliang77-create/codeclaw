@@ -210,7 +210,7 @@ async function createQueryEngineInvoker(
 
       // M1-F + L2：跟踪最后一个非空 message-complete text；空 turn（中间 tool_call-only）不覆盖
       let lastNonEmptyAnswer = "";
-      let modelId: string | undefined = provider.model;
+      const modelId: string | undefined = provider.model;
 
       try {
         const engine = createQueryEngine({

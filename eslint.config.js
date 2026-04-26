@@ -2,8 +2,19 @@ import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
+  // 全局 ignores 必须独立 config 对象（不含 files/rules/languageOptions）
   {
-    ignores: ["dist", "node_modules", ".codeclaw"],
+    ignores: [
+      "dist/**",
+      "node_modules/**",
+      ".codeclaw/**",
+      "test/golden/fix/**",
+      "web/vendor/**",
+      "web-react/dist/**",
+      "web-react/node_modules/**",
+    ],
+  },
+  {
     languageOptions: {
       globals: {
         console: "readonly",

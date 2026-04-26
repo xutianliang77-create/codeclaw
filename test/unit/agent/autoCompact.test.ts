@@ -16,7 +16,7 @@
  * 不变量：summary message 用 role:"assistant" + source:"summary"（与 performCompact 现网约定一致）
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   autoCompactIfNeeded,
   splitForCompact,
@@ -25,7 +25,6 @@ import {
 } from "../../../src/agent/autoCompact";
 import type { EngineMessage } from "../../../src/agent/types";
 import type { ProviderStatus } from "../../../src/provider/types";
-import type { MemoryDigest } from "../../../src/memory/sessionMemory/store";
 
 const provider = (model: string, ctxOverride?: number): ProviderStatus =>
   ({

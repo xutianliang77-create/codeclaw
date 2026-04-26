@@ -8,7 +8,6 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, statSync, cpSync, rmSync, readdirSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import yaml from "js-yaml";
 

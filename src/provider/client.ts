@@ -301,15 +301,6 @@ function extractOpenAiDeltaParts(payload: unknown): OpenAiDeltaParts {
   };
 }
 
-/**
- * Generator yield 用：保 backward compat —— content 优先；为空降级 reasoning。
- * 调用方需要纯净 content 时用 onContent callback，不依赖此函数返回。
- */
-function getDeltaTextFromOpenAiPayload(payload: unknown): string {
-  const { content, reasoning } = extractOpenAiDeltaParts(payload);
-  return content || reasoning;
-}
-
 function pickDeltaText(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {

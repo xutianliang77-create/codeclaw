@@ -9,7 +9,7 @@
  *   - hooks 配置缺省时 5 个时点皆 no-op
  */
 
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { createQueryEngine } from "../../../src/agent/queryEngine";
 import type { CodeclawSettings } from "../../../src/hooks/settings";

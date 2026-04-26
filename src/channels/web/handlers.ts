@@ -365,7 +365,7 @@ export async function handlePatchProvider(
   const { readProvidersFile, writeProvidersFile, resolveConfigPaths } = await import("../../lib/config");
   const paths = resolveConfigPaths();
   const existing = (await readProvidersFile(paths)) ?? {};
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   (existing as any)[providerType] = {
     ...((existing as Record<string, unknown>)[providerType] ?? {}),
     ...filtered,

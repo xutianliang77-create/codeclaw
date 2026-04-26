@@ -20,7 +20,7 @@ import { readdirSync } from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
 
-import { chunkFile, chunkId, shouldSkipDir, type ChunkInput } from "./chunker";
+import { chunkFile, chunkId, shouldSkipDir } from "./chunker";
 import { tokenFreqs, tokenize } from "./tokenize";
 import {
   deleteChunk,

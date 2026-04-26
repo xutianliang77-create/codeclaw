@@ -127,7 +127,7 @@ describe("runWithProviderChain · 编排", () => {
         providers: [fakeProvider("openai")],
         backoffBaseMs: 1,
         sleepImpl: () => Promise.resolve(),
-        invoke: async function* () {
+      invoke: async function* () {
           calls++;
           if (calls === 1) throw new ProviderRequestError("blip", 503);
           yield "ok";
@@ -205,6 +205,7 @@ describe("runWithProviderChain · 编排", () => {
     const agen = runWithProviderChain({
       providers: [fakeProvider("openai"), fakeProvider("anthropic")],
       abortSignal: ac.signal,
+      // eslint-disable-next-line require-yield
       invoke: async function* () {
         const e = new Error("x");
         e.name = "AbortError";
@@ -242,7 +243,8 @@ describe("runWithProviderChain · 编排", () => {
         providers: [fakeProvider("openai"), fakeProvider("anthropic")],
         maxRetriesPerProvider: 0,
         sleepImpl: () => Promise.resolve(),
-        invoke: async function* () {
+        // eslint-disable-next-line require-yield
+      invoke: async function* () {
           throw new ProviderRequestError("forbidden", 401);
         },
       })
@@ -270,7 +272,8 @@ describe("runWithProviderChain · 编排", () => {
           sleeps.push(ms);
           return Promise.resolve();
         },
-        invoke: async function* () {
+        // eslint-disable-next-line require-yield
+      invoke: async function* () {
           throw new ProviderRequestError("down", 503);
         },
       })

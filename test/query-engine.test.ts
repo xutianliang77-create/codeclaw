@@ -930,7 +930,7 @@ describe("query engine", () => {
     expect(engine.getMessages().at(-1)?.text).toContain("reflector-decision:");
 
     await collect(engine.submitMessage("/doctor"));
-    expect(engine.getMessages().at(-1)?.text).toContain("CodeClaw 0.5.0");
+    expect(engine.getMessages().at(-1)?.text).toContain("CodeClaw 0.6.0");
 
     await collect(engine.submitMessage("/wechat"));
     expect(engine.getMessages().at(-1)?.text).toContain("WeChat");
@@ -1742,9 +1742,9 @@ describe("query engine", () => {
     tempDirs.push(dir);
     const dataDbPath = path.join(dir, "data.db");
 
-    let fetchCalls = 0;
+    let _fetchCalls = 0;
     const fetchImpl = async () => {
-      fetchCalls++;
+      _fetchCalls++;
       return new Response(
         new ReadableStream({
           start(controller) {

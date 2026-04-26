@@ -14,6 +14,7 @@
  * 启动方式：node test/fixtures/mcp-fake-server.cjs
  */
 
+/* eslint-disable @typescript-eslint/no-require-imports, no-undef */
 const readline = require("node:readline");
 
 function send(msg) {

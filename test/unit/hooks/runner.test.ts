@@ -150,8 +150,10 @@ describe("runHooks · E1 stderr sanitize", () => {
     const r = await runHooks(baseEvent, cfg);
     expect(r.blocked).toBe(true);
     // ANSI 转义被剥
+    // eslint-disable-next-line no-control-regex
     expect(r.blockReason).not.toMatch(/\x1B\[/);
     // 控制字符（NUL / BS）被替换为空格
+    // eslint-disable-next-line no-control-regex
     expect(r.blockReason).not.toMatch(/[\x00-\x08\x0E-\x1F]/);
     // 主要内容 'ERROR' + 'raw text' 仍可见
     expect(r.blockReason).toMatch(/ERROR/);

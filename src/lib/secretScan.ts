@@ -52,26 +52,26 @@ export const DEFAULT_RULES: SecretRule[] = [
   {
     name: "anthropic-key",
     severity: "high",
-    pattern: /\bsk-ant-[0-9A-Za-z_\-]{20,}\b/g,
+    pattern: /\bsk-ant-[0-9A-Za-z_-]{20,}\b/g,
     description: "Anthropic API key",
   },
   {
     name: "openai-key",
     severity: "high",
     // negative lookahead 排除 sk-ant-（Anthropic 单独算）
-    pattern: /\bsk-(?!ant-)[0-9A-Za-z_\-]{20,}\b/g,
+    pattern: /\bsk-(?!ant-)[0-9A-Za-z_-]{20,}\b/g,
     description: "OpenAI API key（含 sk-proj- project key 变体）",
   },
   {
     name: "google-api-key",
     severity: "high",
-    pattern: /\bAIza[0-9A-Za-z_\-]{35,}\b/g,
+    pattern: /\bAIza[0-9A-Za-z_-]{35,}\b/g,
     description: "Google API key（GCP / Maps / etc.）",
   },
   {
     name: "slack-token",
     severity: "high",
-    pattern: /\bxox[abprs]-[0-9A-Za-z\-]{10,}\b/g,
+    pattern: /\bxox[abprs]-[0-9A-Za-z-]{10,}\b/g,
     description: "Slack token（bot/user/app/refresh/SOCKET）",
   },
   {
@@ -83,7 +83,7 @@ export const DEFAULT_RULES: SecretRule[] = [
   {
     name: "jwt-likely",
     severity: "medium",
-    pattern: /\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b/g,
+    pattern: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
     description: "JWT 形似（三段 base64url）",
   },
   {

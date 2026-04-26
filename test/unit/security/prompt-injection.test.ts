@@ -14,9 +14,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import path from "node:path";
-import os from "node:os";
+import { rmSync } from "node:fs";
 
 import { handleWechatWebhookEvents } from "../../../src/channels/wechat/handler";
 import type { WechatBotAdapter } from "../../../src/channels/wechat/adapter";

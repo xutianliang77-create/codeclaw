@@ -62,7 +62,7 @@ export function backupFileIfExists(
   }
   if (!stats.isFile()) return null;
   if (stats.size > MAX_BACKUP_FILE_BYTES) {
-    // eslint-disable-next-line no-console
+     
     console.warn(
       `[backup] skipped: ${absoluteTargetPath} size ${stats.size} exceeds ${MAX_BACKUP_FILE_BYTES}`
     );
@@ -83,7 +83,7 @@ export function backupFileIfExists(
     copyFileSync(absoluteTargetPath, dest);
     return dest;
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     console.warn(`[backup] failed: ${absoluteTargetPath} → ${dest}: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }

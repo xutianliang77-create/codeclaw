@@ -46,7 +46,8 @@ console.log("");
 
 // 整体
 const passed = records.filter((r) => r.score?.pass).length;
-const failed = records.length - passed;
+const _failed = records.length - passed;
+void _failed;
 console.log(`## 整体`);
 console.log(`- pass: ${passed} / ${records.length} (${((passed / records.length) * 100).toFixed(1)}%)`);
 if (summary) console.log(`- meetsGate (≥85% overall, refusal 100%): ${summary.meetsGate ? "✅" : "❌"}`);

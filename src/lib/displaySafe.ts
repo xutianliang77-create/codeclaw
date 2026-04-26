@@ -10,9 +10,11 @@
  * 在 audit log 里保留，便于事后取证；显示层永远只见净化版本。
  */
 
+/* eslint-disable no-control-regex */
 const ANSI_ESCAPE_RE = /\x1b\[[0-9;]*[a-zA-Z]/g;
 // 控制字符（除 tab）。换行和回车单独处理以保留可见提示。
 const CONTROL_CHARS_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
+/* eslint-enable no-control-regex */
 const NEWLINE_RE = /[\n\r]/g;
 const TAB_RE = /\t/g;
 

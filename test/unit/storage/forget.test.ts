@@ -82,7 +82,7 @@ function seedSession(sessionId: string): void {
   writeFileSync(path.join(sd, "observations.jsonl"), '{"observationId":"x"}\n');
 }
 
-function countSession(sessionId: string): number {
+function _countSession(sessionId: string): number {
   return [
     "sessions", "approvals", "tasks", "l1_memory",
     "observations", "llm_calls_raw", "memory_digest",

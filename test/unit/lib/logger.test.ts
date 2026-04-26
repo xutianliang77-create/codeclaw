@@ -11,7 +11,7 @@ import pino from "pino";
 
 import { createLogger, createSilentLogger, logger } from "../../../src/lib/logger";
 
-function captureLogs(level: string = "info"): { stream: Writable; lines: () => unknown[] } {
+function captureLogs(_level: string = "info"): { stream: Writable; lines: () => unknown[] } {
   const chunks: string[] = [];
   const stream = new Writable({
     write(chunk, _enc, cb) {

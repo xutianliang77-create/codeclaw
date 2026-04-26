@@ -13,8 +13,6 @@
  *
  * 给 M2-02 留 hook：sections.push("## Memory") 在第 9 段；agentRole 给 M3-02 subagent。
  */
-/* eslint-disable security/detect-child-process */
-
 import { execSync } from "node:child_process";
 import type { PermissionMode } from "../lib/config";
 import type { ProviderStatus } from "../provider/types";

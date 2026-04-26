@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { BUILTIN_ROLES, getRole, listRoleNames } from "../../../../src/agent/subagents/roles";
+import { getRole, listRoleNames } from "../../../../src/agent/subagents/roles";
 
 describe("BUILTIN_ROLES", () => {
   it("含 8 个 role", () => {

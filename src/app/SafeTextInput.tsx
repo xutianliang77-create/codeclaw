@@ -68,6 +68,7 @@ export function SafeTextInput({
       //     （已实测：按 4 次 → input 含 4 个 \x7f）
       //   - raw 字节：\x7f (DEL, Linux/macOS) 或 \x08 (BS, Windows/Telnet)
       // 因此：用 regex 数 input 中的 \x7f/\x08 字符个数决定要删几个字符。
+      // eslint-disable-next-line no-control-regex
       const bsMatches = (input ?? "").match(/[\x7f\x08]/g);
       const bsCount = bsMatches?.length ?? 0;
       const isBackspaceFlag = key.backspace || key.delete;
