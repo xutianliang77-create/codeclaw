@@ -6,6 +6,7 @@ import { createCliIngressMessage } from "../channels/cli/adapter";
 import type { IngressGateway } from "../ingress/gateway";
 import { sanitizeForDisplay } from "../lib/displaySafe";
 import { feature } from "../lib/feature";
+import { buildDefaultStatusLine, startCustomStatusLine } from "../hooks/statusLine";
 
 type AppBootInfo = {
   providerLabel: string;
@@ -103,14 +104,25 @@ function FooterHints(): React.JSX.Element {
   );
 }
 
+function StatusLine({ text }: { text: string }): React.JSX.Element {
+  return (
+    <Box paddingX={1}>
+      <Text color="cyan">{text}</Text>
+    </Box>
+  );
+}
+
 export function App({
   bootInfo,
   queryEngine,
-  ingressGateway
+  ingressGateway,
+  statusLine
 }: {
   bootInfo: AppBootInfo;
   queryEngine: QueryEngine;
   ingressGateway: IngressGateway;
+  /** M3-04 step 5：来自 settings.json statusLine 配置；省略走默认数据源 */
+  statusLine?: { command?: string; intervalMs?: number };
 }): React.JSX.Element {
   const { exit } = useApp();
   const initialRuntimeState = queryEngine.getRuntimeState();
@@ -128,6 +140,16 @@ export function App({
   );
   const [pendingApproval, setPendingApproval] = useState<PendingApprovalState>(initialPendingApproval);
 
+  // M3-04 step 4+5：status line 显示文本；默认 buildDefaultStatusLine，配 custom command 时由 polling 覆盖
+  const [statusLineText, setStatusLineText] = useState<string>(() =>
+    buildDefaultStatusLine({
+      providerLabel: initialRuntimeState.providerLabel,
+      modelLabel: initialRuntimeState.modelLabel,
+      permissionMode: initialRuntimeState.permissionMode,
+      workspace: bootInfo.workspace,
+    })
+  );
+
   useEffect(() => {
     return queryEngine.subscribe(() => {
       setRuntimeState(queryEngine.getRuntimeState());
@@ -135,6 +157,31 @@ export function App({
       setPendingApproval(queryEngine.getPendingApproval());
     });
   }, [queryEngine]);
+
+  // 没配 custom command 时，让默认 status line 跟随 runtime state 变化
+  useEffect(() => {
+    if (statusLine?.command) return; // custom polling 接管
+    setStatusLineText(
+      buildDefaultStatusLine({
+        providerLabel: runtimeState.providerLabel,
+        modelLabel: runtimeState.modelLabel,
+        permissionMode: runtimeState.permissionMode,
+        workspace: bootInfo.workspace,
+      })
+    );
+  }, [statusLine?.command, runtimeState.providerLabel, runtimeState.modelLabel, runtimeState.permissionMode, bootInfo.workspace]);
+
+  // 配置了 custom command → 启 polling，cleanup on unmount
+  useEffect(() => {
+    if (!statusLine?.command) return;
+    const handle = startCustomStatusLine({
+      command: statusLine.command,
+      intervalMs: statusLine.intervalMs,
+      fallbackText: "[status line failed]",
+      onUpdate: (t) => setStatusLineText(t),
+    });
+    return () => handle.stop();
+  }, [statusLine?.command, statusLine?.intervalMs]);
 
   useInput((value, key) => {
     if (key.escape) {
@@ -325,6 +372,7 @@ export function App({
           buffer: {input.length} chars · Backspace/←→ Ctrl+A=home Ctrl+E=end Ctrl+U=clear Ctrl+W=del-word Enter=send
         </Text>
       </Box>
+      <StatusLine text={statusLineText} />
       <FooterHints />
     </Box>
   );

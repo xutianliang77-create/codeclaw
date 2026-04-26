@@ -375,6 +375,7 @@ async function main(): Promise<void> {
       }}
       queryEngine={queryEngine}
       ingressGateway={ingressGateway}
+      statusLine={settings?.statusLine}
     />,
     {
       exitOnCtrlC: false

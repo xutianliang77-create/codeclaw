@@ -730,7 +730,9 @@ describe("query engine", () => {
     expect(engine.getMessages().at(-1)?.text).toContain("active-skill: review");
 
     await collect(engine.submitMessage("/hooks"));
-    expect(engine.getMessages().at(-1)?.text).toContain("hooks: none configured");
+    // M3-04：/hooks 重写后输出每事件状态；空配置时含示例引导
+    expect(engine.getMessages().at(-1)?.text).toContain("Hooks (lifecycle event integrations)");
+    expect(engine.getMessages().at(-1)?.text).toContain("PreToolUse: (none)");
 
     await collect(engine.submitMessage("/init"));
     expect(engine.getMessages().at(-1)?.text).toContain("Bootstrap checklist:");
