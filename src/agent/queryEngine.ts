@@ -75,6 +75,8 @@ import { applySkillBanner } from "./skillBanner";
 import { runHooks } from "../hooks/runner";
 import type { HookSettings } from "../hooks/settings";
 import { registerTaskTool } from "./tools/taskTool";
+import { registerRagSearchTool } from "./tools/ragTool";
+import { runIndex, runSearch, runStatus, runClear, formatStatus } from "../rag/api";
 import { checkTokenBudget, estimateToolsSchemaTokens, warnIfBudgetExceeded } from "./tokenBudget";
 import { autoCompactIfNeeded } from "./autoCompact";
 import { detectLocalTool, inspectLocalTool, isHandledLocalToolResult, runLocalTool } from "../tools/local";
@@ -790,6 +792,10 @@ class LocalQueryEngine implements QueryEngine {
           ...(options.mcpManager ? { mcpManager: options.mcpManager } : {}),
           ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
         });
+      }
+      // #75 M4 RAG：注册 rag_search 让 LLM 用关键字找代码。env CODECLAW_RAG=false 关。
+      if (process.env.CODECLAW_RAG !== "false") {
+        registerRagSearchTool(this.toolRegistry, { workspace: options.workspace });
       }
     }
     // M3-04：lifecycle hooks 配置；缺省视为无 hook
@@ -2550,6 +2556,31 @@ class LocalQueryEngine implements QueryEngine {
       lines.push('  { "hooks": { "PreToolUse": [{ "matcher": "^bash$", "hooks": [{ "type": "command", "command": "scripts/check.sh" }] }] } }');
     }
     return lines.join("\n");
+  }
+
+  // M4-#75 step e：/rag 命令分发；保持 stateless（每次操作打开 db → 用完关）
+  private async runRagCommand(argsRaw: string): Promise<string> {
+    const trimmed = argsRaw.trim();
+    if (!trimmed || trimmed === "status") {
+      const s = runStatus(this.options.workspace);
+      return formatStatus(s);
+    }
+    const [sub, ...rest] = trimmed.split(/\s+/);
+    if (sub === "index") {
+      const r = runIndex(this.options.workspace);
+      return r.summary;
+    }
+    if (sub === "search") {
+      const query = rest.join(" ").trim();
+      if (!query) return "Usage: /rag search <query>";
+      const r = runSearch(this.options.workspace, query, 8);
+      return r.text;
+    }
+    if (sub === "clear") {
+      const r = runClear(this.options.workspace);
+      return `cleared: ${r.cleared} chunk(s). Re-run /rag index to rebuild.`;
+    }
+    return "Usage: /rag | /rag index | /rag search <q> | /rag status | /rag clear";
   }
 
   private buildInitReply(): string {
