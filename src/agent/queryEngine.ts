@@ -75,6 +75,8 @@ import { applySkillBanner } from "./skillBanner";
 import { runHooks } from "../hooks/runner";
 import type { HookSettings } from "../hooks/settings";
 import { registerTaskTool } from "./tools/taskTool";
+import { SubagentRegistry } from "./subagents/registry";
+import type { SubagentRunRecord } from "./subagents/registry";
 import { registerRagSearchTool } from "./tools/ragTool";
 import { registerGraphQueryTool } from "./tools/graphTool";
 import { runIndex, runSearch, runStatus, runClear, runEmbed, runHybridSearch, formatStatus } from "../rag/api";
@@ -651,6 +653,14 @@ class LocalQueryEngine implements QueryEngine {
     this.hooksConfig = next ?? {};
   }
 
+  /** B.8：subagent 运行追踪；Task tool 调用前后写入；handleSubagents 读取 */
+  private readonly subagentRegistry = new SubagentRegistry();
+
+  /** B.8：暴露给 web channel 读 */
+  getSubagentRecords(): SubagentRunRecord[] {
+    return this.subagentRegistry.list();
+  }
+
   /** #116 阶段🅐：cron 调度器；仅主 cli engine 启用，其他 channel 为 null */
   private cronManager: CronManager | null = null;
   /** cron 通知去向适配器：cli.tsx 负责注入 wechat / web 实现；缺省仅 cli inject */
@@ -813,6 +823,7 @@ class LocalQueryEngine implements QueryEngine {
           ...(options.approvalsDir ? { approvalsDir: options.approvalsDir } : {}),
           ...(options.mcpManager ? { mcpManager: options.mcpManager } : {}),
           ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+          subagentRegistry: this.subagentRegistry,
         });
       }
       // #75 M4 RAG：注册 rag_search 让 LLM 用关键字找代码。env CODECLAW_RAG=false 关。

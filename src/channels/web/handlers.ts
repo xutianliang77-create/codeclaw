@@ -840,9 +840,16 @@ export async function handleSubagents(
     jsonResponse(res, 404, errorBody("session-not-found", `unknown session: ${sessionId}`));
     return;
   }
-  // 阶段 A：runner 暂未持久化中间状态；返回 placeholder（阶段 B 加 instrumentation）
+  // B.8：从 engine 的 SubagentRegistry 读真实记录；轮询 ~3s 客户端可见
+  const engine = session.engine as unknown as {
+    getSubagentRecords?: () => unknown[];
+  };
+  const records = engine.getSubagentRecords?.() ?? [];
   jsonResponse(res, 200, {
-    subagents: [],
-    note: "subagent traces are not yet streamed in stage A; coming in stage B",
+    subagents: records,
+    note:
+      records.length === 0
+        ? "no subagents invoked yet in this session"
+        : undefined,
   });
 }

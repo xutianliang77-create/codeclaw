@@ -9,14 +9,25 @@ import { useEffect, useState } from "react";
 import { getSubagents } from "@/api/endpoints";
 
 interface SubagentNode {
+  id?: string;
   role?: string;
   prompt?: string;
-  status?: string;
+  status?: "running" | "completed" | "failed" | "timeout" | string;
   toolCallCount?: number;
   startedAt?: number;
   finishedAt?: number;
+  durationMs?: number;
+  error?: string;
+  resultPreview?: string;
   children?: SubagentNode[];
 }
+
+const STATUS_COLORS: Record<string, string> = {
+  running: "border-accent",
+  completed: "border-ok",
+  failed: "border-danger",
+  timeout: "border-danger",
+};
 
 interface Props {
   sessionId: string | null;
@@ -81,20 +92,33 @@ export default function SubagentTree({ sessionId }: Props) {
 }
 
 function SubagentRow({ node }: { node: SubagentNode }) {
+  const cls = STATUS_COLORS[node.status ?? ""] ?? "border-border";
   return (
-    <li className="border border-border rounded p-2.5">
-      <div className="text-sm">
-        <strong>{node.role ?? "?"}</strong> · {node.status ?? "?"}
+    <li className={`border rounded p-2.5 ${cls}`}>
+      <div className="text-sm flex items-center gap-2">
+        <strong>{node.role ?? "?"}</strong>
+        <span className="text-xs text-muted">·</span>
+        <span className="text-xs">{node.status ?? "?"}</span>
+        {node.id && <span className="text-xs text-muted ml-auto font-mono">{node.id}</span>}
       </div>
       {node.prompt && (
-        <div className="text-xs text-muted mt-1 font-mono truncate">{node.prompt}</div>
+        <pre className="text-xs text-muted mt-1 font-mono whitespace-pre-wrap line-clamp-2">{node.prompt}</pre>
       )}
-      <div className="text-xs text-muted mt-1">
-        tools={node.toolCallCount ?? 0}
-        {node.startedAt && node.finishedAt && (
-          <span className="ml-2">duration={node.finishedAt - node.startedAt}ms</span>
+      <div className="text-xs text-muted mt-1 flex gap-3">
+        <span>tools={node.toolCallCount ?? 0}</span>
+        {node.durationMs !== undefined && <span>{node.durationMs}ms</span>}
+        {node.startedAt && (
+          <span>started {new Date(node.startedAt).toLocaleTimeString()}</span>
         )}
       </div>
+      {node.error && (
+        <div className="text-xs text-danger mt-1 font-mono">error: {node.error}</div>
+      )}
+      {node.resultPreview && (
+        <pre className="text-xs mt-1 bg-bg p-1.5 rounded whitespace-pre-wrap max-h-24 overflow-auto">
+          {node.resultPreview}
+        </pre>
+      )}
       {node.children && node.children.length > 0 && (
         <ul className="mt-2 ml-4 border-l border-border pl-3 space-y-2">
           {node.children.map((c, i) => (
