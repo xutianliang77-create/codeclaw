@@ -2504,10 +2504,39 @@ class LocalQueryEngine implements QueryEngine {
   }
 
   private buildHooksReply(): string {
-    return [
-      "hooks: none configured",
-      "Supported hook integration is deferred past Phase 1."
-    ].join("\n");
+    // M3-04：列出实际加载的 5 个事件 hook 配置（来自 ~/.codeclaw/settings.json 等）
+    const eventTypes: Array<keyof HookSettings> = [
+      "PreToolUse",
+      "PostToolUse",
+      "UserPromptSubmit",
+      "Stop",
+      "SessionStart",
+    ];
+    const lines: string[] = ["Hooks (lifecycle event integrations)"];
+    let total = 0;
+    for (const ev of eventTypes) {
+      const matchers = this.hooksConfig[ev] ?? [];
+      const cmdCount = matchers.reduce((sum, m) => sum + m.hooks.length, 0);
+      total += cmdCount;
+      if (cmdCount === 0) {
+        lines.push(`- ${ev}: (none)`);
+        continue;
+      }
+      lines.push(`- ${ev}: ${matchers.length} matcher(s), ${cmdCount} command(s)`);
+      for (const m of matchers) {
+        const matcherStr = m.matcher ? `match=/${m.matcher}/` : "match=*";
+        for (const c of m.hooks) {
+          const tail = c.timeout ? ` timeout=${c.timeout}ms` : "";
+          lines.push(`    · ${matcherStr} cmd="${c.command}"${tail}`);
+        }
+      }
+    }
+    if (total === 0) {
+      lines.push("");
+      lines.push("Configure via <workspace>/.codeclaw/settings.json or ~/.codeclaw/settings.json:");
+      lines.push('  { "hooks": { "PreToolUse": [{ "matcher": "^bash$", "hooks": [{ "type": "command", "command": "scripts/check.sh" }] }] } }');
+    }
+    return lines.join("\n");
   }
 
   private buildInitReply(): string {
