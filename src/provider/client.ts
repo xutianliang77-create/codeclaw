@@ -238,17 +238,25 @@ async function fetchWithConnectTimeout(
 }
 
 /**
- * 从 OpenAI compat 流帧抽 delta 文本。
- * 兼容 reasoning 模型（GPT-5 / DeepSeek R1 / Qwen3 reasoning / Gemini thinking 等）：
- *   - 优先取 delta.content
- *   - 为空时回退到 delta.reasoning_content（LM Studio / DeepSeek 兼容字段）
- *   - 也回退到 delta.reasoning（OpenRouter 等用法）
- *   - 单帧 reasoning 与 content 同时存在时，content 优先（避免重复 yield）
+ * 从 OpenAI compat 流帧抽 delta，分离 content（最终答案）vs reasoning（思考过程）。
  *
- * 设计：stream 期间整段 reasoning_content 也吐给上层，让用户能看到推理过程；
- * 上层（queryEngine / golden ask）累积成完整 answer，LLM-judge 可基于全文评分。
+ * 字段语义（OpenAI 协议 + 各家扩展）：
+ *   - delta.content                  最终答案（标准）
+ *   - delta.reasoning_content        思考过程（LM Studio / DeepSeek R1 / Qwen3 reasoning）
+ *   - delta.reasoning                思考过程（OpenRouter 风格）
+ *
+ * 设计（M1-F）：
+ *   - 字段级分离：content 与 reasoning 走不同字段，无歧义
+ *   - 调用方决定如何使用：runner / token budget 用 content 才算答案；CLI 可显示 reasoning
+ *   - 保留 fallback 行为：当只有 reasoning 没 content 时，让 generator yield reasoning
+ *     以维持 CLI 流式体验向后兼容；新调用方用 onContent / onReasoning callbacks 拿干净流
  */
-function getDeltaTextFromOpenAiPayload(payload: unknown): string {
+interface OpenAiDeltaParts {
+  content: string;
+  reasoning: string;
+}
+
+function extractOpenAiDeltaParts(payload: unknown): OpenAiDeltaParts {
   const choice = (payload as {
     choices?: Array<{
       delta?: {
@@ -259,14 +267,20 @@ function getDeltaTextFromOpenAiPayload(payload: unknown): string {
     }>;
   }).choices?.[0];
   const delta = choice?.delta;
-  if (!delta) return "";
+  if (!delta) return { content: "", reasoning: "" };
+  return {
+    content: pickDeltaText(delta.content),
+    reasoning: pickDeltaText(delta.reasoning_content) || pickDeltaText(delta.reasoning),
+  };
+}
 
-  const primary = pickDeltaText(delta.content);
-  if (primary) return primary;
-
-  const reasoning =
-    pickDeltaText(delta.reasoning_content) || pickDeltaText(delta.reasoning);
-  return reasoning;
+/**
+ * Generator yield 用：保 backward compat —— content 优先；为空降级 reasoning。
+ * 调用方需要纯净 content 时用 onContent callback，不依赖此函数返回。
+ */
+function getDeltaTextFromOpenAiPayload(payload: unknown): string {
+  const { content, reasoning } = extractOpenAiDeltaParts(payload);
+  return content || reasoning;
 }
 
 function pickDeltaText(value: unknown): string {
@@ -393,7 +407,9 @@ async function* streamOpenAiCompatible(
   abortSignal?: AbortSignal,
   onUsage?: (usage: ProviderUsage) => void,
   tools?: ToolSchemaSpec[],
-  onToolCall?: (call: ToolCallEvent) => void
+  onToolCall?: (call: ToolCallEvent) => void,
+  onContent?: (chunk: string) => void,
+  onReasoning?: (chunk: string) => void
 ): AsyncGenerator<string> {
   const response = await fetchWithConnectTimeout(
     fetchImpl,
@@ -488,7 +504,11 @@ async function* streamOpenAiCompatible(
         toolBuffers.clear();
       }
     }
-    return getDeltaTextFromOpenAiPayload(parsed);
+    // M1-F：分别 fire content / reasoning callback；让调用方拿干净流
+    const parts = extractOpenAiDeltaParts(parsed);
+    if (onContent && parts.content) onContent(parts.content);
+    if (onReasoning && parts.reasoning) onReasoning(parts.reasoning);
+    return parts.content || parts.reasoning; // generator 仍 yield 合并流（向后兼容 CLI）
   });
 
   // 流结束时如果还有未触发的 buffer（finish_reason 缺失），兜底 yield
@@ -696,6 +716,10 @@ export async function* streamProviderResponse(
     tools?: ToolSchemaSpec[];
     /** M1-B：流式解析出的 tool_call 事件回调（参数累积完成后才触发） */
     onToolCall?: (call: ToolCallEvent) => void;
+    /** M1-F：每收到 OpenAI delta.content 分片回调（最终答案流） */
+    onContent?: (chunk: string) => void;
+    /** M1-F：每收到 reasoning_content / reasoning 分片回调（思考过程流） */
+    onReasoning?: (chunk: string) => void;
   }
 ): AsyncGenerator<string> {
   const fetchImpl = options?.fetchImpl ?? fetch;
@@ -733,6 +757,8 @@ export async function* streamProviderResponse(
     options?.abortSignal,
     options?.onUsage,
     options?.tools,
-    options?.onToolCall
+    options?.onToolCall,
+    options?.onContent,
+    options?.onReasoning
   );
 }

@@ -143,16 +143,27 @@ async function createStreamInvoker(
         },
       ];
 
+      // M1-F：分别收 content / reasoning；最终 answer 优先 content，纯 thinking 时 fallback reasoning
+      let contentBuf = "";
+      let reasoningBuf = "";
       try {
-        for await (const chunk of streamProviderResponse(provider, messages, {
+        for await (const _chunk of streamProviderResponse(provider, messages, {
           onUsage: (u) => {
             usageInputTokens = u.inputTokens ?? 0;
             usageOutputTokens = u.outputTokens ?? 0;
             modelId = u.modelId ?? modelId;
           },
+          onContent: (c) => {
+            contentBuf += c;
+          },
+          onReasoning: (r) => {
+            reasoningBuf += r;
+          },
         })) {
-          answer += chunk;
+          // generator yield 是 backward compat 合并流（content || reasoning），这里不消费
+          // 真 answer 走 callback 区分；避免污染
         }
+        answer = contentBuf.trim() || (reasoningBuf.trim() ? "[thinking only, no content]" : "[empty response]");
       } catch (err) {
         answer = `[provider error] ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -197,8 +208,8 @@ async function createQueryEngineInvoker(
       const start = Date.now();
       const sessionsTmp = mkdtempSync(path.join(tmpdir(), "golden-ask-sess-"));
 
-      let lastTurnAnswer = "";
-      let buffering = "";
+      // M1-F + L2：跟踪最后一个非空 message-complete text；空 turn（中间 tool_call-only）不覆盖
+      let lastNonEmptyAnswer = "";
       let modelId: string | undefined = provider.model;
 
       try {
@@ -223,17 +234,16 @@ async function createQueryEngineInvoker(
         }
 
         for await (const ev of engine.submitMessage(question.prompt)) {
-          if (ev.type === "message-start") {
-            buffering = "";
-          } else if (ev.type === "message-delta") {
-            buffering += ev.delta;
-          } else if (ev.type === "message-complete") {
-            lastTurnAnswer = ev.text || buffering;
-            buffering = "";
+          if (ev.type === "message-complete") {
+            // M1-F：queryEngine 已用 contentBuf 作 ev.text（不再含 reasoning）；
+            // 中间 turn 是 tool-call only 时 text 可能为空，不覆盖之前的 lastNonEmptyAnswer
+            if (ev.text.trim()) {
+              lastNonEmptyAnswer = ev.text;
+            }
           }
         }
       } catch (err) {
-        lastTurnAnswer = `[engine error] ${err instanceof Error ? err.message : String(err)}`;
+        lastNonEmptyAnswer = `[engine error] ${err instanceof Error ? err.message : String(err)}`;
       } finally {
         try {
           rmSync(sessionsTmp, { recursive: true, force: true });
@@ -245,7 +255,7 @@ async function createQueryEngineInvoker(
       return {
         provider: provider.type,
         modelId,
-        answer: lastTurnAnswer,
+        answer: lastNonEmptyAnswer || "[no content produced]",
         latencyMs: Date.now() - start,
       } as LlmInvocation;
     },

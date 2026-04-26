@@ -115,6 +115,51 @@ describe("streamProviderResponse · OpenAI tool_calls", () => {
     expect(calls[0].raw).toBe("{not json");
   });
 
+  it("M1-F：onContent 仅收 delta.content，onReasoning 仅收 reasoning_content/reasoning", async () => {
+    const frames = [
+      JSON.stringify({ choices: [{ delta: { reasoning_content: "let me think... " } }] }),
+      JSON.stringify({ choices: [{ delta: { reasoning_content: "OK I got it. " } }] }),
+      JSON.stringify({ choices: [{ delta: { content: "The answer is 42." } }] }),
+      JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] }),
+    ];
+    const fetchImpl = vi.fn().mockResolvedValue(sseResponse(frames));
+    let contentBuf = "";
+    let reasoningBuf = "";
+    const yieldedChunks: string[] = [];
+    for await (const c of streamProviderResponse(fakeProvider("openai"), [{ id: "u1", role: "user", text: "hi" }], {
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      onContent: (c) => (contentBuf += c),
+      onReasoning: (r) => (reasoningBuf += r),
+    })) {
+      yieldedChunks.push(c);
+    }
+    expect(contentBuf).toBe("The answer is 42.");
+    expect(reasoningBuf).toBe("let me think... OK I got it. ");
+    // generator 仍 yield 合并流（向后兼容 CLI）
+    expect(yieldedChunks.join("")).toBe("let me think... OK I got it. The answer is 42.");
+  });
+
+  it("M1-F：reasoning 路径降级 yield（content 空时 generator 仍 yield reasoning）", async () => {
+    const frames = [
+      JSON.stringify({ choices: [{ delta: { reasoning: "thinking only..." } }] }),
+      JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] }),
+    ];
+    const fetchImpl = vi.fn().mockResolvedValue(sseResponse(frames));
+    let contentBuf = "";
+    let reasoningBuf = "";
+    const yielded = await consume(
+      streamProviderResponse(fakeProvider("openai"), [{ id: "u1", role: "user", text: "hi" }], {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        onContent: (c) => (contentBuf += c),
+        onReasoning: (r) => (reasoningBuf += r),
+      })
+    );
+    expect(contentBuf).toBe("");
+    expect(reasoningBuf).toBe("thinking only...");
+    // generator yield = combined fallback（content 空时 reasoning）
+    expect(yielded).toBe("thinking only...");
+  });
+
   it("不传 tools 时 body 不含 tools 字段", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(sseResponse([
       JSON.stringify({ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }),

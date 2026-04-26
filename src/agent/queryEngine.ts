@@ -850,6 +850,9 @@ class LocalQueryEngine implements QueryEngine {
     let messageId = createId("msg");
     let output = "";
     let assistantMessageSource: EngineMessageSource = "local";
+    // M1-F：reasoning model 流分离用；LLM 路径填充，非 LLM 路径保持空，最终 push 兼容
+    let contentBuf = "";
+    let reasoningBuf = "";
     const approveTargetId = parseApprovalCommand(trimmed, "/approve");
     let denyTargetId = parseApprovalCommand(trimmed, "/deny");
     let approveTargetIdMutable = approveTargetId;
@@ -1289,8 +1292,12 @@ class LocalQueryEngine implements QueryEngine {
       const toolSchemas = hasNativeTools ? this.buildStreamToolSchemas() : undefined;
       let lastError: Error | null = null;
       let allowFallback = true;
+      // M1-F：contentBuf / reasoningBuf 已在 submitMessage 顶部 hoist；这里只重置每 turn
       multiTurn: while (true) {
         let collectedToolCalls: ToolCallEvent[] = [];
+        // 每个 turn 重置：assistant.text 只存当前 turn content，reasoning 走可选字段
+        contentBuf = "";
+        reasoningBuf = "";
         let reactiveCompactTriggered = false;
         lastError = null;
         allowFallback = true;
@@ -1352,6 +1359,13 @@ class LocalQueryEngine implements QueryEngine {
                 onToolCall: hasNativeTools
                   ? (call) => collectedToolCalls.push(call)
                   : undefined,
+                // M1-F：分流收集 content / reasoning
+                onContent: (chunk) => {
+                  contentBuf += chunk;
+                },
+                onReasoning: (chunk) => {
+                  reasoningBuf += chunk;
+                },
               });
             },
             onAttempt: (attempt) => {
@@ -1438,6 +1452,8 @@ class LocalQueryEngine implements QueryEngine {
           if (!output) {
             output = this.buildProviderFailureMessage(lastError);
             assistantMessageSource = "local";
+            // M1-F：error path 写到 contentBuf 让最终 push 也用上
+            contentBuf = output;
             yield {
               type: "message-delta",
               messageId,
@@ -1446,6 +1462,8 @@ class LocalQueryEngine implements QueryEngine {
           } else if (!allowFallback) {
             const failureNote = `\n[stream interrupted: ${lastError.message}]`;
             output += failureNote;
+            // M1-F：把中断提示也追加到 contentBuf；assistant.text 完整带上
+            contentBuf += failureNote;
             yield {
               type: "message-delta",
               messageId,
@@ -1455,6 +1473,7 @@ class LocalQueryEngine implements QueryEngine {
         } else if (!this.interrupted && !output && collectedToolCalls.length === 0) {
           output = "Provider returned an empty response.";
           assistantMessageSource = "local";
+          contentBuf = output;
           yield {
             type: "message-delta",
             messageId,
@@ -1475,15 +1494,17 @@ class LocalQueryEngine implements QueryEngine {
 
         // M1-B.2：本回合 LLM 要求调工具 — push 当前 assistant 消息（含 toolCalls 字段）+
         // 串行 invoke 工具 + push role:"tool" 消息 + 重置 messageId/output 进入下一轮
+        // M1-F：text 只存 content（最终答案），reasoning 单独字段，避免 provider replay 污染
         this.messages.push({
           id: messageId,
           role: "assistant",
-          text: output,
+          text: contentBuf,
           source: assistantMessageSource,
           toolCalls: collectedToolCalls.map((c) => ({ id: c.id, name: c.name, args: c.args })),
+          ...(reasoningBuf ? { reasoning: reasoningBuf } : {}),
         });
         this.notifyListeners();
-        yield { type: "message-complete", messageId, text: output };
+        yield { type: "message-complete", messageId, text: contentBuf };
 
         for (const call of collectedToolCalls) {
           const detailPreview = JSON.stringify(call.args ?? {}).slice(0, 100);
@@ -1536,17 +1557,23 @@ class LocalQueryEngine implements QueryEngine {
       return;
     }
 
+    // M1-F：LLM 路径用 contentBuf（干净答案）；非 LLM 路径（slash / 本地工具）contentBuf 为空，
+    // 退化到 output（含命令回复 / 工具输出）。两路兼容。
+    const isLlmPath = assistantMessageSource === "model";
+    const finalText = isLlmPath ? (contentBuf || output) : output;
+    const finalReasoning = isLlmPath && reasoningBuf ? reasoningBuf : undefined;
     this.messages.push({
       id: messageId,
       role: "assistant",
-      text: output,
-      source: assistantMessageSource
+      text: finalText,
+      source: assistantMessageSource,
+      ...(finalReasoning ? { reasoning: finalReasoning } : {}),
     });
     this.notifyListeners();
     yield {
       type: "message-complete",
       messageId,
-      text: output
+      text: finalText
     };
     yield this.phaseEvent("completed");
   }

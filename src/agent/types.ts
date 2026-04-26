@@ -36,6 +36,9 @@ export interface EngineMessage {
   toolName?: string;
   /** role: "assistant" 含 tool_use 时填；这一轮 LLM 调用了哪些工具 */
   toolCalls?: EngineToolCallRef[];
+  /** role: "assistant" 时可填：reasoning 模型的思考过程（OpenAI delta.reasoning_content / reasoning）；
+   *  与 text（最终答案）分离存储，避免在 provider replay / autoCompact / token budget 中污染 */
+  reasoning?: string;
 }
 
 export interface PendingApprovalView {
