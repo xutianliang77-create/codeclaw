@@ -1,7 +1,7 @@
 import type { PermissionMode } from "../lib/config";
 import type { ProviderStatus } from "../provider/types";
 
-export type EngineMessageRole = "user" | "assistant" | "system";
+export type EngineMessageRole = "user" | "assistant" | "system" | "tool";
 export type EngineMessageSource = "user" | "command" | "model" | "local" | "summary";
 
 export type EnginePhase = "idle" | "planning" | "compacting" | "executing" | "completed" | "halted";
@@ -17,12 +17,25 @@ export interface EngineImageAttachment {
   sourceUrl?: string;
 }
 
+/** assistant 一轮调用的 tool_use 记录（M1-B/C） */
+export interface EngineToolCallRef {
+  id: string;
+  name: string;
+  args: unknown;
+}
+
 export interface EngineMessage {
   id: string;
   role: EngineMessageRole;
   text: string;
   source?: EngineMessageSource;
   attachments?: EngineImageAttachment[];
+  /** role: "tool" 时填；指向 assistant 上一轮的 toolCalls[].id */
+  toolCallId?: string;
+  /** role: "tool" 时填；冗余存名便于查询 */
+  toolName?: string;
+  /** role: "assistant" 含 tool_use 时填；这一轮 LLM 调用了哪些工具 */
+  toolCalls?: EngineToolCallRef[];
 }
 
 export interface PendingApprovalView {

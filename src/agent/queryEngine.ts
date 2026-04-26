@@ -56,6 +56,7 @@ import { detectProviderCapabilities } from "../provider/capabilities";
 import type { ProviderStatus } from "../provider/types";
 import { createSkillRegistry, createSkillRegistryFromDisk } from "../skills/registry";
 import type { SkillDefinition } from "../skills/registry";
+import { buildSystemPrompt } from "./systemPrompt";
 import { detectLocalTool, inspectLocalTool, isHandledLocalToolResult, runLocalTool } from "../tools/local";
 import type { LocalToolName } from "../tools/local";
 import type {
@@ -2790,23 +2791,44 @@ class LocalQueryEngine implements QueryEngine {
       return false;
     });
 
-    if (!this.activeSkill) {
-      return providerMessages;
+    // M1-A：CODECLAW_AGENT_GRADE=false 紧急回退到旧 skill-prompt-injection 路径
+    const agentGradeOff = process.env.CODECLAW_AGENT_GRADE === "false";
+
+    if (agentGradeOff) {
+      if (!this.activeSkill) {
+        return providerMessages;
+      }
+      const firstUserIndex = providerMessages.findIndex((message) => message.role === "user");
+      if (firstUserIndex < 0) {
+        return providerMessages;
+      }
+      return providerMessages.map((message, index) =>
+        index === firstUserIndex
+          ? {
+              ...message,
+              text: injectSkillPrompt(this.activeSkill as SkillDefinition, message.text)
+            }
+          : message
+      );
     }
 
-    const firstUserIndex = providerMessages.findIndex((message) => message.role === "user");
-    if (firstUserIndex < 0) {
-      return providerMessages;
-    }
-
-    return providerMessages.map((message, index) =>
-      index === firstUserIndex
-        ? {
-            ...message,
-            text: injectSkillPrompt(this.activeSkill as SkillDefinition, message.text)
-          }
-        : message
-    );
+    // M1-A 默认路径：在头部插 system message
+    const systemText = buildSystemPrompt({
+      workspace: this.options.workspace,
+      permissionMode: this.permissionMode,
+      provider: this.currentProvider,
+      slashRegistry: this.slashRegistry,
+      skillRegistry: this.skillRegistry,
+      activeSkill: this.activeSkill,
+      // toolRegistry 在 M1-B 接入；空缺不影响 prompt 构造
+    });
+    const systemMessage: EngineMessage = {
+      id: createId("system"),
+      role: "system",
+      text: systemText,
+      source: "local"
+    };
+    return [systemMessage, ...providerMessages];
   }
 
   private buildProviderFailureMessage(error: Error): string {

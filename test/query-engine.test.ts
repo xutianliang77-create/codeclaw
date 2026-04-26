@@ -569,12 +569,11 @@ describe("query engine", () => {
     await collect(engine.submitMessage("hi"));
 
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.messages).toEqual([
-      {
-        role: "user",
-        content: "hi"
-      }
-    ]);
+    // M1-A：头部多了 system message；user 消息保持不变
+    expect(requests[0]?.messages).toHaveLength(2);
+    expect(requests[0]?.messages?.[0]?.role).toBe("system");
+    expect(requests[0]?.messages?.[0]?.content).toContain("CodeClaw");
+    expect(requests[0]?.messages?.[1]).toEqual({ role: "user", content: "hi" });
     expect(engine.getMessages().at(-1)?.text).toContain("hello back");
   });
 
@@ -764,9 +763,13 @@ describe("query engine", () => {
     await collect(engine.submitMessage("check this change"));
 
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.messages?.[0]?.content).toContain("[Skill: review]");
-    expect(requests[0]?.messages?.[0]?.content).toContain("Act in review mode.");
-    expect(requests[0]?.messages?.[0]?.content).toContain("check this change");
+    // M1-A：skill prompt 搬到 system message；user 消息保持原样不再加 [Skill: xxx] 前缀
+    const sysContent = requests[0]?.messages?.[0]?.content;
+    const userContent = requests[0]?.messages?.[1]?.content;
+    expect(requests[0]?.messages?.[0]?.role).toBe("system");
+    expect(sysContent).toContain("review");
+    expect(sysContent).toContain("Act in review mode.");
+    expect(userContent).toContain("check this change");
   });
 
   it("blocks disallowed write tools when the active skill is read-only", async () => {

@@ -202,8 +202,12 @@ describe("query engine end-to-end", () => {
     );
 
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.messages?.[0]?.content).toContain("[Skill: explain]");
-    expect(requests[0]?.messages?.[0]?.content).toContain("explain the current session state");
+    // M1-A：skill prompt 搬到 system message；user 消息保持原样
+    const sysContent = requests[0]?.messages?.[0]?.content;
+    const userContent = requests[0]?.messages?.[1]?.content;
+    expect(requests[0]?.messages?.[0]?.role).toBe("system");
+    expect(sysContent).toContain("explain");
+    expect(userContent).toContain("explain the current session state");
     expect(engine.getMessages().some((message) => message.text.includes("Summary"))).toBe(true);
     expect(engine.getMessages().at(-1)?.text).toContain("model-lane-ok");
   });
