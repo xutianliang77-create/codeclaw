@@ -60,6 +60,7 @@ import { buildSystemPrompt } from "./systemPrompt";
 import { ToolRegistry, createToolRegistry } from "./tools/registry";
 import type { ToolCallEvent } from "./tools/registry";
 import { registerBuiltinTools } from "./tools/builtins";
+import { checkTokenBudget, estimateToolsSchemaTokens, warnIfBudgetExceeded } from "./tokenBudget";
 import { detectLocalTool, inspectLocalTool, isHandledLocalToolResult, runLocalTool } from "../tools/local";
 import type { LocalToolName } from "../tools/local";
 import type {
@@ -1290,6 +1291,26 @@ class LocalQueryEngine implements QueryEngine {
         let reactiveCompactTriggered = false;
         lastError = null;
         allowFallback = true;
+
+        // M1-D：Token 预算检查（warn-only，不动 messages；M2-01 在这里挂 auto-compact）
+        if (this.currentProvider) {
+          const toolsSchemaTokens = hasNativeTools
+            ? estimateToolsSchemaTokens(
+                this.toolRegistry.list().map((t) => ({
+                  name: t.name,
+                  description: t.description,
+                  inputSchema: t.inputSchema,
+                }))
+              )
+            : 0;
+          const budgetReport = checkTokenBudget(
+            this.getProviderMessages(),
+            this.currentProvider,
+            toolsSchemaTokens
+          );
+          warnIfBudgetExceeded(budgetReport);
+          this.lastEstimatedTokens = budgetReport.estimatedTokens;
+        }
 
         while (true) {
           lastError = null;
