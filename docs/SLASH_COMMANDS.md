@@ -1,6 +1,6 @@
 # CodeClaw Slash 命令清单
 
-> 版本：M2 完成（2026-04-26）· 共 33 个 builtin 命令
+> 版本：M3 + P2-M4 全套（2026-04-26）· 共 35 个 builtin 命令
 > 所有命令在 CLI/Web/WeChat 入口均通过 `SlashRegistry` 同一实现派发。
 > 实现位置：`src/commands/slash/builtins/*.ts`，注册入口 `src/commands/slash/loader.ts`。
 
@@ -11,7 +11,7 @@
 | help | `/help` |
 | session | `/ask` `/end` `/export` `/forget` `/init` `/resume` `/session` `/status` |
 | workflow | `/commit` `/fix` `/orchestrate` `/plan` `/review` |
-| memory | `/compact` `/memory` `/preferences` `/remember` `/summary` |
+| memory | `/compact` `/graph` `/memory` `/preferences` `/rag` `/remember` `/summary` |
 | observability | `/context` `/cost` `/debug-tool-call` `/diff` `/doctor` |
 | permission | `/approvals` `/mode` |
 | provider | `/model` `/providers` |
@@ -139,6 +139,21 @@
 - **summary**: 显示压缩 summary 数量及最近一次压缩状态
 - **用法**: `/memory`
 
+### `/graph <build | callers | callees | dependents | dependencies | symbol | status>`
+- **risk**: low
+- **summary**: workspace CodebaseGraph（TS/JS imports + 调用链）构建 / 查询
+- **用法**:
+  - `/graph` — status (symbols/imports/calls 计数)
+  - `/graph build` — 全量重建
+  - `/graph callers <name> [callee_path]` — 谁调用 name（可选 callee_path 限定）
+  - `/graph callees <file_path>` — file 调了哪些 callee
+  - `/graph dependents <file_path>` — 哪些文件 import 了 file
+  - `/graph dependencies <file_path>` — file 依赖了哪些 module / 文件
+  - `/graph symbol <name|path>` — 按名查 symbol，或按 path 列文件全部 symbol
+- **存储**: `~/.codeclaw/projects/<hash>/rag.db`（与 RAG 共用）
+- **当前**: TS/JS only；Python / Go / Rust pending
+- **配套 native tool**: `graph_query`（LLM 自动调）
+
 ### `/preferences <show | add <text> | user-add <text>>` (alias: `/prefs`)
 - **risk**: low
 - **summary**: 操作 `CODECLAW.md`（项目级 + 用户级），自动注入 system prompt
@@ -151,6 +166,22 @@
   - 文件不存在自动创建并加 `# CodeClaw Preferences\n\n` 头
   - 64KB 上限；超出抛错让用户手工瘦身
 - **$EDITOR mode**: M3+
+
+### `/rag <index | embed | search <q> | status | clear>`
+- **risk**: low
+- **summary**: workspace 代码 RAG 索引（BM25 关键字 + bge-m3 向量混合召回）
+- **用法**:
+  - `/rag` — status（chunks / embedded / last-indexed / workspace）
+  - `/rag index` — 全量 / 增量索引（hash 比对 skip 未变文件）
+  - `/rag embed` — 批量补缺向量（默认每次 ≤ 500 chunk；`bge-m3` 模型）
+  - `/rag search <query>` — 自动选 hybrid（embedded > 0 时）否则降级 BM25
+  - `/rag clear` — 清空索引（不重建，需再 `/rag index`）
+- **行为**:
+  - chunks 默认 30 行/chunk + 5 行 overlap；跳过 binary / > 500KB / node_modules / dist 等
+  - 向量召回 + BM25 通过 RRF 融合（k=60）；返回 top 8 含 src 来源标识
+  - embed 模型可通过 `CODECLAW_RAG_EMBED_MODEL` env 改；`CODECLAW_RAG_EMBED_BASE_URL` 改 endpoint
+- **存储**: `~/.codeclaw/projects/<hash>/rag.db`
+- **配套 native tool**: `rag_search`（LLM 自动调）
 
 ### `/remember <text>`
 - **risk**: low
@@ -237,9 +268,26 @@
 
 ### `/hooks`
 - **risk**: low
-- **summary**: 列出已注册的 lifecycle / tool hooks
+- **summary**: 列出 5 个 lifecycle 时点配置的 hook 命令
+- **5 个时点**: `PreToolUse` `PostToolUse` `UserPromptSubmit` `Stop` `SessionStart`
+- **配置**: 路径优先级 `<workspace>/.codeclaw/settings.json` > `~/.codeclaw/settings.json` > `~/.claude/settings.json`
+  ```json
+  {
+    "hooks": {
+      "PreToolUse": [{
+        "matcher": "^bash$",
+        "hooks": [{ "type": "command", "command": "scripts/precheck.sh", "timeout": 5000 }]
+      }],
+      "Stop": [{ "hooks": [{ "type": "command", "command": "scripts/notify.sh" }] }]
+    }
+  }
+  ```
+- **行为**:
+  - `PreToolUse` / `UserPromptSubmit` 阻塞型（exit≠0 拦截执行）；其他副作用型
+  - 默认超时 5s；`UserPromptSubmit` 默认 200ms（严格阻塞 IO）
+  - matcher（仅 PreToolUse / PostToolUse）regex 匹配 tool name；非法 regex 视为不匹配
+  - fail-open：spawn 错 / timeout 不阻塞主流程（避免 hook 故障锁死所有 IO）
 - **用法**: `/hooks`
-- **注**: M3-04 预留增强（5s/200ms 超时矩阵）
 
 ### `/reload-plugins`
 - **risk**: low
@@ -258,15 +306,31 @@
 
 ## integration（外部集成）
 
-### `/mcp <servers | tools | resources | call <server>:<tool> ...>`
+### `/mcp <(无参) | resources | tools | read | call>`
 - **risk**: medium
-- **summary**: 列 MCP servers / tools / resources，或调用 MCP tool
+- **summary**: 真 spawn MCP server（M3-01）+ 内置 in-process workspace-mcp，混合展示
 - **用法**:
-  - `/mcp servers` — 配置的 server 列表
-  - `/mcp tools` — 跨 server 的 tool 列表
-  - `/mcp resources` — resource 列表
-  - `/mcp call <server>:<tool> ...` — 调用 tool（受 approval 控制）
-- **注**: M3-01 真 spawn (stdio JSON-RPC + autoRestart) pending
+  - `/mcp` — 列出所有 server（含 spawn server status / 重启次数 / 错误）
+  - `/mcp resources <server>` — 资源列表
+  - `/mcp tools <server>` — 工具列表（spawn server 优先，否则 fallback in-process）
+  - `/mcp read <server> <resource>` — 读 resource（受 approval 控制）
+  - `/mcp call <server> <tool> [json|raw input]` — 调用 tool；输入按 JSON 解析失败则 `{input: <raw>}`
+- **配置**（路径优先级）: `<workspace>/.mcp.json` > `~/.codeclaw/mcp.json`
+  ```json
+  {
+    "servers": {
+      "filesystem": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+      }
+    }
+  }
+  ```
+- **行为**:
+  - 启动并发 spawn 所有 enabled server；失败 server 不阻塞主进程
+  - 子进程崩溃 → 1s/2s/4s/8s/16s 指数退避，最多 5 次重启（超过 → status=failed）
+  - LLM 看到的 tool 名为 `mcp__<server>__<tool>`（自动 sanitize 非法字符）
+  - 命名空间：每个 server 暴露的 tool 自动桥接进 ToolRegistry，与 builtin / RAG / Graph 不冲突
 
 ### `/wechat <status | login | send <to> <text>>`
 - **risk**: medium
@@ -289,6 +353,23 @@
 
 ---
 
+## Native Tool 总览（`CODECLAW_NATIVE_TOOLS=true` 时 LLM 可调）
+
+| tool | 来源 | env 关闭 |
+|---|---|---|
+| `read` `glob` `symbol` `definition` `references` | M1-B builtin（只读） | — |
+| `bash` `write` `append` `replace` | M1-B builtin（写改） | — |
+| `memory_write` `memory_remove` | M2-02 跨会话 memory | `CODECLAW_PROJECT_MEMORY=false` |
+| `ExitPlanMode` | M2-03 plan 双阶段 | `CODECLAW_PLAN_MODE_STRICT=false` |
+| `mcp__<server>__<tool>` | M3-01 真 spawn 的 MCP server | （删除 `~/.codeclaw/mcp.json`） |
+| `Task` | M3-02 派生 8 个 builtin role 的 subagent | `CODECLAW_SUBAGENT=false` |
+| `rag_search` | #75 P2-M4 BM25+bge-m3 混合召回 | `CODECLAW_RAG=false` |
+| `graph_query` | #76 P2-M4 CodebaseGraph 调用链 / import | `CODECLAW_GRAPH=false` |
+
+8 个 Subagent role: `general-purpose` / `Explore` / `Plan` / `code-reviewer` / `feature-dev` / `simple-executor` / `code-simplifier` / `deep-reviewer`，工具集与 permissionMode 各异（详见 `src/agent/subagents/roles.ts`）。
+
+---
+
 ## 设计速记
 
 - **dispatch**: 用户输入 `/` 开头的行 → CLI 走 `SlashRegistry.handle`，命中 builtin 则同步/异步返回 `reply`/`rewrite`/`error`；未命中走 LLM
@@ -298,3 +379,12 @@
 - **risk 用途**: CLI/Web `/help` 渲染 + audit log 标记 + 个别 mode（如 `auto`）的 gate
 - **跨入口一致**: CLI/Web/WeChat 共用同一个 registry；新增命令仅需 `builtins/<name>.ts` + `loader.ts` BUILTINS 数组
 - **`CODECLAW_NATIVE_TOOLS=true` 模式下**: tools schema 进 system prompt，`/ask` `/plan` 等命令仍走原 slash 路径，不被 LLM 工具调用替代
+- **存储位置一览**:
+  - `~/.codeclaw/data.db` — 全局 audit / sessions / memory_digest（跨 workspace）
+  - `~/.codeclaw/projects/<sha256(realpath(workspace)):16>/`
+    - `memory/` `MEMORY.md` + user_note 列表（M2-02 跨会话项目级 memory）
+    - `rag.db` — RAG 索引 + CodebaseGraph 共用（rag_chunks / rag_terms / cg_imports / cg_symbols / cg_calls）
+  - `~/.codeclaw/CODECLAW.md` — 用户级 preferences
+  - `<workspace>/CODECLAW.md` — 项目级 preferences（覆盖用户级）
+  - `~/.codeclaw/mcp.json` 或 `<workspace>/.mcp.json` — MCP server 配置
+  - `~/.codeclaw/settings.json` 或 `<workspace>/.codeclaw/settings.json` — hooks + statusLine
