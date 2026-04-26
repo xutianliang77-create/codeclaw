@@ -40,6 +40,8 @@ export interface CronManagerOptions {
   clearInterval?: typeof clearInterval;
   now?: () => number;
   onError?: (taskId: string, err: unknown) => void;
+  /** 阶段 🅑：data.db 句柄；提供时双写运行历史到 sqlite */
+  dataDb?: import("better-sqlite3").Database;
 }
 
 export class CronManager {
@@ -55,6 +57,7 @@ export class CronManager {
       engineFactory: opts.engineFactory,
       ...(opts.notify ? { notify: opts.notify } : {}),
       paths: this.paths,
+      ...(opts.dataDb ? { dataDb: opts.dataDb } : {}),
       updateTaskMeta: (task, run) => {
         const live = this.store.tasks[task.id];
         if (!live) return;

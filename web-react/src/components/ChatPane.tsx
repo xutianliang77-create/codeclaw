@@ -139,6 +139,18 @@ export default function ChatPane({ onError }: Props) {
               resultPreview: data.resultPreview,
             });
             break;
+          case "cron-result": {
+            // 阶段 🅑 cron --notify=web：把任务结果作为系统消息塞到当前 chat 末尾
+            const taskName = (data.task as { name?: string })?.name ?? "?";
+            const status = (data.run as { status?: string })?.status ?? "?";
+            const duration =
+              ((data.run as { endedAt?: number; startedAt?: number })?.endedAt ?? 0) -
+              ((data.run as { endedAt?: number; startedAt?: number })?.startedAt ?? 0);
+            const output = (data.run as { output?: string })?.output ?? "";
+            const text = `[Cron · ${taskName} · ${status} · ${duration}ms]\n${output.slice(0, 1024)}`;
+            store.appendSystem(activeId, text);
+            break;
+          }
           default:
             // phase / 其它子事件先不渲染
             break;

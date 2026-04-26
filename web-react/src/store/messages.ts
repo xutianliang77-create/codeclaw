@@ -30,6 +30,7 @@ interface MessagesState {
   completeAssistant(sessionId: string, messageId: string, finalText: string): void;
   appendTool(sessionId: string, name: string, status: ChatMessage["tool"] extends infer T ? (T extends { status: infer S } ? S : never) : never, detail?: string): void;
   appendError(sessionId: string, text: string): void;
+  appendSystem(sessionId: string, text: string): void;
   clear(sessionId: string): void;
   get(sessionId: string): ChatMessage[];
 }
@@ -117,6 +118,15 @@ export const useMessagesStore = create<MessagesState>((set, get) => ({
       const next = new Map(s.bySession);
       const arr = [...(next.get(sessionId) ?? [])];
       arr.push({ id: crypto.randomUUID(), sessionId, role: "error", text, ts: Date.now() });
+      next.set(sessionId, arr);
+      return { bySession: next };
+    });
+  },
+  appendSystem(sessionId, text) {
+    set((s) => {
+      const next = new Map(s.bySession);
+      const arr = [...(next.get(sessionId) ?? [])];
+      arr.push({ id: crypto.randomUUID(), sessionId, role: "system", text, ts: Date.now() });
       next.set(sessionId, arr);
       return { bySession: next };
     });

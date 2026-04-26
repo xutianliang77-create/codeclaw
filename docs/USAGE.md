@@ -400,10 +400,39 @@ files-indexed: 0
 chunks-upserted: 0
 ```
 
-阶段🅐 仅 `cli` 通道完整可用；`wechat` / `web` 选项为占位，未连接对应通道时 fall-through
-为 console.warn 警告，不阻塞 task 运行。
+阶段🅐：`cli` 通道。
+阶段🅑：`web` 通道接通——`codeclaw web` 子命令独建 cron host engine，cron 触发后通过
+SSE `cron-result` 事件广播到所有 active web session（chat tab 末尾出现 system 消息）。
+`wechat` 通道仍为占位（需要 wechat outbound API 重设计，推迟到 阶段🅒）。
 
-### 11.4 行为速记
+### 11.4 任务模板（阶段🅑）
+
+5 个 builtin 模板免去记 cron 表达式：
+
+```
+/cron template list
+# key              schedule    kind   description
+# daily-rag        0 2 * * *   slash  每天凌晨 2 点跑 /rag index 增量重建索引
+# weekly-review    0 9 * * 1   prompt 每周一 9 点让 LLM 审本周 commits + 写技术债报告
+# hourly-audit     @hourly     shell  每小时跑 npm audit（仅 production deps）
+# graph-rebuild    0 3 * * *   slash  每天凌晨 3 点重建 CodebaseGraph
+# session-summary  0 */6 * * * prompt 每 6 小时让 LLM 总结当前 session
+
+/cron template add daily-rag           # 用 default name
+/cron template add weekly-review wr    # 自定义 name
+```
+
+### 11.5 sqlite 历史（阶段🅑）
+
+除 jsonl 文件外，运行历史也写入 `~/.codeclaw/data.db` 的 `cron_runs` 表。便于 SQL 聚合：
+
+```sql
+SELECT task_name, status, COUNT(*) FROM cron_runs
+WHERE ended_at > strftime('%s','now','-7 days') * 1000
+GROUP BY task_name, status;
+```
+
+### 11.6 行为速记
 
 - 调度精度：30s tick + ±60s 漂移补偿；同任务 1 分钟内最多 1 次触发
 - 默认超时：slash/prompt 5 min；shell 1 min；用 `--timeout=10m` / `30s` 覆盖

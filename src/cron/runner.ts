@@ -13,8 +13,10 @@
 
 import { spawn } from "node:child_process";
 
+import type Database from "better-sqlite3";
 import type { EngineEvent, QueryEngine } from "../agent/types";
 import { appendRunLog, defaultCronPaths, type CronPaths } from "./store";
+import { appendRunRow } from "./historyStore";
 import {
   DEFAULT_TIMEOUT_MS,
   type CronNotifyChannel,
@@ -42,6 +44,8 @@ export interface CronRunnerOptions {
   updateTaskMeta?: (task: CronTask, run: CronRun) => void;
   /** shell 启动器：测试可注入 */
   spawnShell?: typeof spawn;
+  /** 阶段 🅑：data.db 句柄；提供时除 jsonl 外也写 cron_runs 表 */
+  dataDb?: Database.Database;
 }
 
 export class CronRunner {
@@ -79,6 +83,13 @@ export class CronRunner {
       appendRunLog(task.id, run, this.opts.paths ?? defaultCronPaths());
     } catch {
       // 日志写失败不影响主流程
+    }
+    if (this.opts.dataDb) {
+      try {
+        appendRunRow(this.opts.dataDb, task, run);
+      } catch {
+        // sqlite 写失败不影响主流程；jsonl 仍可用
+      }
     }
 
     this.opts.updateTaskMeta?.(task, run);

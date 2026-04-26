@@ -953,6 +953,7 @@ class LocalQueryEngine implements QueryEngine {
         this.cronManager = new CronManager({
           engineFactory: (task) => this.createCronChildEngine(task),
           notify: (channels, task, run) => this.deliverCronNotifications(channels, task, run),
+          ...(this.dataDb ? { dataDb: this.dataDb } : {}),
           onError: (taskId, err) => {
             console.error(
               `cron task ${taskId} runtime error: ${err instanceof Error ? err.message : String(err)}`

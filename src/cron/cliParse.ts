@@ -25,6 +25,8 @@ export type CronCliCommand =
   | { kind: "disable"; target: string }
   | { kind: "run-now"; target: string }
   | { kind: "logs"; target: string; tail: number }
+  | { kind: "template-list" }
+  | { kind: "template-add"; templateKey: string; name?: string }
   | { kind: "help" };
 
 const HELP = "help";
@@ -56,11 +58,27 @@ export function parseCronArgs(argsRaw: string): CronCliCommand {
       return parseLogs(tokens);
     case "add":
       return parseAdd(tokens);
+    case "template":
+    case "templates":
+    case "tpl":
+      return parseTemplate(tokens);
     case HELP:
       return { kind: "help" };
     default:
       throw new Error(`unknown /cron subcommand: ${sub}`);
   }
+}
+
+function parseTemplate(tokens: string[]): CronCliCommand {
+  const sub = tokens.shift()?.toLowerCase();
+  if (!sub || sub === "list" || sub === "ls") return { kind: "template-list" };
+  if (sub === "add") {
+    const key = tokens[0];
+    const name = tokens[1];
+    if (!key) throw new Error("/cron template add requires <template-key> [name]");
+    return { kind: "template-add", templateKey: key, ...(name ? { name } : {}) };
+  }
+  throw new Error(`unknown /cron template subcommand: ${sub}`);
 }
 
 function requireTarget(

@@ -131,6 +131,8 @@
   - `/cron add <name> <schedule> <kind>:<payload> [--notify=cli[,wechat,web]] [--timeout=Nm|Ns|Nh]`
   - `/cron remove|enable|disable|run-now <id-or-name>`
   - `/cron logs <id-or-name> [--tail=N]`
+  - `/cron template list` 列 5 个 builtin 模板（阶段 🅑）
+  - `/cron template add <key> [name]` 从模板加任务
 - **schedule**:
   - 标准 5 字段：`分 时 日 月 周`，含 `*` `1,3,5` `1-5` `*/15`
   - 别名：`@hourly` / `@daily` / `@weekly` / `@monthly`

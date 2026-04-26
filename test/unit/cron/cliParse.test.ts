@@ -130,6 +130,38 @@ describe("parseCronArgs - remove/enable/disable/run-now", () => {
   });
 });
 
+describe("parseCronArgs - template（阶段 🅑）", () => {
+  it("template list", () => {
+    expect(parseCronArgs("template list")).toEqual({ kind: "template-list" });
+    expect(parseCronArgs("template")).toEqual({ kind: "template-list" });
+    expect(parseCronArgs("templates")).toEqual({ kind: "template-list" });
+    expect(parseCronArgs("tpl")).toEqual({ kind: "template-list" });
+  });
+
+  it("template add <key>", () => {
+    expect(parseCronArgs("template add daily-rag")).toEqual({
+      kind: "template-add",
+      templateKey: "daily-rag",
+    });
+  });
+
+  it("template add <key> <name>", () => {
+    expect(parseCronArgs("template add daily-rag my-rag")).toEqual({
+      kind: "template-add",
+      templateKey: "daily-rag",
+      name: "my-rag",
+    });
+  });
+
+  it("template add 缺 key 抛错", () => {
+    expect(() => parseCronArgs("template add")).toThrow();
+  });
+
+  it("template 未知子命令抛错", () => {
+    expect(() => parseCronArgs("template bogus")).toThrow();
+  });
+});
+
 describe("parseCronArgs - logs", () => {
   it("默认 tail=20", () => {
     expect(parseCronArgs("logs my-task")).toEqual({

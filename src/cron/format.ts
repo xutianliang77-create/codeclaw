@@ -5,6 +5,7 @@
  */
 
 import type { CronManager } from "./manager";
+import { formatTemplateList, getTemplate } from "./templates";
 import type { CronRun, CronTask } from "./types";
 
 export function formatTaskList(tasks: CronTask[]): string {
@@ -84,6 +85,8 @@ export function formatCronHelp(): string {
     "  /cron disable <id-or-name>                              disable",
     "  /cron run-now <id-or-name>                              fire immediately (off-schedule)",
     "  /cron logs <id-or-name> [--tail=N]                      show recent runs",
+    "  /cron template list                                     list built-in templates (#116 阶段 🅑)",
+    "  /cron template add <key> [name]                         add task from template",
     "",
     "Add flags:",
     "  --notify=cli[,wechat[,web]]    where to publish results (default: log only)",
@@ -173,6 +176,25 @@ export async function dispatchCronCmd(
       const r = manager.readLogs(parsed.target, parsed.tail);
       if (!r) return `no such task: ${parsed.target}`;
       return formatLogs(r.task, r.runs);
+    }
+    case "template-list":
+      return formatTemplateList();
+    case "template-add": {
+      const t = getTemplate(parsed.templateKey);
+      if (!t) return `no such template: ${parsed.templateKey}\n\n${formatTemplateList()}`;
+      try {
+        const created = manager.add({
+          name: parsed.name ?? t.defaultName,
+          schedule: t.schedule,
+          kind: t.kind,
+          payload: t.payload,
+          notifyChannels: [...t.notifyChannels],
+          ...(t.timeoutMs !== undefined ? { timeoutMs: t.timeoutMs } : {}),
+        });
+        return `added from template '${t.key}': ${created.name} (${created.id})`;
+      } catch (err) {
+        return `template add failed: ${(err as Error).message}`;
+      }
     }
   }
 }

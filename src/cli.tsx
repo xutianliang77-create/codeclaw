@@ -239,6 +239,37 @@ async function main(): Promise<void> {
     });
     console.log(`CodeClaw Web listening on http://${handle.host}:${handle.port}`);
     console.log("Open it in your browser. Set the same CODECLAW_WEB_TOKEN value in the auth bar.");
+
+    // 阶段 🅑：在 web 子命令也跑 cron。每个 user engine 的 channel="http" 会禁用 cron（避免重复触发）；
+    // 这里独建 host engine（channel undefined → 走 cli 路径启 scheduler）专跑 cron + 广播 web SSE。
+    const cronHost = createQueryEngine({
+      currentProvider: runtime.selection?.current ?? null,
+      fallbackProvider: runtime.selection?.fallback ?? null,
+      permissionMode: runtime.config?.defaults.permissionMode ?? "plan",
+      workspace,
+      auditDbPath: null,
+      dataDbPath: null,
+      ...(runtime.config?.memory.l1AutoCompactThreshold !== undefined
+        ? { autoCompactThreshold: runtime.config.memory.l1AutoCompactThreshold }
+        : {}),
+      mcpManager,
+      settings,
+    });
+    (cronHost as unknown as {
+      setCronNotifyAdapters?: (a: {
+        wechat?: (...args: unknown[]) => void;
+        web?: (task: unknown, run: unknown) => void;
+      }) => void;
+    }).setCronNotifyAdapters?.({
+      web: (task, run) => {
+        handle.store.broadcastEvent({
+          type: "cron-result",
+          task,
+          run,
+        });
+      },
+    });
+
     // SIGHUP 同步 settings 到所有已有 web sessions
     process.on("SIGHUP", () => {
       try {
@@ -252,6 +283,11 @@ async function main(): Promise<void> {
       }
     });
     process.on("SIGINT", () => {
+      try {
+        (cronHost as unknown as { disposeCron?: () => void }).disposeCron?.();
+      } catch {
+        // 忽略
+      }
       void handle.close().then(() => shutdownMcp()).finally(() => process.exit(0));
     });
     return;

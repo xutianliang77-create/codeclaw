@@ -136,4 +136,18 @@ export class SessionStore {
       }
     }
   }
+
+  /**
+   * 向所有 active session 广播一条自定义事件（cron-result 等）。
+   * 客户端在 EventSource 上能直接收到 data: {...} 帧。
+   */
+  broadcastEvent(event: { type: string; [k: string]: unknown }): void {
+    for (const s of this.map.values()) {
+      try {
+        s.emitter.emit("event", event);
+      } catch {
+        // 单 session emitter 失败不阻塞其它
+      }
+    }
+  }
 }
