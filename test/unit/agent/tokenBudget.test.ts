@@ -9,11 +9,15 @@
  *   - warnIfBudgetExceeded ≥70% 写 stderr，<70% 不写
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   checkTokenBudget,
+  DEFAULT_HARD_CUT_RATIO,
+  DEFAULT_WARN_RATIO,
   estimateMessageTokens,
   estimateToolsSchemaTokens,
+  getHardCutRatio,
+  getWarnRatio,
   inferContextWindow,
   warnIfBudgetExceeded,
 } from "../../../src/agent/tokenBudget";
@@ -137,6 +141,58 @@ describe("checkTokenBudget", () => {
     const noTools = checkTokenBudget([msg("user", "hi")], provider("gpt-4", 100));
     const withTools = checkTokenBudget([msg("user", "hi")], provider("gpt-4", 100), 50);
     expect(withTools.estimatedTokens).toBe(noTools.estimatedTokens + 50);
+  });
+});
+
+describe("env-configurable thresholds", () => {
+  const ENV_BACKUP = {
+    warn: process.env.CODECLAW_TOKEN_WARN_THRESHOLD,
+    hardCut: process.env.CODECLAW_AUTO_COMPACT_THRESHOLD,
+  };
+
+  afterEach(() => {
+    if (ENV_BACKUP.warn === undefined) delete process.env.CODECLAW_TOKEN_WARN_THRESHOLD;
+    else process.env.CODECLAW_TOKEN_WARN_THRESHOLD = ENV_BACKUP.warn;
+    if (ENV_BACKUP.hardCut === undefined) delete process.env.CODECLAW_AUTO_COMPACT_THRESHOLD;
+    else process.env.CODECLAW_AUTO_COMPACT_THRESHOLD = ENV_BACKUP.hardCut;
+  });
+
+  it("env 未设 → 默认 0.7 / 0.95", () => {
+    delete process.env.CODECLAW_TOKEN_WARN_THRESHOLD;
+    delete process.env.CODECLAW_AUTO_COMPACT_THRESHOLD;
+    expect(getWarnRatio()).toBe(DEFAULT_WARN_RATIO);
+    expect(getHardCutRatio()).toBe(DEFAULT_HARD_CUT_RATIO);
+  });
+
+  it("env 合法 → 用 env 值", () => {
+    process.env.CODECLAW_TOKEN_WARN_THRESHOLD = "0.5";
+    process.env.CODECLAW_AUTO_COMPACT_THRESHOLD = "0.85";
+    expect(getWarnRatio()).toBe(0.5);
+    expect(getHardCutRatio()).toBe(0.85);
+  });
+
+  it("env 非法（NaN / >=1 / <=0）→ 回落默认 + stderr warn", () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    process.env.CODECLAW_AUTO_COMPACT_THRESHOLD = "abc";
+    expect(getHardCutRatio()).toBe(DEFAULT_HARD_CUT_RATIO);
+    process.env.CODECLAW_AUTO_COMPACT_THRESHOLD = "1.5";
+    expect(getHardCutRatio()).toBe(DEFAULT_HARD_CUT_RATIO);
+    process.env.CODECLAW_AUTO_COMPACT_THRESHOLD = "0";
+    expect(getHardCutRatio()).toBe(DEFAULT_HARD_CUT_RATIO);
+    process.env.CODECLAW_AUTO_COMPACT_THRESHOLD = "-0.5";
+    expect(getHardCutRatio()).toBe(DEFAULT_HARD_CUT_RATIO);
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining("invalid CODECLAW_AUTO_COMPACT_THRESHOLD"));
+    stderr.mockRestore();
+  });
+
+  it("env 配置驱动 checkTokenBudget 阈值（端到端）", () => {
+    process.env.CODECLAW_AUTO_COMPACT_THRESHOLD = "0.5"; // 50%
+    const r = checkTokenBudget([msg("user", "a ".repeat(30))], provider("gpt-4", 100));
+    // 30 tokens + 4 overhead ≈ 30+ tokens / 100 ctx ≈ 30%+，应触发 warn 但不 hardCut（50% 阈值）
+    expect(r.shouldHardCut).toBe(false);
+    process.env.CODECLAW_AUTO_COMPACT_THRESHOLD = "0.2"; // 20%
+    const r2 = checkTokenBudget([msg("user", "a ".repeat(30))], provider("gpt-4", 100));
+    expect(r2.shouldHardCut).toBe(true); // 30%+ > 20% → 触发
   });
 });
 

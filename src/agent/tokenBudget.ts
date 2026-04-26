@@ -40,8 +40,38 @@ const DEFAULT_CONTEXT_WINDOW: Array<[string, number]> = [
   ["mistral", 32_768],
 ];
 const FALLBACK_CONTEXT_WINDOW = 32_768;
-const WARN_RATIO = 0.7;
-const HARD_CUT_RATIO = 0.95;
+export const DEFAULT_WARN_RATIO = 0.7;
+export const DEFAULT_HARD_CUT_RATIO = 0.95;
+
+/**
+ * 阈值可配（M2-03+）：
+ *   - env CODECLAW_TOKEN_WARN_THRESHOLD     默认 0.7
+ *   - env CODECLAW_AUTO_COMPACT_THRESHOLD   默认 0.95
+ *   - 必须 0 < x < 1；非法值回落默认 + stderr warn
+ *
+ * 从 env 读使 sync API 不变；yaml `~/.codeclaw/config.yaml: memory.{warnThreshold,
+ * autoCompactThreshold}` 由调用方在启动时读出后传 env（README 后补；现网仅 env）。
+ */
+function readEnvRatio(envName: string, defaultVal: number): number {
+  const raw = process.env[envName];
+  if (raw === undefined || raw === "") return defaultVal;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0 || n >= 1) {
+    process.stderr.write(
+      `[token-budget] invalid ${envName}=${raw}, must be 0<x<1; using default ${defaultVal}\n`
+    );
+    return defaultVal;
+  }
+  return n;
+}
+
+export function getWarnRatio(): number {
+  return readEnvRatio("CODECLAW_TOKEN_WARN_THRESHOLD", DEFAULT_WARN_RATIO);
+}
+
+export function getHardCutRatio(): number {
+  return readEnvRatio("CODECLAW_AUTO_COMPACT_THRESHOLD", DEFAULT_HARD_CUT_RATIO);
+}
 
 export interface TokenBudgetReport {
   estimatedTokens: number;
@@ -100,8 +130,8 @@ export function checkTokenBudget(
     estimatedTokens: used,
     contextWindow: window,
     utilizationRatio: ratio,
-    shouldWarn: ratio >= WARN_RATIO,
-    shouldHardCut: ratio >= HARD_CUT_RATIO,
+    shouldWarn: ratio >= getWarnRatio(),
+    shouldHardCut: ratio >= getHardCutRatio(),
   };
 }
 
