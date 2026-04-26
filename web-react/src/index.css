@@ -2,7 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+:root,
+:root[data-theme="light"] {
   --cc-bg: #ffffff;
   --cc-fg: #1f2328;
   --cc-muted: #6e7781;
@@ -12,8 +13,19 @@
   --cc-ok: #2da94f;
 }
 
+:root[data-theme="dark"] {
+  --cc-bg: #0e1117;
+  --cc-fg: #e6e8eb;
+  --cc-muted: #8b95a5;
+  --cc-border: #2c333d;
+  --cc-accent: #4a9cff;
+  --cc-danger: #c83b3b;
+  --cc-ok: #2da94f;
+}
+
+/* 用户未显式选 → 跟随系统 */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     --cc-bg: #0e1117;
     --cc-fg: #e6e8eb;
     --cc-muted: #8b95a5;

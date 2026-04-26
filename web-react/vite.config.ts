@@ -30,6 +30,22 @@ export default defineConfig({
     outDir: "dist",
     sourcemap: true,
     target: "es2022",
+    // 161KB gzip 的 vendor 在生产可接受；调高阈值避免误报
+    chunkSizeWarningLimit: 700,
+    // 手动拆分体积大头：vendor 包含 react/markdown/highlight（避免循环），d3 / virtual 单拆
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules")) {
+            if (id.includes("d3-")) return "d3";
+            if (id.includes("@tanstack")) return "virtual";
+            // react / react-dom / react-markdown / remark / rehype / highlight.js 都进 vendor
+            return "vendor";
+          }
+          return undefined;
+        },
+      },
+    },
   },
   test: {
     environment: "happy-dom",
