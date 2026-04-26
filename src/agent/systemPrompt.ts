@@ -20,6 +20,7 @@ import type { PermissionMode } from "../lib/config";
 import type { ProviderStatus } from "../provider/types";
 import type { SkillDefinition } from "../skills/types";
 import { loadProjectCodeclawMd, loadUserCodeclawMd } from "./codeclawMd";
+import { loadAllMemoriesCached, type MemoryEntry } from "../memory/projectMemory/store";
 
 /** 结构化最小依赖：M1-B 后 ToolRegistry 类会实现这个接口，M1 测试用 stub */
 export interface ToolListSource {
@@ -44,10 +45,14 @@ export interface SystemPromptInput {
   activeSkill?: SkillDefinition | null;
   /** 子 agent 模式时传入，覆盖默认 codeclaw 角色（M3 用） */
   agentRole?: string;
-  /** 注入额外段（M2-02 memory / M3-04 status line 之类） */
+  /** 注入额外段（M3-04 status line 之类） */
   extraSections?: Array<{ title: string; body: string }>;
   /** git summary 探测覆盖（测试用） */
   gitSummaryProvider?: (cwd: string) => GitSummary | null;
+  /** M2-02：memory 提供方覆盖（测试用；不传走 loadAllMemoriesCached(workspace)） */
+  memoryProvider?: (workspace: string) => MemoryEntry[];
+  /** M2-02：禁用 Project Memory 段（测试 / 启动早期 / privacy 选项；默认 false 即启用） */
+  disableMemorySection?: boolean;
 }
 
 export interface GitSummary {
@@ -121,7 +126,29 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   }
   addSection("Runtime Context", ctxLines.join("\n"));
 
-  // M2/M3 hook：调用方注入额外段（如 Memory / status line）
+  // M2-02：第 9 段 Project Memory —— 列 entry 索引（每条 1 行 hook，不展开 body）；
+  // LLM 用 read tool 读 ~/.codeclaw/projects/<hash>/memory/<name>.md 取全文；
+  // 用 memory_write tool 落新条目
+  if (!input.disableMemorySection) {
+    const memoryFn = input.memoryProvider ?? loadAllMemoriesCached;
+    let memories: MemoryEntry[] = [];
+    try {
+      memories = memoryFn(input.workspace);
+    } catch {
+      memories = []; // 读失败不阻塞 prompt 构造
+    }
+    if (memories.length > 0) {
+      const lines = memories.map((m) => `- **${m.name}** (${m.type}): ${m.description}`);
+      lines.push(
+        "\n_To read full content of a memory, use the `read` tool with " +
+        "`~/.codeclaw/projects/<hash>/memory/<name>.md`. " +
+        "To save new memory, call `memory_write`._"
+      );
+      addSection("Project Memory", lines.join("\n"));
+    }
+  }
+
+  // M3 hook：调用方注入额外段（如 status line）
   if (input.extraSections) {
     for (const ex of input.extraSections) {
       if (!ex.body.trim()) continue;

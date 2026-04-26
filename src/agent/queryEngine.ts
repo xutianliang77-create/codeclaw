@@ -61,6 +61,8 @@ import { buildSystemPrompt } from "./systemPrompt";
 import { ToolRegistry, createToolRegistry } from "./tools/registry";
 import type { ToolCallEvent } from "./tools/registry";
 import { registerBuiltinTools } from "./tools/builtins";
+import { registerMemoryTools } from "./tools/memoryTools";
+import { clearAllMemories, writeMemory, type MemoryType } from "../memory/projectMemory/store";
 import { checkTokenBudget, estimateToolsSchemaTokens, warnIfBudgetExceeded } from "./tokenBudget";
 import { autoCompactIfNeeded } from "./autoCompact";
 import { detectLocalTool, inspectLocalTool, isHandledLocalToolResult, runLocalTool } from "../tools/local";
@@ -706,6 +708,10 @@ class LocalQueryEngine implements QueryEngine {
     // M1-B/B.2：native tool_use opt-in 通过 env 启用；不设默认开启避免影响现有 baseline
     if (process.env.CODECLAW_NATIVE_TOOLS === "true") {
       registerBuiltinTools(this.toolRegistry);
+      // M2-02：跨会话 memory tools；env CODECLAW_PROJECT_MEMORY=false 显式关
+      if (process.env.CODECLAW_PROJECT_MEMORY !== "false") {
+        registerMemoryTools(this.toolRegistry);
+      }
     }
     // #81：把 user skill manifest 的 commands[] 桥接到 slashRegistry
     // handler 行为 = 自动激活该 skill（等价 /skills use <name>）；冲突 builtin 时 skip
@@ -1925,6 +1931,26 @@ class LocalQueryEngine implements QueryEngine {
    *
    * audit_events **故意保留**——不可篡改的审计 trail；reply 里透明告知数量。
    */
+  /**
+   * M2-02 /remember 命令支持：把用户给的文本作 user-type 长期记忆落盘。
+   * name 自动生成（user_note_<ts>）；description 取前 80 char。
+   */
+  public rememberQuickNote(text: string, type: MemoryType = "user"): string {
+    const trimmed = text.trim();
+    if (!trimmed) return "Usage: /remember <text to save as memory>";
+    try {
+      const entry = writeMemory(this.options.workspace, {
+        name: `user_note_${Date.now()}`,
+        description: trimmed.slice(0, 80),
+        type,
+        body: trimmed,
+      });
+      return `Saved memory: ${entry.name} (${entry.type})\n  → ${entry.filePath}`;
+    } catch (err) {
+      return `[remember] failed: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
   public runForgetCommand(opts: ForgetOptions): string {
     if (!this.dataDb) {
       return "Memory not enabled (dataDbPath disabled / vitest env).";
@@ -1938,10 +1964,18 @@ class LocalQueryEngine implements QueryEngine {
         0
       );
       const filesRemoved = r.results.filter((x) => x.fileRemoved).length;
+      // M2-02：/forget --all 一并清当前项目的跨会话 memory（~/.codeclaw/projects/<hash>/memory/）
+      let memoriesCleared = 0;
+      try {
+        memoriesCleared = clearAllMemories(this.options.workspace);
+      } catch {
+        /* memory dir 不存在或权限错都不阻塞 forget */
+      }
       return [
         `Forgot ${r.totalSessions} session(s) (all).`,
         `  rows deleted across tables: ${totalRows}`,
         `  session dirs removed: ${filesRemoved}`,
+        `  project memories cleared: ${memoriesCleared}`,
         `  audit_events preserved (compliance): see ~/.codeclaw/audit.db`,
       ].join("\n");
     }
