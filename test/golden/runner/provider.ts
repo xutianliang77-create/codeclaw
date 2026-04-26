@@ -60,14 +60,19 @@ export class FailingMockLlmInvoker implements LlmInvoker {
 }
 
 /**
- * 真实 provider 接入（W3 后期落地）：
- * 用户配置文件 + streamProviderResponse 包装成 LlmInvoker。
- * 跑前会从 ~/.codeclaw 读 providers.json 和 config.yaml，挑出 default provider。
+ * 真实 provider 接入。两条路径：
+ *
+ * 1. 默认（裸壳测试）：直接 streamProviderResponse + 单条 user message —— pre-M1 baseline 用
+ * 2. env GOLDEN_M1_SYSTEM_PROMPT=true：在 messages[0] 注入 buildSystemPrompt() 模拟 M1-A 用户体感
+ *    —— 但仍单轮（M1-B.2 multi-turn 不会触发）
+ * 3. env GOLDEN_M1_QUERY_ENGINE=true：走 QueryEngine.submitMessage 完整路径
+ *    —— 含 M1-A system prompt + M1-B native tool_use + M1-B.2 multi-turn dispatch
+ *    最 fair 的 M1 baseline 测量方式
+ *
+ * 三条路径 mutually exclusive；优先级 3 > 2 > 1
  */
 export async function createRealInvoker(): Promise<LlmInvoker> {
   const { loadRuntimeSelection } = await import("../../../src/provider/registry");
-  const { streamProviderResponse } = await import("../../../src/provider/client");
-
   const { config, selection } = await loadRuntimeSelection();
   if (!config || !selection || !selection.current) {
     throw new Error(
@@ -75,6 +80,48 @@ export async function createRealInvoker(): Promise<LlmInvoker> {
     );
   }
   const provider = selection.current;
+
+  if (process.env.GOLDEN_M1_QUERY_ENGINE === "true") {
+    return createQueryEngineInvoker(provider);
+  }
+
+  return createStreamInvoker(provider, process.env.GOLDEN_M1_SYSTEM_PROMPT === "true");
+}
+
+/**
+ * 路径 1/2：streamProviderResponse 单轮。systemPrompt 可选注入。
+ */
+async function createStreamInvoker(
+  provider: import("../../../src/provider/types").ProviderStatus,
+  injectSystemPrompt: boolean
+): Promise<LlmInvoker> {
+  const { streamProviderResponse } = await import("../../../src/provider/client");
+
+  let systemPromptText: string | null = null;
+  if (injectSystemPrompt) {
+    const { buildSystemPrompt } = await import("../../../src/agent/systemPrompt");
+    const { SlashRegistry, loadBuiltins } = await import("../../../src/commands/slash");
+    const { createSkillRegistryFromDisk } = await import("../../../src/skills/registry");
+    const { createToolRegistry } = await import("../../../src/agent/tools/registry");
+    const { registerBuiltinTools } = await import("../../../src/agent/tools/builtins");
+
+    const slashRegistry = new SlashRegistry();
+    loadBuiltins(slashRegistry);
+    const skillRegistry = createSkillRegistryFromDisk();
+    const toolRegistry = createToolRegistry();
+    if (process.env.CODECLAW_NATIVE_TOOLS === "true") {
+      registerBuiltinTools(toolRegistry);
+    }
+
+    systemPromptText = buildSystemPrompt({
+      workspace: process.cwd(),
+      permissionMode: "default",
+      provider,
+      slashRegistry,
+      skillRegistry,
+      toolRegistry,
+    });
+  }
 
   return {
     async invoke(question: AskQuestion): Promise<LlmInvocation> {
@@ -85,6 +132,9 @@ export async function createRealInvoker(): Promise<LlmInvoker> {
       let modelId: string | undefined = provider.model;
 
       const messages = [
+        ...(systemPromptText
+          ? [{ id: "sys-1", role: "system" as const, text: systemPromptText, source: "local" as const }]
+          : []),
         {
           id: "user-1",
           role: "user" as const,
@@ -104,7 +154,6 @@ export async function createRealInvoker(): Promise<LlmInvoker> {
           answer += chunk;
         }
       } catch (err) {
-        // 失败时把错误塞进 answer，让 scorer 走"没命中 must_mention"路径自然 fail
         answer = `[provider error] ${err instanceof Error ? err.message : String(err)}`;
       }
 
@@ -113,13 +162,91 @@ export async function createRealInvoker(): Promise<LlmInvoker> {
         modelId,
         answer,
         latencyMs: Date.now() - start,
-        // 携带真实 token 用量供 runner / report 累加
         ...(usageInputTokens || usageOutputTokens
-          ? {
-              inputTokens: usageInputTokens,
-              outputTokens: usageOutputTokens,
-            }
+          ? { inputTokens: usageInputTokens, outputTokens: usageOutputTokens }
           : {}),
+      } as LlmInvocation;
+    },
+  };
+}
+
+/**
+ * 路径 3：QueryEngine.submitMessage 完整 multi-turn。
+ * - workspace = process.cwd()（真项目根；ASK 题大多问 codeclaw 内部，需 LLM 真能 read）
+ * - permissionMode: "plan"（语义只读；当前 toolRegistry.invoke 不走 evaluate（M2-04 修），
+ *   所以额外保护：toolRegistry 仅注册 5 个只读 builtin（read/glob/symbol/definition/references），
+ *   彻底剥离 bash/write/append/replace—— LLM 无法调用，物理上不会动项目）
+ * - 每题独立 sessionId；audit/dataDb 关；session 落 tmp（不污染本机）
+ * - 收 message-complete：最终 answer = 最后一个 assistant turn 的 text
+ */
+async function createQueryEngineInvoker(
+  provider: import("../../../src/provider/types").ProviderStatus
+): Promise<LlmInvoker> {
+  const { createQueryEngine } = await import("../../../src/agent/queryEngine");
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+
+  // 物理只读保护：在 createQueryEngine 之前 monkey-patch ToolRegistry 默认注册的 builtins
+  // —— 临时改 env 让 registerBuiltinTools 仍跑，但跑完后立即 unregister 4 个写工具
+  // 备选做法：直接改 builtins.ts 接 env READ_ONLY；这里走 monkey-patch 保 builtins.ts 干净
+  const READ_ONLY_TOOLS = new Set(["read", "glob", "symbol", "definition", "references"]);
+
+  return {
+    async invoke(question: AskQuestion): Promise<LlmInvocation> {
+      const start = Date.now();
+      const sessionsTmp = mkdtempSync(path.join(tmpdir(), "golden-ask-sess-"));
+
+      let lastTurnAnswer = "";
+      let buffering = "";
+      let modelId: string | undefined = provider.model;
+
+      try {
+        const engine = createQueryEngine({
+          currentProvider: provider,
+          fallbackProvider: null,
+          permissionMode: "plan",
+          workspace: process.cwd(),
+          channel: "cli",
+          userId: "golden-ask",
+          auditDbPath: null,
+          dataDbPath: null,
+          sessionsDir: sessionsTmp,
+        });
+
+        // 物理剥离写工具：runner 模式下不允许 LLM 真改文件
+        const reg = (engine as unknown as { toolRegistry?: { list(): Array<{ name: string }>; unregister(name: string): boolean } }).toolRegistry;
+        if (reg) {
+          for (const t of reg.list()) {
+            if (!READ_ONLY_TOOLS.has(t.name)) reg.unregister(t.name);
+          }
+        }
+
+        for await (const ev of engine.submitMessage(question.prompt)) {
+          if (ev.type === "message-start") {
+            buffering = "";
+          } else if (ev.type === "message-delta") {
+            buffering += ev.delta;
+          } else if (ev.type === "message-complete") {
+            lastTurnAnswer = ev.text || buffering;
+            buffering = "";
+          }
+        }
+      } catch (err) {
+        lastTurnAnswer = `[engine error] ${err instanceof Error ? err.message : String(err)}`;
+      } finally {
+        try {
+          rmSync(sessionsTmp, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+
+      return {
+        provider: provider.type,
+        modelId,
+        answer: lastTurnAnswer,
+        latencyMs: Date.now() - start,
       } as LlmInvocation;
     },
   };
