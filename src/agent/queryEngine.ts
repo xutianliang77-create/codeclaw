@@ -74,6 +74,7 @@ import { bridgeMcpTools } from "../mcp/bridge";
 import { applySkillBanner } from "./skillBanner";
 import { runHooks } from "../hooks/runner";
 import type { HookSettings } from "../hooks/settings";
+import { registerTaskTool } from "./tools/taskTool";
 import { checkTokenBudget, estimateToolsSchemaTokens, warnIfBudgetExceeded } from "./tokenBudget";
 import { autoCompactIfNeeded } from "./autoCompact";
 import { detectLocalTool, inspectLocalTool, isHandledLocalToolResult, runLocalTool } from "../tools/local";
@@ -777,6 +778,18 @@ class LocalQueryEngine implements QueryEngine {
       // LLM 在 native tool_use 中可直接调 mcp__<server>__<tool>
       if (options.mcpManager) {
         bridgeMcpTools(options.mcpManager, this.toolRegistry);
+      }
+      // M3-02：注册 Task tool，让 LLM 能派生 subagent。env CODECLAW_SUBAGENT=false 显式关。
+      // 子 agent 内部不会再注册 Task（runner.ts 内部 unregister 防递归）。
+      if (process.env.CODECLAW_SUBAGENT !== "false") {
+        registerTaskTool(this.toolRegistry, {
+          currentProvider: options.currentProvider,
+          fallbackProvider: options.fallbackProvider,
+          workspace: options.workspace,
+          ...(options.approvalsDir ? { approvalsDir: options.approvalsDir } : {}),
+          ...(options.mcpManager ? { mcpManager: options.mcpManager } : {}),
+          ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+        });
       }
     }
     // M3-04：lifecycle hooks 配置；缺省视为无 hook
