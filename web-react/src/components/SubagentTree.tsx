@@ -7,20 +7,9 @@
 
 import { useEffect, useState } from "react";
 import { getSubagents } from "@/api/endpoints";
+import { useSubagentsStore, type SubagentRow } from "@/store/subagents";
 
-interface SubagentNode {
-  id?: string;
-  role?: string;
-  prompt?: string;
-  status?: "running" | "completed" | "failed" | "timeout" | string;
-  toolCallCount?: number;
-  startedAt?: number;
-  finishedAt?: number;
-  durationMs?: number;
-  error?: string;
-  resultPreview?: string;
-  children?: SubagentNode[];
-}
+type SubagentNode = SubagentRow & { children?: SubagentNode[] };
 
 const STATUS_COLORS: Record<string, string> = {
   running: "border-accent",
@@ -34,14 +23,16 @@ interface Props {
 }
 
 export default function SubagentTree({ sessionId }: Props) {
-  const [items, setItems] = useState<SubagentNode[]>([]);
+  // 主源：SSE 推送写入的 store；polling 兜底（首次拉历史 + SSE 断线自愈）
+  const items = useSubagentsStore((s) =>
+    sessionId ? s.bySession.get(sessionId) ?? [] : []
+  );
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     if (!sessionId) {
-      setItems([]);
       setNote(null);
       setError(null);
       return;
@@ -50,7 +41,11 @@ export default function SubagentTree({ sessionId }: Props) {
       try {
         const r = await getSubagents(sessionId!);
         if (cancelled) return;
-        setItems((r.subagents ?? []) as SubagentNode[]);
+        // polling 不 overwrite，仅当 store 当前为空时用作 hydrate
+        const snapshot = useSubagentsStore.getState().get(sessionId!);
+        if (snapshot.length === 0 && r.subagents.length > 0) {
+          useSubagentsStore.getState().setAll(sessionId!, r.subagents as SubagentRow[]);
+        }
         setNote(r.note ?? null);
         setError(null);
       } catch (err) {
@@ -58,7 +53,7 @@ export default function SubagentTree({ sessionId }: Props) {
       }
     }
     refresh();
-    const id = setInterval(refresh, 3000);
+    const id = setInterval(refresh, 8000); // SSE 实时；polling 仅兜底，间隔放宽到 8s
     return () => {
       cancelled = true;
       clearInterval(id);

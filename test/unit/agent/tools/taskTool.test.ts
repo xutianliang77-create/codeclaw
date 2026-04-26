@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { registerTaskTool } from "../../../../src/agent/tools/taskTool";
 import { createToolRegistry } from "../../../../src/agent/tools/registry";
 import { PermissionManager } from "../../../../src/permissions/manager";
+import { SubagentRegistry } from "../../../../src/agent/subagents/registry";
 import type { ProviderStatus } from "../../../../src/provider/types";
 
 const MOCK_PROVIDER: ProviderStatus = {
@@ -151,6 +152,47 @@ describe("Task tool · invoke", () => {
     expect(result.ok).toBe(true);
     expect(result.content).toContain("[Task Explore]");
     expect(result.content).toContain("explore result");
+  });
+
+  it("subagentRegistry 注入时 happy path 写入一条 completed 记录（B.8）", async () => {
+    const reg = createToolRegistry();
+    const subagents = new SubagentRegistry();
+    registerTaskTool(reg, {
+      currentProvider: MOCK_PROVIDER,
+      fallbackProvider: null,
+      workspace: process.cwd(),
+      fetchImpl: mockOpenAi("done"),
+      subagentRegistry: subagents,
+    });
+    expect(subagents.size()).toBe(0);
+    await reg.invoke("Task", { role: "Explore", prompt: "find" }, ctx());
+    expect(subagents.size()).toBe(1);
+    const rec = subagents.list()[0];
+    expect(rec.role).toBe("Explore");
+    expect(rec.status).toBe("completed");
+    expect(rec.toolCallCount).toBeGreaterThanOrEqual(0);
+  });
+
+  it("subagentRegistry 失败路径写 failed 记录", async () => {
+    const reg = createToolRegistry();
+    const subagents = new SubagentRegistry();
+    registerTaskTool(reg, {
+      currentProvider: MOCK_PROVIDER,
+      fallbackProvider: null,
+      workspace: process.cwd(),
+      fetchImpl: mockOpenAi("x"),
+      subagentRegistry: subagents,
+    });
+    // 未知 role：runSubagent 直接 ok=false
+    await reg.invoke(
+      "Task",
+      { role: "definitely-not-a-role", prompt: "stuff" },
+      ctx()
+    );
+    // 注：未知 role 在 runSubagent 内即返 error，registry 仍 start+finish 写一条
+    // 但 invalid 'role' 字符串会被 parseArgs 接受，runSubagent 才返 unknown
+    expect(subagents.size()).toBe(1);
+    expect(subagents.list()[0].status).toBe("failed");
   });
 
   it("未知 role → subagent_failed errorCode", async () => {

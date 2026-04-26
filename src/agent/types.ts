@@ -187,6 +187,23 @@ export type EngineEvent =
       type: "message-complete";
       messageId: string;
       text: string;
+    }
+  | {
+      // B.8 阶段 B：subagent 真实推送（替代 3s 轮询）
+      type: "subagent-start";
+      id: string;
+      role: string;
+      prompt: string;
+      startedAt: number;
+    }
+  | {
+      type: "subagent-end";
+      id: string;
+      status: "completed" | "failed" | "timeout";
+      toolCallCount: number;
+      durationMs: number;
+      error?: string;
+      resultPreview?: string;
     };
 
 export interface QueryEngine {

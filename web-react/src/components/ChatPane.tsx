@@ -11,6 +11,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useSessionsStore } from "@/store/sessions";
 import { useMessagesStore } from "@/store/messages";
 import { useApprovalsStore } from "@/store/approvals";
+import { useSubagentsStore } from "@/store/subagents";
 import { useAuthStore } from "@/store/auth";
 import { sendMessage } from "@/api/endpoints";
 import MessageBubble from "./MessageBubble";
@@ -118,6 +119,25 @@ export default function ChatPane({ onError }: Props) {
             break;
           case "approval-cleared":
             useApprovalsStore.getState().clear(activeId);
+            break;
+          case "subagent-start":
+            useSubagentsStore.getState().start(activeId, {
+              id: data.id,
+              role: data.role,
+              prompt: data.prompt,
+              status: "running",
+              startedAt: data.startedAt,
+            });
+            break;
+          case "subagent-end":
+            useSubagentsStore.getState().end(activeId, data.id, {
+              status: data.status,
+              toolCallCount: data.toolCallCount,
+              durationMs: data.durationMs,
+              finishedAt: Date.now(),
+              error: data.error,
+              resultPreview: data.resultPreview,
+            });
             break;
           default:
             // phase / 其它子事件先不渲染

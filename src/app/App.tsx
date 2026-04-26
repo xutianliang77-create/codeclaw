@@ -300,11 +300,15 @@ export function App({
           continue;
         }
 
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === event.messageId ? { ...message, text: event.text } : message
-          )
-        );
+        if (event.type === "message-complete") {
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === event.messageId ? { ...message, text: event.text } : message
+            )
+          );
+          continue;
+        }
+        // subagent-start / subagent-end：ink CLI 暂不展示，留给 web channel
       }
     } catch (error) {
       turnErrorMessage = formatTurnError(error);

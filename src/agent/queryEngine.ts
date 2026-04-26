@@ -1823,6 +1823,26 @@ class LocalQueryEngine implements QueryEngine {
           }
 
           yield { type: "tool-start", toolName: call.name, detail: detailPreview };
+          // B.8 SSE 推流：Task tool invoke 前后 yield subagent-start / subagent-end
+          // 让 web 端立即看到子 agent 启停，不必等 3s 轮询
+          let subagentStartedAt: number | null = null;
+          let subagentRecordsBefore = 0;
+          if (call.name === "Task") {
+            const args = (call.args ?? {}) as { role?: string; prompt?: string };
+            if (typeof args.role === "string" && typeof args.prompt === "string") {
+              subagentStartedAt = Date.now();
+              subagentRecordsBefore = this.subagentRegistry.size();
+              yield {
+                type: "subagent-start",
+                // 真实 id 由 registry.start 在 Task tool invoke 内分配；这里 yield 占位
+                // ID（subagentRecordsBefore+1）与之后 list()[0] 对得上
+                id: `sa-${subagentRecordsBefore + 1}`,
+                role: args.role,
+                prompt: args.prompt,
+                startedAt: subagentStartedAt,
+              };
+            }
+          }
           // C2: 透传 abortSignal，让长跑工具（Task subagent / mcp call / bash）
           // 在父 turn Ctrl-C 时也能被中断，不再 5min wall clock 跑飞
           // 注：tool dispatch 处 this.abortController 经 1511 行赋值后 TS narrow 为 null
@@ -1833,6 +1853,22 @@ class LocalQueryEngine implements QueryEngine {
             permissionManager: this.permissions,
             ...(abortSignal ? { abortSignal } : {}),
           });
+          // B.8：Task tool 完成后从 registry 拿最新记录 yield subagent-end
+          if (call.name === "Task" && subagentStartedAt !== null) {
+            const records = this.subagentRegistry.list();
+            const rec = records[0]; // list 已倒序，最新的在 [0]
+            if (rec && rec.status !== "running") {
+              yield {
+                type: "subagent-end",
+                id: rec.id,
+                status: rec.status,
+                toolCallCount: rec.toolCallCount ?? 0,
+                durationMs: rec.durationMs ?? Date.now() - subagentStartedAt,
+                ...(rec.error ? { error: rec.error } : {}),
+                ...(rec.resultPreview ? { resultPreview: rec.resultPreview } : {}),
+              };
+            }
+          }
           this.messages.push({
             id: createId("tool"),
             role: "tool",
