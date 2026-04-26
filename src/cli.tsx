@@ -246,9 +246,23 @@ async function main(): Promise<void> {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`CodeClaw MCP manager startup failed (continuing without spawn servers): ${msg}`);
   }
-  process.on("exit", () => {
-    void mcpManager.closeAll().catch(() => undefined);
+  // M3-01：MCP 子进程优雅关闭。注意 process.on("exit") 是同步事件，async closeAll
+  // 不会被等待，子进程会变 zombie；改 SIGINT/SIGTERM/beforeExit（async-aware）。
+  let mcpClosingPromise: Promise<void> | null = null;
+  const shutdownMcp = async (): Promise<void> => {
+    if (!mcpClosingPromise) {
+      mcpClosingPromise = mcpManager.closeAll().catch(() => undefined);
+    }
+    return mcpClosingPromise;
+  };
+  process.on("beforeExit", () => {
+    void shutdownMcp();
   });
+  for (const sig of ["SIGINT", "SIGTERM"] as const) {
+    process.on(sig, () => {
+      void shutdownMcp().finally(() => process.exit(0));
+    });
+  }
 
   // M3-04：加载 settings.json（hooks + statusLine 配置）；解析失败不阻塞主进程
   let settings;

@@ -115,11 +115,10 @@ export async function runHooks(
       executions.push(exec);
       if (isBlockingEvent && !exec.ok && !exec.timedOut && exec.exitCode !== null && exec.exitCode !== 0) {
         // 阻塞性事件 + 子进程返回非 0（不是 spawn 错也不是 timeout）→ 真阻塞
-        return {
-          blocked: true,
-          blockReason: exec.stderr.trim() || `${event.type} hook exited ${exec.exitCode}`,
-          executions,
-        };
+        // sanitize：stderr 直灌进 LLM context + transcript，先剥 ANSI / 控制字符
+        // 防 tokenizer 边界异常 + replay 时显示乱码
+        const reason = sanitizeForLlm(exec.stderr.trim()) || `${event.type} hook exited ${exec.exitCode}`;
+        return { blocked: true, blockReason: reason, executions };
       }
     }
   }
@@ -213,4 +212,26 @@ function runSingleHook(cmd: HookCommand, event: HookEventPayload): Promise<HookE
 function clip(s: string): string {
   if (s.length <= MAX_HOOK_OUTPUT_BYTES) return s;
   return `${s.slice(0, MAX_HOOK_OUTPUT_BYTES)}\n[truncated]`;
+}
+
+/**
+ * 把 hook stderr 转成给 LLM 看的安全字符串：
+ *   - 剥 ANSI 转义 (CSI / OSC)
+ *   - 替换 NUL / 控制字符（除 \t \n \r）为空格
+ *   - 截 4KB 上限（再短一点；blockReason 不需要全文）
+ */
+function sanitizeForLlm(raw: string): string {
+  if (!raw) return "";
+  let s = raw;
+  // ANSI CSI 序列 ESC [ ... letter
+  // eslint-disable-next-line no-control-regex
+  s = s.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
+  // ANSI OSC 序列 ESC ] ... BEL or ESC \
+  // eslint-disable-next-line no-control-regex
+  s = s.replace(/\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)/g, "");
+  // NUL + 其他控制字符（保留 \t \n \r）
+  // eslint-disable-next-line no-control-regex
+  s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, " ");
+  if (s.length > 4096) s = `${s.slice(0, 4096)}\n[blockReason truncated]`;
+  return s;
 }

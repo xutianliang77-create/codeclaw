@@ -43,6 +43,8 @@ export interface RunSubagentDeps {
   settings?: CodeclawSettings;
   /** 测试注入 mock provider stream；生产忽略走默认 fetch */
   fetchImpl?: typeof fetch;
+  /** 父 turn 的 abort signal；用户 Ctrl-C 时让子 engine 立即停 */
+  abortSignal?: AbortSignal;
 }
 
 export interface RunSubagentOutput {
@@ -94,11 +96,16 @@ export async function runSubagent(
 
   // 工具集过滤：role.allowedTools 之外的全部 unregister
   // Task 工具本身也要 unregister 防止子 agent 递归创建子 agent
+  // B2: readonly 类 role（plan mode）的 allowedTools 没显式列 memory_write/memory_remove，
+  //     但 queryEngine constructor 默认会注册它们（CODECLAW_PROJECT_MEMORY 控制）。
+  //     allowedTools 限定 path 自动剔除；全集 role path 这里要主动剔除 memory 写工具，
+  //     避免 readonly subagent 误改父项目 memory。Plan/Explore/code-reviewer/deep-reviewer
+  //     等 role 因为 allowedTools 限定，自动落入第一条 path，无需额外处理。
+  const reg = (engine as unknown as {
+    toolRegistry?: { list(): Array<{ name: string }>; unregister(name: string): boolean };
+  }).toolRegistry;
   if (role.allowedTools !== undefined) {
     const allowed = new Set<string>(role.allowedTools);
-    const reg = (engine as unknown as {
-      toolRegistry?: { list(): Array<{ name: string }>; unregister(name: string): boolean };
-    }).toolRegistry;
     if (reg) {
       for (const t of reg.list()) {
         if (!allowed.has(t.name)) reg.unregister(t.name);
@@ -106,10 +113,12 @@ export async function runSubagent(
     }
   } else {
     // 全集 role 也要砍 Task（防递归）
-    const reg = (engine as unknown as {
-      toolRegistry?: { unregister(name: string): boolean };
-    }).toolRegistry;
     reg?.unregister("Task");
+    // plan mode 全集 role（理论上不存在，但保护）→ 砍 memory write
+    if (role.permissionMode === "plan") {
+      reg?.unregister("memory_write");
+      reg?.unregister("memory_remove");
+    }
   }
 
   // 拼最终 prompt：role.instructions 作为前缀（轻量；不重复 buildSystemPrompt 内容）
@@ -126,10 +135,25 @@ export async function runSubagent(
     aborted = true;
   }, SUBAGENT_MAX_DURATION_MS);
 
+  // 父 abort 信号同步级联
+  let parentAbortListener: (() => void) | null = null;
+  if (deps.abortSignal) {
+    if (deps.abortSignal.aborted) {
+      aborted = true;
+      abortError = "parent turn aborted before subagent started";
+    } else {
+      parentAbortListener = () => {
+        aborted = true;
+        if (!abortError) abortError = "parent turn aborted";
+      };
+      deps.abortSignal.addEventListener("abort", parentAbortListener);
+    }
+  }
+
   try {
     for await (const ev of engine.submitMessage(finalPrompt) as AsyncGenerator<EngineEvent>) {
       if (aborted) {
-        abortError = `subagent exceeded ${SUBAGENT_MAX_DURATION_MS}ms wall clock`;
+        if (!abortError) abortError = `subagent exceeded ${SUBAGENT_MAX_DURATION_MS}ms wall clock`;
         break;
       }
       if (ev.type === "tool-start") toolCallCount += 1;
@@ -142,6 +166,9 @@ export async function runSubagent(
     abortError = err instanceof Error ? err.message : String(err);
   } finally {
     clearTimeout(abortTimer);
+    if (parentAbortListener && deps.abortSignal) {
+      deps.abortSignal.removeEventListener("abort", parentAbortListener);
+    }
   }
 
   return {

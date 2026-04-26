@@ -53,7 +53,7 @@ function buildTaskToolDefinition(deps: RegisterTaskToolDeps): ToolDefinition {
       required: ["role", "prompt"],
       additionalProperties: false,
     },
-    async invoke(args, _ctx) {
+    async invoke(args, ctx) {
       const { role, prompt } = parseArgs(args);
       if (!role) {
         return {
@@ -72,7 +72,11 @@ function buildTaskToolDefinition(deps: RegisterTaskToolDeps): ToolDefinition {
         };
       }
 
-      const result = await runSubagent({ role, prompt }, deps);
+      // C2: 父 abortSignal 透传到子 runner，父 Ctrl-C 时子 engine 立即停
+      const result = await runSubagent(
+        { role, prompt },
+        { ...deps, ...(ctx.abortSignal ? { abortSignal: ctx.abortSignal } : {}) }
+      );
       const header = `[Task ${role}] ${result.toolCallCount} tool call(s), ${result.durationMs}ms`;
       const body = result.error ? `error: ${result.error}\n\n${result.finalText}` : result.finalText;
       return {

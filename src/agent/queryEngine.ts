@@ -1769,9 +1769,15 @@ class LocalQueryEngine implements QueryEngine {
           }
 
           yield { type: "tool-start", toolName: call.name, detail: detailPreview };
+          // C2: 透传 abortSignal，让长跑工具（Task subagent / mcp call / bash）
+          // 在父 turn Ctrl-C 时也能被中断，不再 5min wall clock 跑飞
+          // 注：tool dispatch 处 this.abortController 经 1511 行赋值后 TS narrow 为 null
+          //   （control-flow 没穿透 chain 内 finally），用 as 重置类型
+          const abortSignal = (this.abortController as AbortController | null)?.signal;
           const invokeResult = await this.toolRegistry.invoke(call.name, call.args, {
             workspace: this.options.workspace,
             permissionManager: this.permissions,
+            ...(abortSignal ? { abortSignal } : {}),
           });
           this.messages.push({
             id: createId("tool"),

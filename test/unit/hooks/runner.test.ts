@@ -132,6 +132,33 @@ describe("runHooks · 阻塞语义", () => {
   });
 });
 
+describe("runHooks · E1 stderr sanitize", () => {
+  it("PreToolUse blocked → blockReason 剥 ANSI / 控制字符", async () => {
+    // stderr 含 ANSI 红色 + NUL + BS
+    const cfg: HookSettings = {
+      PreToolUse: [
+        {
+          hooks: [
+            {
+              type: "command",
+              command: 'printf "\\x1b[31mERROR\\x1b[0m\\x00\\x08 raw text\\n" >&2; exit 1',
+            },
+          ],
+        },
+      ],
+    };
+    const r = await runHooks(baseEvent, cfg);
+    expect(r.blocked).toBe(true);
+    // ANSI 转义被剥
+    expect(r.blockReason).not.toMatch(/\x1B\[/);
+    // 控制字符（NUL / BS）被替换为空格
+    expect(r.blockReason).not.toMatch(/[\x00-\x08\x0E-\x1F]/);
+    // 主要内容 'ERROR' + 'raw text' 仍可见
+    expect(r.blockReason).toMatch(/ERROR/);
+    expect(r.blockReason).toMatch(/raw text/);
+  });
+});
+
 describe("runHooks · timeout", () => {
   it("超时 → timedOut=true，ok=false，PreToolUse fail-open（spawn 错语义）", async () => {
     const cfg: HookSettings = {
