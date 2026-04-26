@@ -1570,7 +1570,11 @@ class LocalQueryEngine implements QueryEngine {
               delta: failureNote
             };
           }
-        } else if (!this.interrupted && !output && collectedToolCalls.length === 0) {
+        } else if (!this.interrupted && !contentBuf && collectedToolCalls.length === 0) {
+          // M1-F 修：判 contentBuf 而非 output —— output 在 LLM 全 reasoning 没 content 时
+          // 也会非空（generator yield 的 backward-compat 合并流含 reasoning fallback chunk），
+          // 用 !output 会漏掉"纯 reasoning 无实质答案"的边界 case，导致下面的 finalText
+          // 退化逻辑把 reasoning 蒙混当 answer。
           output = "Provider returned an empty response.";
           assistantMessageSource = "local";
           contentBuf = output;
@@ -1708,10 +1712,13 @@ class LocalQueryEngine implements QueryEngine {
       return;
     }
 
-    // M1-F：LLM 路径用 contentBuf（干净答案）；非 LLM 路径（slash / 本地工具）contentBuf 为空，
-    // 退化到 output（含命令回复 / 工具输出）。两路兼容。
+    // M1-F：LLM 路径用 contentBuf（干净答案）；非 LLM 路径（slash / 本地工具）走 output。
+    // 重要：LLM 路径不再 fallback 到 output —— output 含 generator yield 合并流（content
+    // 空时 fallback reasoning），如果 contentBuf 空就退化到 output 等于把 reasoning 当
+    // answer（ASK-060/078 baseline 回归根因）。empty-response 兜底已在上面把 contentBuf
+    // 填成友好串，这里直接用 contentBuf 即可。
     const isLlmPath = assistantMessageSource === "model";
-    const finalText = isLlmPath ? (contentBuf || output) : output;
+    const finalText = isLlmPath ? contentBuf : output;
     const finalReasoning = isLlmPath && reasoningBuf ? reasoningBuf : undefined;
     this.messages.push({
       id: messageId,
