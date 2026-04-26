@@ -117,6 +117,12 @@ export interface QueryEngineOptions {
   /** #86：成本预算（USD / token 双阈值）；不传走 env CODECLAW_BUDGET_*；都没则不检查 */
   budget?: import("../provider/budget").BudgetConfig;
   fetchImpl?: typeof fetch;
+  /**
+   * M3-01：可选注入 McpManager（已 start + initialized 完成）。
+   * 给入时 queryEngine 在 constructor 内自动 bridge tools 进 ToolRegistry，
+   * /mcp 命令也优先走 manager；不传则降级到 in-process service.ts（workspace-mcp）。
+   */
+  mcpManager?: import("../mcp/manager").McpManager;
   wechat?: {
     tokenFile?: string;
     baseUrl?: string;

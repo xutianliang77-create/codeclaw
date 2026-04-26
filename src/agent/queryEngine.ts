@@ -70,6 +70,7 @@ import { registerBuiltinTools } from "./tools/builtins";
 import { registerMemoryTools } from "./tools/memoryTools";
 import { clearAllMemories, writeMemory, type MemoryType } from "../memory/projectMemory/store";
 import { EXIT_PLAN_SENTINEL, registerPlanModeTool } from "./tools/planMode";
+import { bridgeMcpTools } from "../mcp/bridge";
 import { checkTokenBudget, estimateToolsSchemaTokens, warnIfBudgetExceeded } from "./tokenBudget";
 import { autoCompactIfNeeded } from "./autoCompact";
 import { detectLocalTool, inspectLocalTool, isHandledLocalToolResult, runLocalTool } from "../tools/local";
@@ -766,6 +767,11 @@ class LocalQueryEngine implements QueryEngine {
       // M2-03：ExitPlanMode tool（plan mode 必备）；env CODECLAW_PLAN_MODE_STRICT=false 显式关
       if (process.env.CODECLAW_PLAN_MODE_STRICT !== "false") {
         registerPlanModeTool(this.toolRegistry);
+      }
+      // M3-01：注入 mcpManager 时把 MCP server 工具桥接进 ToolRegistry，
+      // LLM 在 native tool_use 中可直接调 mcp__<server>__<tool>
+      if (options.mcpManager) {
+        bridgeMcpTools(options.mcpManager, this.toolRegistry);
       }
     }
     // #81：把 user skill manifest 的 commands[] 桥接到 slashRegistry
@@ -2466,14 +2472,26 @@ class LocalQueryEngine implements QueryEngine {
 
   private async handleMcpCommand(prompt: string): Promise<string> {
     const suffix = prompt.slice("/mcp".length).trim();
+    const manager = this.options.mcpManager;
+
     if (!suffix) {
-      const servers = await listMcpServers(this.options.workspace);
-      return [
+      // M3-01：mcpManager 注入时合并 spawn server + in-process workspace-mcp
+      const inProcServers = await listMcpServers(this.options.workspace);
+      const spawnServers = manager ? manager.listServers() : [];
+      const lines = [
         "MCP",
-        `servers: ${servers.length}`,
-        ...servers.map((server) => `- ${server.name} (${server.transport}, ${server.status}) tools=${server.toolCount} resources=${server.resourceCount}`),
-        "Commands: /mcp resources <server>, /mcp tools <server>, /mcp read <server> <resource>, /mcp call <server> <tool> <input>"
-      ].join("\n");
+        `servers: ${inProcServers.length + spawnServers.length}`,
+        ...inProcServers.map(
+          (s) => `- ${s.name} (${s.transport}, ${s.status}) tools=${s.toolCount} resources=${s.resourceCount}`
+        ),
+        ...spawnServers.map(
+          (s) =>
+            `- ${s.name} (stdio-spawn, ${s.status}) tools=${s.toolCount} restarts=${s.restartCount}` +
+            (s.lastError ? ` lastError=${s.lastError.slice(0, 80)}` : "")
+        ),
+        "Commands: /mcp resources <server>, /mcp tools <server>, /mcp read <server> <resource>, /mcp call <server> <tool> <input>",
+      ];
+      return lines.join("\n");
     }
 
     const [subcommand, ...rest] = suffix.split(/\s+/);
@@ -2489,6 +2507,15 @@ class LocalQueryEngine implements QueryEngine {
 
     if (subcommand === "tools") {
       const serverName = rest[0] ?? "workspace-mcp";
+      // M3-01：spawn server 优先；fallback in-process
+      if (manager?.hasServer(serverName)) {
+        const matching = manager.listAllTools().filter((t) => t.server === serverName);
+        return [
+          "MCP Tools",
+          `server: ${serverName} (stdio-spawn)`,
+          ...matching.map(({ tool }) => `- ${tool.name} ${tool.description ?? ""}`),
+        ].join("\n");
+      }
       const tools = listMcpTools(serverName);
       return [
         "MCP Tools",
@@ -2540,6 +2567,34 @@ class LocalQueryEngine implements QueryEngine {
         return decision.behavior === "ask"
           ? `MCP tool call requires approval in mode ${this.permissionMode}. Switch to /mode auto or /mode acceptEdits to execute.\nserver: ${serverName}\ntool: ${toolName}`
           : `MCP tool call blocked: ${decision.reason}`;
+      }
+
+      // M3-01：spawn server 优先；fallback in-process
+      if (manager?.hasServer(serverName)) {
+        try {
+          // input 是 CLI 字符串；尝试 JSON 解析，失败则当作 {input: <raw>} 透传
+          let args: unknown;
+          try {
+            args = input ? JSON.parse(input) : {};
+          } catch {
+            args = { input };
+          }
+          const result = await manager.callTool(serverName, toolName, args);
+          const text = result.content
+            .filter((c) => c?.type === "text" && typeof c.text === "string")
+            .map((c) => c.text as string)
+            .join("\n");
+          return [
+            "MCP Tool",
+            `server: ${serverName} (stdio-spawn)`,
+            `tool: ${toolName}`,
+            result.isError ? "[mcp tool reported error]" : "",
+            "",
+            text || "(empty content)",
+          ].filter((l) => l !== "").join("\n");
+        } catch (err) {
+          return `MCP tool call failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
       }
 
       const output = await callMcpTool(this.options.workspace, serverName, toolName, input);

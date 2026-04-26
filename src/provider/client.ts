@@ -561,7 +561,8 @@ async function* streamAnthropic(
   abortSignal?: AbortSignal,
   onUsage?: (usage: ProviderUsage) => void,
   tools?: ToolSchemaSpec[],
-  onToolCall?: (call: ToolCallEvent) => void
+  onToolCall?: (call: ToolCallEvent) => void,
+  onContent?: (chunk: string) => void
 ): AsyncGenerator<string> {
   const response = await fetchWithConnectTimeout(
     fetchImpl,
@@ -665,9 +666,13 @@ async function* streamAnthropic(
         }
       }
     }
-    return parsed.type === "content_block_delta" && parsed.delta?.type !== "input_json_delta"
-      ? parsed.delta?.text ?? ""
-      : "";
+    if (parsed.type === "content_block_delta" && parsed.delta?.type !== "input_json_delta") {
+      const text = parsed.delta?.text ?? "";
+      // M1-F：anthropic 也走 onContent 让 contentBuf 拿到内容（与 OpenAI / Ollama 对齐）
+      if (onContent && text) onContent(text);
+      return text;
+    }
+    return "";
   });
 }
 
@@ -676,7 +681,8 @@ async function* streamOllama(
   messages: EngineMessage[],
   fetchImpl: FetchLike,
   abortSignal?: AbortSignal,
-  onUsage?: (usage: ProviderUsage) => void
+  onUsage?: (usage: ProviderUsage) => void,
+  onContent?: (chunk: string) => void
 ): AsyncGenerator<string> {
   const response = await fetchWithConnectTimeout(
     fetchImpl,
@@ -725,7 +731,12 @@ async function* streamOllama(
           (parsed.prompt_eval_count ?? 0) + (parsed.eval_count ?? 0) || undefined,
       });
     }
-    return parsed.message?.content ?? "";
+    const text = parsed.message?.content ?? "";
+    // M1-F：让 ollama path 也走 onContent callback，与 OpenAI 流分离对齐；
+    // 否则 queryEngine.contentBuf 拿不到 ollama 内容，最终 finalText 会落到
+    // empty-response 兜底（只剩 generator yield 进 output 但 output 不再被采用）
+    if (onContent && text) onContent(text);
+    return text;
   });
 }
 
@@ -767,13 +778,21 @@ export async function* streamProviderResponse(
       options?.abortSignal,
       options?.onUsage,
       options?.tools,
-      options?.onToolCall
+      options?.onToolCall,
+      options?.onContent
     );
     return;
   }
 
   if (provider.type === "ollama") {
-    yield* streamOllama(provider, safeMessages, fetchImpl, options?.abortSignal, options?.onUsage);
+    yield* streamOllama(
+      provider,
+      safeMessages,
+      fetchImpl,
+      options?.abortSignal,
+      options?.onUsage,
+      options?.onContent,
+    );
     return;
   }
 

@@ -13,6 +13,8 @@ import { detectProviderCapabilities } from "./provider/capabilities";
 import { createOpenAiCompatibleSpeechTranscriber } from "./provider/speech";
 import { loadRuntimeSelection } from "./provider/registry";
 import { runPlainRepl } from "./repl/plain";
+import { McpManager } from "./mcp/manager";
+import { loadMcpConfig } from "./mcp/config";
 import { startGatewayServer } from "./sdk/httpServer";
 import { VERSION } from "./version";
 import { appendFileSync, mkdirSync } from "node:fs";
@@ -233,13 +235,28 @@ async function main(): Promise<void> {
         }
       })
     : undefined;
+  // M3-01：启动 MCP manager（spawn ~/.codeclaw/mcp.json 或项目级 .mcp.json 中的所有
+  // enabled server），失败 server 不阻塞主进程；找不到配置就是空 manager（无 spawn）
+  const workspace = runtime.config?.defaults.workspace ?? process.cwd();
+  const mcpManager = new McpManager();
+  try {
+    await mcpManager.start(loadMcpConfig(workspace));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`CodeClaw MCP manager startup failed (continuing without spawn servers): ${msg}`);
+  }
+  process.on("exit", () => {
+    void mcpManager.closeAll().catch(() => undefined);
+  });
+
   const queryEngine = createQueryEngine({
     currentProvider: runtime.selection?.current ?? null,
     fallbackProvider: runtime.selection?.fallback ?? null,
     permissionMode: runtime.config?.defaults.permissionMode ?? "plan",
-    workspace: runtime.config?.defaults.workspace ?? process.cwd(),
+    workspace,
     autoCompactThreshold: runtime.config?.memory.l1AutoCompactThreshold,
     approvalsDir: paths.approvalsDir,
+    mcpManager,
     wechat: {
       tokenFile: configuredWechatTokenFile,
       baseUrl: configuredWechatBaseUrl,
