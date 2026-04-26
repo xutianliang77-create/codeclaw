@@ -155,6 +155,17 @@ node dist/cli.js gateway --port 3000
 
 See [docs/HTTP_API.md](./docs/HTTP_API.md).
 
+## Documentation
+
+| | |
+|---|---|
+| [docs/INSTALL.md](./docs/INSTALL.md) | 安装、首次配置、各通道启动、环境变量速查、常见排错 |
+| [docs/USAGE.md](./docs/USAGE.md) | 用户视角 12 个工作流（陌生代码库 / 写代码 / 调 bug / refactor / MCP / Hooks / Status line 等） |
+| [docs/SLASH_COMMANDS.md](./docs/SLASH_COMMANDS.md) | 35 个 builtin slash 命令字典 + native tool 总览 + 存储位置 |
+| [docs/HTTP_API.md](./docs/HTTP_API.md) | gateway 子命令 HTTP API |
+| [docs/WECHAT_BOT.md](./docs/WECHAT_BOT.md) | WeChat iLink 集成（webhook + worker 双模式） |
+| [docs/LSP_SETUP.md](./docs/LSP_SETUP.md) | 真 multilspy LSP 后端可选安装 |
+
 ## Release Notes
 
 The first public release notes are in:
