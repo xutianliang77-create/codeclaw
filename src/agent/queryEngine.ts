@@ -57,6 +57,9 @@ import type { ProviderStatus } from "../provider/types";
 import { createSkillRegistry, createSkillRegistryFromDisk } from "../skills/registry";
 import type { SkillDefinition } from "../skills/registry";
 import { buildSystemPrompt } from "./systemPrompt";
+import { ToolRegistry, createToolRegistry } from "./tools/registry";
+import type { ToolCallEvent } from "./tools/registry";
+import { registerBuiltinTools } from "./tools/builtins";
 import { detectLocalTool, inspectLocalTool, isHandledLocalToolResult, runLocalTool } from "../tools/local";
 import type { LocalToolName } from "../tools/local";
 import type {
@@ -569,6 +572,8 @@ class LocalQueryEngine implements QueryEngine {
   // #86：成本预算配置（构造时从 options.budget ?? env 决定）
   private readonly budgetConfig: BudgetConfig;
   private readonly slashRegistry = new SlashRegistry();
+  // M1-B/B.2：native tool_use 注册表；env CODECLAW_NATIVE_TOOLS=true 时构造时注册 9 个 builtin
+  private readonly toolRegistry: ToolRegistry = createToolRegistry();
   private readonly fsm = new EngineFsm();
   private readonly auditLog: AuditLog | null;
   // L2 Session Memory：dataDb 句柄；channel/userId 都齐备时才启用 recall + 持久化
@@ -695,6 +700,10 @@ class LocalQueryEngine implements QueryEngine {
     // session A 的 save 不会删 B 的 pending。这是对"覆盖"风险与"recovery 可见性"的折中。
     this.pendingApprovals = loadPendingApprovals(options.approvalsDir);
     loadBuiltins(this.slashRegistry);
+    // M1-B/B.2：native tool_use opt-in 通过 env 启用；不设默认开启避免影响现有 baseline
+    if (process.env.CODECLAW_NATIVE_TOOLS === "true") {
+      registerBuiltinTools(this.toolRegistry);
+    }
     // #81：把 user skill manifest 的 commands[] 桥接到 slashRegistry
     // handler 行为 = 自动激活该 skill（等价 /skills use <name>）；冲突 builtin 时 skip
     for (const skill of this.skillRegistry.list()) {
@@ -835,7 +844,8 @@ class LocalQueryEngine implements QueryEngine {
 
     yield this.phaseEvent("executing");
 
-    const messageId = createId("msg");
+    // M1-B.2：multi-turn tool dispatch 期间需要为每个 assistant 回合换 id
+    let messageId = createId("msg");
     let output = "";
     let assistantMessageSource: EngineMessageSource = "local";
     const approveTargetId = parseApprovalCommand(trimmed, "/approve");
@@ -1269,158 +1279,232 @@ class LocalQueryEngine implements QueryEngine {
         (provider, index, list): provider is ProviderStatus =>
           provider !== null && list.findIndex((item) => item?.type === provider.type) === index
       );
+      // M1-B.2 multi-turn：每个 turn 一次 LLM streaming + 可选 tool 派发；MAX_TURNS 防无限循环
+      const MAX_TOOL_TURNS = 25;
+      let toolTurns = 0;
+      const hasNativeTools = this.toolRegistry.list().length > 0;
       let lastError: Error | null = null;
       let allowFallback = true;
-      let reactiveCompactTriggered = false;
-
-      while (true) {
+      multiTurn: while (true) {
+        let collectedToolCalls: ToolCallEvent[] = [];
+        let reactiveCompactTriggered = false;
         lastError = null;
         allowFallback = true;
-        this.abortController = new AbortController();
 
-        // #69：把 provider 重试 + fallback 编排交给 runWithProviderChain；
-        // 这里只关心：每次新 attempt 重置 token 计数 + 成功 attempt 写 llm_calls_raw。
-        let currentCall: {
-          provider: ProviderStatus;
-          startMs: number;
-          inputTokens: number;
-          outputTokens: number;
-          modelId?: string;
-        } | null = null;
+        while (true) {
+          lastError = null;
+          allowFallback = true;
+          this.abortController = new AbortController();
 
-        const chain = runWithProviderChain({
-          providers,
-          abortSignal: this.abortController.signal,
-          invoke: (provider) => {
-            currentCall = {
-              provider,
-              startMs: Date.now(),
-              inputTokens: 0,
-              outputTokens: 0,
-              modelId: provider.model,
-            };
-            return streamProviderResponse(provider, this.getProviderMessages(), {
-              fetchImpl: this.options.fetchImpl,
-              abortSignal: this.abortController!.signal,
-              onUsage: (usage) => {
-                // W3-05：累加真实 token 用量到 session
-                this.sessionInputTokens += usage.inputTokens ?? 0;
-                this.sessionOutputTokens += usage.outputTokens ?? 0;
-                this.lastProviderModelId = usage.modelId ?? this.lastProviderModelId;
-                if (currentCall) {
-                  currentCall.inputTokens = usage.inputTokens ?? currentCall.inputTokens;
-                  currentCall.outputTokens = usage.outputTokens ?? currentCall.outputTokens;
-                  currentCall.modelId = usage.modelId ?? currentCall.modelId;
-                }
-              },
-            });
-          },
-          onAttempt: (attempt) => {
-            // W3-17：成功 attempt → 写 llm_calls_raw（含 USD 估算）
-            if (
-              attempt.ok &&
-              currentCall &&
-              (currentCall.inputTokens > 0 || currentCall.outputTokens > 0)
-            ) {
-              recordCall(this.dataDb, {
-                traceId: this.sessionId,
-                sessionId: this.sessionId,
-                provider: currentCall.provider.type,
-                modelId: currentCall.modelId ?? currentCall.provider.model,
-                inputTokens: currentCall.inputTokens,
-                outputTokens: currentCall.outputTokens,
-                latencyMs: Date.now() - currentCall.startMs,
+          // #69：把 provider 重试 + fallback 编排交给 runWithProviderChain；
+          // 这里只关心：每次新 attempt 重置 token 计数 + 成功 attempt 写 llm_calls_raw。
+          let currentCall: {
+            provider: ProviderStatus;
+            startMs: number;
+            inputTokens: number;
+            outputTokens: number;
+            modelId?: string;
+          } | null = null;
+
+          const chain = runWithProviderChain({
+            providers,
+            abortSignal: this.abortController.signal,
+            invoke: (provider) => {
+              currentCall = {
+                provider,
+                startMs: Date.now(),
+                inputTokens: 0,
+                outputTokens: 0,
+                modelId: provider.model,
+              };
+              return streamProviderResponse(provider, this.getProviderMessages(), {
+                fetchImpl: this.options.fetchImpl,
+                abortSignal: this.abortController!.signal,
+                onUsage: (usage) => {
+                  // W3-05：累加真实 token 用量到 session
+                  this.sessionInputTokens += usage.inputTokens ?? 0;
+                  this.sessionOutputTokens += usage.outputTokens ?? 0;
+                  this.lastProviderModelId = usage.modelId ?? this.lastProviderModelId;
+                  if (currentCall) {
+                    currentCall.inputTokens = usage.inputTokens ?? currentCall.inputTokens;
+                    currentCall.outputTokens = usage.outputTokens ?? currentCall.outputTokens;
+                    currentCall.modelId = usage.modelId ?? currentCall.modelId;
+                  }
+                },
+                // M1-B.2：注入 tools schema + 收集 LLM 发起的 tool_call
+                tools: hasNativeTools
+                  ? this.toolRegistry.list().map((t) => ({
+                      name: t.name,
+                      description: t.description,
+                      inputSchema: t.inputSchema,
+                    }))
+                  : undefined,
+                onToolCall: hasNativeTools
+                  ? (call) => collectedToolCalls.push(call)
+                  : undefined,
               });
-            }
-          },
-        });
+            },
+            onAttempt: (attempt) => {
+              // W3-17：成功 attempt → 写 llm_calls_raw（含 USD 估算）
+              if (
+                attempt.ok &&
+                currentCall &&
+                (currentCall.inputTokens > 0 || currentCall.outputTokens > 0)
+              ) {
+                recordCall(this.dataDb, {
+                  traceId: this.sessionId,
+                  sessionId: this.sessionId,
+                  provider: currentCall.provider.type,
+                  modelId: currentCall.modelId ?? currentCall.provider.model,
+                  inputTokens: currentCall.inputTokens,
+                  outputTokens: currentCall.outputTokens,
+                  latencyMs: Date.now() - currentCall.startMs,
+                });
+              }
+            },
+          });
 
-        let chainResult: RunChainResult | undefined;
-        let producedAny = false;
-        try {
-          while (true) {
-            const next = await chain.next();
-            if (next.done) {
-              chainResult = next.value;
-              break;
+          let chainResult: RunChainResult | undefined;
+          let producedAny = false;
+          try {
+            while (true) {
+              const next = await chain.next();
+              if (next.done) {
+                chainResult = next.value;
+                break;
+              }
+              producedAny = true;
+              output += next.value;
+              yield {
+                type: "message-delta",
+                messageId,
+                delta: next.value,
+              };
             }
-            producedAny = true;
-            output += next.value;
+          } catch (error) {
+            // chain 仅会向上抛 AbortError；其余 provider 错都被 chain 收编进 chainResult
+            if ((error as Error).name === "AbortError") {
+              this.interrupted = true;
+            } else {
+              throw error;
+            }
+          } finally {
+            this.abortController = null;
+          }
+
+          if (this.interrupted) {
+            break;
+          }
+
+          if (chainResult?.ok) {
+            lastError = null;
+            break;
+          }
+
+          lastError = chainResult?.lastError ?? null;
+          // 已 yield 过 chunk → outer 也不该再 retry（避免重叠）
+          allowFallback = !producedAny;
+          if (producedAny) break;
+
+          if (
+            !output &&
+            lastError &&
+            !reactiveCompactTriggered &&
+            this.shouldReactiveCompact(lastError)
+          ) {
+            const reactiveCompactResult = this.performCompact(DEFAULT_COMPACT_KEEP_RECENT_MESSAGES);
+            if (reactiveCompactResult) {
+              reactiveCompactTriggered = true;
+              this.reactiveCompactCount += 1;
+              yield this.phaseEvent("compacting");
+              continue;
+            }
+          }
+
+          break;
+        }
+
+        if (!this.interrupted && lastError) {
+          if (!output) {
+            output = this.buildProviderFailureMessage(lastError);
+            assistantMessageSource = "local";
             yield {
               type: "message-delta",
               messageId,
-              delta: next.value,
+              delta: output
+            };
+          } else if (!allowFallback) {
+            const failureNote = `\n[stream interrupted: ${lastError.message}]`;
+            output += failureNote;
+            yield {
+              type: "message-delta",
+              messageId,
+              delta: failureNote
             };
           }
-        } catch (error) {
-          // chain 仅会向上抛 AbortError；其余 provider 错都被 chain 收编进 chainResult
-          if ((error as Error).name === "AbortError") {
-            this.interrupted = true;
-          } else {
-            throw error;
-          }
-        } finally {
-          this.abortController = null;
-        }
-
-        if (this.interrupted) {
-          break;
-        }
-
-        if (chainResult?.ok) {
-          lastError = null;
-          break;
-        }
-
-        lastError = chainResult?.lastError ?? null;
-        // 已 yield 过 chunk → outer 也不该再 retry（避免重叠）
-        allowFallback = !producedAny;
-        if (producedAny) break;
-
-        if (
-          !output &&
-          lastError &&
-          !reactiveCompactTriggered &&
-          this.shouldReactiveCompact(lastError)
-        ) {
-          const reactiveCompactResult = this.performCompact(DEFAULT_COMPACT_KEEP_RECENT_MESSAGES);
-          if (reactiveCompactResult) {
-            reactiveCompactTriggered = true;
-            this.reactiveCompactCount += 1;
-            yield this.phaseEvent("compacting");
-            continue;
-          }
-        }
-
-        break;
-      }
-
-      if (!this.interrupted && lastError) {
-        if (!output) {
-          output = this.buildProviderFailureMessage(lastError);
+        } else if (!this.interrupted && !output && collectedToolCalls.length === 0) {
+          output = "Provider returned an empty response.";
           assistantMessageSource = "local";
           yield {
             type: "message-delta",
             messageId,
             delta: output
           };
-        } else if (!allowFallback) {
-          const failureNote = `\n[stream interrupted: ${lastError.message}]`;
-          output += failureNote;
+        }
+
+        // M1-B.2：multi-turn 出口判定 — 没工具 / 已中断 / 已超 turn 上限 / 有错 → 跳出
+        if (
+          !hasNativeTools ||
+          collectedToolCalls.length === 0 ||
+          this.interrupted ||
+          lastError ||
+          toolTurns >= MAX_TOOL_TURNS
+        ) {
+          break multiTurn;
+        }
+
+        // M1-B.2：本回合 LLM 要求调工具 — push 当前 assistant 消息（含 toolCalls 字段）+
+        // 串行 invoke 工具 + push role:"tool" 消息 + 重置 messageId/output 进入下一轮
+        this.messages.push({
+          id: messageId,
+          role: "assistant",
+          text: output,
+          source: assistantMessageSource,
+          toolCalls: collectedToolCalls.map((c) => ({ id: c.id, name: c.name, args: c.args })),
+        });
+        this.notifyListeners();
+        yield { type: "message-complete", messageId, text: output };
+
+        for (const call of collectedToolCalls) {
+          const detailPreview = JSON.stringify(call.args ?? {}).slice(0, 100);
+          yield { type: "tool-start", toolName: call.name, detail: detailPreview };
+          // tool runner 暂未消费 abortSignal；这里传 undefined 即可（abortController 已被 stream 路径置空）
+          const invokeResult = await this.toolRegistry.invoke(call.name, call.args, {
+            workspace: this.options.workspace,
+            permissionManager: this.permissions,
+          });
+          this.messages.push({
+            id: createId("tool"),
+            role: "tool",
+            text: invokeResult.content,
+            source: "local",
+            toolCallId: call.id,
+            toolName: call.name,
+          });
+          this.notifyListeners();
           yield {
-            type: "message-delta",
-            messageId,
-            delta: failureNote
+            type: "tool-end",
+            toolName: call.name,
+            status: invokeResult.ok ? "completed" : "failed",
           };
         }
-      } else if (!this.interrupted && !output) {
-        output = "Provider returned an empty response.";
-        assistantMessageSource = "local";
-        yield {
-          type: "message-delta",
-          messageId,
-          delta: output
-        };
+
+        // 准备下一轮 assistant 流：新 messageId、清空 output；message-start 事件让上层 UI 拉新条
+        output = "";
+        assistantMessageSource = "model";
+        messageId = createId("msg");
+        yield { type: "message-start", messageId, role: "assistant" };
+        toolTurns += 1;
       }
     }
 
@@ -2786,6 +2870,11 @@ class LocalQueryEngine implements QueryEngine {
 
       if (message.role === "assistant") {
         return message.source === "model" || message.source === "summary";
+      }
+
+      // M1-B.2：role:"tool" 消息也保留，作为下一轮 LLM 上下文（含 toolCallId）
+      if (message.role === "tool") {
+        return true;
       }
 
       return false;
