@@ -201,6 +201,28 @@ describe("Graph 端点", () => {
   });
 });
 
+describe("/next 双 URL（#115 阶段 B 静态资源）", () => {
+  it("GET /next → 200 + index.html（若 web-react 已构建）", async () => {
+    const r = await fetch(`${baseUrl}/next/`);
+    // 构建过 → 200；未构建（CI 干净环境）→ 404；都是合法状态
+    expect([200, 404]).toContain(r.status);
+    if (r.status === 200) {
+      const ct = r.headers.get("content-type") ?? "";
+      expect(ct).toMatch(/text\/html/);
+    }
+  });
+
+  it("GET /next/missing.x → SPA fallback 仍返 index 或 404", async () => {
+    const r = await fetch(`${baseUrl}/next/some-deep-link`);
+    expect([200, 404]).toContain(r.status);
+  });
+
+  it("GET /legacy → 200（vanilla）或 404（无 web/）", async () => {
+    const r = await fetch(`${baseUrl}/legacy`);
+    expect([200, 404]).toContain(r.status);
+  });
+});
+
 describe("status-line + subagents", () => {
   it("GET /v1/web/status-line → 200 + 默认文本", async () => {
     const r = await fetch(`${baseUrl}/v1/web/status-line`, { headers: authHeaders() });

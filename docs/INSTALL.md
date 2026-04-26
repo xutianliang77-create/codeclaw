@@ -164,6 +164,16 @@ SIGHUP 信号会同步到所有 active web session，等价于 ink CLI 的热重
 阶段 A 暴露的 panel：Chat / RAG / Graph / MCP / Hooks 共 5 个；多会话侧栏；状态栏 5s 轮询。
 完整使用见 [USAGE.md §10 Web 段](./USAGE.md)。
 
+#115 阶段 B 起 `codeclaw web` 同时提供两条 URL：
+
+| URL | 实现 |
+|---|---|
+| `http://127.0.0.1:7180/` 或 `/legacy` | vanilla JS SPA（阶段 A · 上线已稳定） |
+| `http://127.0.0.1:7180/next` | React + Vite 重写版（阶段 B · 开发中） |
+
+`/next` 需要先在仓库根 `cd web-react && npm install && npm run build`（一次性），后续 `bun run build`
+会自动把 `web-react/dist` 拷到 `dist/public-react/`；未构建时 `/next` 返 404，不影响 `/legacy`。
+
 ### 5.5 WeChat（iLink）
 
 需要先获取 iLink token 文件：

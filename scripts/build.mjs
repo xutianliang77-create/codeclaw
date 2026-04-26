@@ -41,4 +41,14 @@ await cp(
 // 生产构建拷贝到 dist/public 让 codeclaw web 命令直接 serve。
 await cp(path.join(rootDir, "web"), path.join(outDir, "public"), { recursive: true });
 
-console.log("Built dist/cli.js + copied migrations/ + web → dist/public/");
+// #115 阶段 B：React 版若已 build 过，拷到 dist/public-react；未构建时跳过（不强求）。
+import { existsSync as _existsSync } from "node:fs";
+const reactDist = path.join(rootDir, "web-react", "dist");
+if (_existsSync(reactDist)) {
+  await cp(reactDist, path.join(outDir, "public-react"), { recursive: true });
+  console.log("Built dist/cli.js + copied migrations/ + web → dist/public/ + web-react → dist/public-react/");
+} else {
+  console.log(
+    "Built dist/cli.js + copied migrations/ + web → dist/public/ (web-react/dist not present, skipped)"
+  );
+}

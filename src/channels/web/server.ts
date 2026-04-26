@@ -100,6 +100,19 @@ function defaultStaticRoot(): string {
   return path.resolve(here, "../../../web");
 }
 
+/**
+ * #115 阶段 B：返回 React 版静态根（dist/public-react 或开发期 web-react/dist）。
+ * 不存在时返 null —— /next 路由 fallthrough 给 404。
+ */
+function reactStaticRoot(): string | null {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const fromDist = path.resolve(here, "public-react");
+  if (existsSync(fromDist)) return fromDist;
+  const fromDev = path.resolve(here, "../../../web-react/dist");
+  if (existsSync(fromDev)) return fromDev;
+  return null;
+}
+
 function serveStaticFile(
   res: ServerResponse,
   staticRoot: string,
@@ -258,12 +271,28 @@ async function dispatch(
 
   // 静态文件
   if (method === "GET" && staticRoot) {
-    if (url.pathname === "/") {
+    if (url.pathname === "/" || url.pathname === "/legacy" || url.pathname === "/legacy/") {
       if (serveStaticFile(res, staticRoot, "index.html")) return;
     }
     const staticMatch = /^\/static\/(.+)$/.exec(url.pathname);
     if (staticMatch) {
       if (serveStaticFile(res, staticRoot, staticMatch[1])) return;
+    }
+  }
+
+  // #115 阶段 B：/next 双 URL 共存；React 版从 dist/public-react 或 dev web-react/dist
+  if (method === "GET") {
+    const reactRoot = reactStaticRoot();
+    if (reactRoot) {
+      if (url.pathname === "/next" || url.pathname === "/next/") {
+        if (serveStaticFile(res, reactRoot, "index.html")) return;
+      }
+      const nextMatch = /^\/next\/(.+)$/.exec(url.pathname);
+      if (nextMatch) {
+        if (serveStaticFile(res, reactRoot, nextMatch[1])) return;
+        // SPA fallback：让 React Router 处理深链（阶段 B 暂未引入 router，仅返 index.html）
+        if (serveStaticFile(res, reactRoot, "index.html")) return;
+      }
     }
   }
   // 静态根禁用 / 文件不存在时给 / 一个占位（保留以前 server.test 兼容）

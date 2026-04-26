@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --cc-bg: #ffffff;
+  --cc-fg: #1f2328;
+  --cc-muted: #6e7781;
+  --cc-border: #d0d7de;
+  --cc-accent: #4a9cff;
+  --cc-danger: #c83b3b;
+  --cc-ok: #2da94f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --cc-bg: #0e1117;
+    --cc-fg: #e6e8eb;
+    --cc-muted: #8b95a5;
+    --cc-border: #2c333d;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+}
+
+@layer components {
+  .btn-primary {
+    @apply px-3 py-1.5 bg-accent text-white rounded text-sm border border-accent disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply px-3 py-1 text-sm border border-border bg-bg text-fg rounded hover:opacity-90 disabled:opacity-50;
+  }
+  .btn-tertiary {
+    @apply px-2 py-0.5 text-xs border border-border bg-bg text-fg rounded;
+  }
+}
