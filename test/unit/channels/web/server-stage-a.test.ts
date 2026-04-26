@@ -201,6 +201,21 @@ describe("Graph 端点", () => {
   });
 });
 
+describe("?token= query 鉴权 fallback（#115 SSE 适配）", () => {
+  it("query token 正确 → 200", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/status-line?token=${encodeURIComponent(TOKEN)}`);
+    expect(r.status).toBe(200);
+  });
+  it("query token 错误 → 401", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/status-line?token=wrong`);
+    expect(r.status).toBe(401);
+  });
+  it("query 与 header 都缺 → 401", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/status-line`);
+    expect(r.status).toBe(401);
+  });
+});
+
 describe("/next 双 URL（#115 阶段 B 静态资源）", () => {
   it("GET /next → 200 + index.html（若 web-react 已构建）", async () => {
     const r = await fetch(`${baseUrl}/next/`);

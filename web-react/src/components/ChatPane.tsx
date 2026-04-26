@@ -1,72 +1,139 @@
 /**
- * Chat 面板（B.4 占位实现）
+ * ChatPane · 虚拟滚动 + 流式 markdown + tool 折叠（B.4 完整版）
  *
- * 阶段 B.4 完整版要求：虚拟滚动 + markdown + tool-call 折叠 + diff 视图。
- * 本文件先提供最小可用 stub：列消息 + 发送 + SSE 监听。
- * 等做到 B.4 step 时再换 react-virtual + react-markdown。
+ * - @tanstack/react-virtual 处理 N≥10K message 流畅
+ * - SSE 流：message-start / message-delta / message-complete / tool-start / tool-end
+ * - 自动滚到底部除非用户上滚（lastScrollFromBottom < 80px 才贴底）
  */
 
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useSessionsStore } from "@/store/sessions";
+import { useMessagesStore } from "@/store/messages";
+import { useAuthStore } from "@/store/auth";
 import { sendMessage } from "@/api/endpoints";
-import { openEventSource } from "@/api/client";
-
-interface Message {
-  id: string;
-  role: "user" | "assistant" | "system" | "error";
-  text: string;
-}
+import MessageBubble from "./MessageBubble";
 
 interface Props {
   onError(msg: string | null): void;
 }
 
+const STICK_THRESHOLD_PX = 80;
+
 export default function ChatPane({ onError }: Props) {
   const { activeId } = useSessionsStore();
-  const [messages, setMessages] = useState<Message[]>([]);
+  const { token } = useAuthStore();
+  const msgs = useMessagesStore((s) => (activeId ? s.bySession.get(activeId) ?? [] : []));
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const sseRef = useRef<EventSource | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const stickToBottomRef = useRef(true);
+
+  // 暴露 setInput 给 CommandPalette（B.9）
+  useEffect(() => {
+    window.codeclawComposer = {
+      setInput: (text) => setInput(text),
+      focus: () => inputRef.current?.focus(),
+    };
+    return () => {
+      delete window.codeclawComposer;
+    };
+  }, []);
+
+  const rowVirtualizer = useVirtualizer({
+    count: msgs.length,
+    getScrollElement: () => containerRef.current,
+    estimateSize: () => 80,
+    overscan: 8,
+    measureElement: (el) => el.getBoundingClientRect().height,
+  });
+
+  // 自动贴底：用户上滚 80px+ 暂停贴底；回到底则恢复
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    function onScroll() {
+      if (!el) return;
+      const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      stickToBottomRef.current = fromBottom < STICK_THRESHOLD_PX;
+    }
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
 
   useEffect(() => {
-    if (!activeId) return;
-    setMessages([]);
+    if (stickToBottomRef.current && msgs.length > 0) {
+      rowVirtualizer.scrollToIndex(msgs.length - 1, { align: "end" });
+    }
+  }, [msgs.length, rowVirtualizer]);
+
+  // SSE 订阅：activeId 变化时重连
+  useEffect(() => {
+    if (!activeId || !token) return;
     sseRef.current?.close();
-    const es = openEventSource(`/v1/web/stream?sessionId=${encodeURIComponent(activeId)}`);
+    // EventSource 不支持自定义 header → 用 query token；后端阶段 B 后续接受 ?token
+    // 阶段 A 后端仍读 Authorization → 先尝试，401 时报错给前端
+    const url = `/v1/web/stream?sessionId=${encodeURIComponent(activeId)}&token=${encodeURIComponent(token)}`;
+    const es = new EventSource(url);
     sseRef.current = es;
+    const store = useMessagesStore.getState();
+
+    let currentStreamingId: string | null = null;
+
     es.addEventListener("message", (ev) => {
       try {
         const data = JSON.parse((ev as MessageEvent).data);
-        if (data?.type === "message-complete") {
-          setMessages((prev) => [
-            ...prev,
-            { id: data.messageId ?? crypto.randomUUID(), role: "assistant", text: data.text },
-          ]);
+        switch (data?.type) {
+          case "message-start":
+            currentStreamingId = data.messageId;
+            store.startAssistant(activeId, data.messageId);
+            break;
+          case "message-delta":
+            if (currentStreamingId) store.appendDelta(activeId, currentStreamingId, data.delta);
+            break;
+          case "message-complete":
+            store.completeAssistant(activeId, data.messageId, data.text);
+            currentStreamingId = null;
+            break;
+          case "tool-start":
+            store.appendTool(activeId, data.toolName, "running", data.detail);
+            break;
+          case "tool-end":
+            store.appendTool(activeId, data.toolName, data.status, data.detail);
+            break;
+          default:
+            // phase / approval-* 暂不展示
+            break;
         }
       } catch {
-        // 忽略 ping 心跳等非 JSON 行
+        // 心跳 / 非 JSON 行忽略
       }
     });
     es.addEventListener("error", () => {
-      // 401（最常见）或网络断；阶段 B 后续做带 token 的 SSE 适配
-      onError("SSE 连接失败（EventSource 不支持 Authorization 头，等 server ?token 适配）");
+      // 401（最常见，token 走 query 时后端尚未支持）；阶段 B 后端补丁后消失
+      onError(
+        "SSE 连接出错（如 401，需后端接受 ?token query；当前 build 仍读 Authorization）"
+      );
     });
     return () => {
       es.close();
       sseRef.current = null;
     };
-  }, [activeId, onError]);
+  }, [activeId, token, onError]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!activeId || !input.trim() || busy) return;
     const text = input.trim();
-    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "user", text }]);
+    useMessagesStore.getState().appendUser(activeId, text);
     setInput("");
     setBusy(true);
     try {
       await sendMessage(activeId, text);
     } catch (err) {
+      useMessagesStore.getState().appendError(activeId, `[发送失败] ${(err as Error).message}`);
       onError(`发送失败：${(err as Error).message}`);
     } finally {
       setBusy(false);
@@ -74,36 +141,46 @@ export default function ChatPane({ onError }: Props) {
   }
 
   if (!activeId) {
-    return (
-      <div className="p-6 text-muted text-sm">请在左侧选择或新建一个 session。</div>
-    );
+    return <div className="p-6 text-muted text-sm">请在左侧选择或新建一个 session。</div>;
   }
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto p-4 space-y-2">
-        {messages.map((m) => (
-          <div
-            key={m.id}
-            className={
-              "rounded px-3 py-2 text-sm whitespace-pre-wrap " +
-              (m.role === "user"
-                ? "bg-accent/10 self-end max-w-[80%]"
-                : m.role === "error"
-                  ? "bg-danger/10 text-danger"
-                  : "bg-bg/60 max-w-[90%]")
-            }
-          >
-            <span className="text-xs text-muted block mb-0.5">{m.role}</span>
-            {m.text}
-          </div>
-        ))}
-        {messages.length === 0 && (
-          <div className="text-muted text-sm">输入消息开始（B.4 加 markdown / 流式）。</div>
+      <div ref={containerRef} className="flex-1 overflow-y-auto px-4 py-3 min-h-0">
+        <div
+          style={{
+            height: `${rowVirtualizer.getTotalSize()}px`,
+            position: "relative",
+          }}
+        >
+          {rowVirtualizer.getVirtualItems().map((vi) => {
+            const m = msgs[vi.index];
+            return (
+              <div
+                key={m.id}
+                ref={rowVirtualizer.measureElement}
+                data-index={vi.index}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  transform: `translateY(${vi.start}px)`,
+                  paddingBottom: 8,
+                }}
+              >
+                <MessageBubble msg={m} />
+              </div>
+            );
+          })}
+        </div>
+        {msgs.length === 0 && (
+          <div className="text-muted text-sm">输入消息开始（含 markdown / 代码块 / 流式光标）。</div>
         )}
       </div>
       <form onSubmit={submit} className="border-t border-border p-3 flex gap-2">
         <textarea
+          ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           rows={2}

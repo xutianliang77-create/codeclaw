@@ -13,6 +13,8 @@ export default defineConfig({
       "**/node_modules/**",
       "**/dist/**",
       "test/golden/fix/**",
+      // web-react/ 是独立 npm 子包，自带 vitest + 路径别名；主仓 vitest 不应跑
+      "web-react/**",
     ],
   },
 });

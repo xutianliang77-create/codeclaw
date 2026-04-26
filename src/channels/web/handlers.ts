@@ -80,18 +80,36 @@ function defaultDeriveUserId(token: string): string {
   return `web-${token.slice(0, 8)}`;
 }
 
-/** 校验 Authorization 头并解出 userId；失败时调 unauthorized 并返回 null */
+/**
+ * 校验 Authorization 头并解出 userId；失败时调 unauthorized 并返回 null。
+ *
+ * #115 SSE 适配：浏览器 EventSource 无法设 header → 同时接受 `?token=` query
+ * 作为 fallback。注意 query token 会进 access log；前端只在 SSE / 静态深链路径用。
+ */
 function authenticate(
   req: IncomingMessage,
   res: ServerResponse,
   deps: HandlerDeps
 ): { userId: string; token: string } | null {
-  const auth = req.headers["authorization"];
-  if (!validateBearer(typeof auth === "string" ? auth : undefined, deps.auth.bearerToken)) {
+  const authHeader = req.headers["authorization"];
+  let token: string | null = null;
+  if (typeof authHeader === "string" && validateBearer(authHeader, deps.auth.bearerToken)) {
+    token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  } else if (req.url) {
+    try {
+      const url = new URL(req.url, "http://internal");
+      const q = url.searchParams.get("token");
+      if (q && validateBearer(`Bearer ${q}`, deps.auth.bearerToken)) {
+        token = q;
+      }
+    } catch {
+      // URL parse 失败 → 走 401
+    }
+  }
+  if (!token) {
     unauthorized(res);
     return null;
   }
-  const token = (auth as string).replace(/^Bearer\s+/i, "").trim();
   const userId = (deps.deriveUserId ?? defaultDeriveUserId)(token);
   return { userId, token };
 }

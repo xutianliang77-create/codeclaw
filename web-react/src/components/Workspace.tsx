@@ -7,6 +7,7 @@ import Header from "./Header";
 import SessionsList from "./SessionsList";
 import StatusLine from "./StatusLine";
 import ChatPane from "./ChatPane";
+import CommandPalette from "./CommandPalette";
 import RagPanel from "./panels/RagPanel";
 import GraphPanel from "./panels/GraphPanel";
 import McpPanel from "./panels/McpPanel";
@@ -31,6 +32,13 @@ export default function Workspace({ onError }: Props) {
 
   return (
     <div className="h-full flex flex-col">
+      <CommandPalette
+        onPick={(entry) => {
+          // 选中后切到 chat tab，便于看到 composer
+          setTab("chat");
+          console.info("[palette] picked", entry.name);
+        }}
+      />
       <Header />
       <nav className="flex gap-1 px-4 pt-2 border-b border-border">
         {TABS.map((t) => (
