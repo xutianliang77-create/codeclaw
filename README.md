@@ -14,7 +14,7 @@ It currently includes:
 
 ## Status
 
-This repository is currently at `v0.5.0`.
+This repository is currently at `v0.6.0`.
 
 What is already delivered:
 
@@ -22,6 +22,11 @@ What is already delivered:
 - Phase 1.5: real LSP bridge with fallback index
 - Phase 2: planner / executor / reflector, MCP, skills, remaining commands
 - Phase 3.5: WeChat bot login, webhook mode, worker mode, approval / resume flow
+- **v0.6.0** (this release):
+  - Cron 阶段 🅑：内置定时任务 (slash / prompt / shell)，3 通道 notify (cli / web / wechat)，sqlite 历史，5 任务模板
+  - Web Stage A：13 后端 endpoint + 5 vanilla SPA panel + 多会话侧栏 + 状态栏
+  - Web Stage B：`/next` URL 上的 React + Vite 重写（虚拟滚动 / 流式 markdown / d3-force / ⌘K palette / Monaco viewer / 主题切换）
+  - Subagent SSE 真实推送（替代 polling）
 
 What is still intentionally limited:
 
@@ -29,6 +34,7 @@ What is still intentionally limited:
 - MCP is still minimal and in-process
 - TUI Chinese IME support is weaker than `--plain`
 - WeChat rich media support is not done yet
+- Cron DAG / 失败重试 / 跨机调度 (阶段 🅒) 未做
 
 ## Requirements
 
@@ -170,7 +176,8 @@ See [docs/HTTP_API.md](./docs/HTTP_API.md).
 
 The first public release notes are in:
 
-- [docs/RELEASE_v0.5.0.md](./docs/RELEASE_v0.5.0.md)
+- [docs/RELEASE_v0.6.0.md](./docs/RELEASE_v0.6.0.md) — current
+- [docs/RELEASE_v0.5.0.md](./docs/RELEASE_v0.5.0.md) — first public release
 
 ## License
 
