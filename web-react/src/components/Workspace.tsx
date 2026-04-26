@@ -8,12 +8,14 @@ import SessionsList from "./SessionsList";
 import StatusLine from "./StatusLine";
 import ChatPane from "./ChatPane";
 import CommandPalette from "./CommandPalette";
+import SubagentTree from "./SubagentTree";
 import RagPanel from "./panels/RagPanel";
 import GraphPanel from "./panels/GraphPanel";
 import McpPanel from "./panels/McpPanel";
 import HooksPanel from "./panels/HooksPanel";
+import { useSessionsStore } from "@/store/sessions";
 
-type TabId = "chat" | "rag" | "graph" | "mcp" | "hooks";
+type TabId = "chat" | "rag" | "graph" | "mcp" | "hooks" | "subagents";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "chat", label: "Chat" },
@@ -21,6 +23,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "graph", label: "Graph" },
   { id: "mcp", label: "MCP" },
   { id: "hooks", label: "Hooks" },
+  { id: "subagents", label: "Subagents" },
 ];
 
 interface Props {
@@ -29,6 +32,7 @@ interface Props {
 
 export default function Workspace({ onError }: Props) {
   const [tab, setTab] = useState<TabId>("chat");
+  const activeId = useSessionsStore((s) => s.activeId);
 
   return (
     <div className="h-full flex flex-col">
@@ -64,6 +68,11 @@ export default function Workspace({ onError }: Props) {
           {tab === "graph" && <GraphPanel onError={onError} />}
           {tab === "mcp" && <McpPanel onError={onError} />}
           {tab === "hooks" && <HooksPanel onError={onError} />}
+          {tab === "subagents" && (
+            <div className="p-4 overflow-y-auto">
+              <SubagentTree sessionId={activeId} />
+            </div>
+          )}
         </main>
       </div>
       <StatusLine />

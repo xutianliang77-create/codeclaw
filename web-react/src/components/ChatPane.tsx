@@ -10,9 +10,11 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useSessionsStore } from "@/store/sessions";
 import { useMessagesStore } from "@/store/messages";
+import { useApprovalsStore } from "@/store/approvals";
 import { useAuthStore } from "@/store/auth";
 import { sendMessage } from "@/api/endpoints";
 import MessageBubble from "./MessageBubble";
+import ApprovalCard from "./ApprovalCard";
 
 interface Props {
   onError(msg: string | null): void;
@@ -24,6 +26,7 @@ export default function ChatPane({ onError }: Props) {
   const { activeId } = useSessionsStore();
   const { token } = useAuthStore();
   const msgs = useMessagesStore((s) => (activeId ? s.bySession.get(activeId) ?? [] : []));
+  const approval = useApprovalsStore((s) => (activeId ? s.bySession.get(activeId) ?? null : null));
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const sseRef = useRef<EventSource | null>(null);
@@ -103,8 +106,21 @@ export default function ChatPane({ onError }: Props) {
           case "tool-end":
             store.appendTool(activeId, data.toolName, data.status, data.detail);
             break;
+          case "approval-request":
+            useApprovalsStore.getState().set(activeId, {
+              id: data.approvalId,
+              toolName: data.toolName,
+              detail: data.detail ?? "",
+              reason: data.reason ?? "",
+              queuePosition: data.queuePosition ?? 1,
+              totalPending: data.totalPending ?? 1,
+            });
+            break;
+          case "approval-cleared":
+            useApprovalsStore.getState().clear(activeId);
+            break;
           default:
-            // phase / approval-* 暂不展示
+            // phase / 其它子事件先不渲染
             break;
         }
       } catch {
@@ -146,6 +162,9 @@ export default function ChatPane({ onError }: Props) {
 
   return (
     <div className="flex flex-col h-full">
+      {approval && activeId && (
+        <ApprovalCard sessionId={activeId} approval={approval} onError={onError} />
+      )}
       <div ref={containerRef} className="flex-1 overflow-y-auto px-4 py-3 min-h-0">
         <div
           style={{
