@@ -3,7 +3,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { clearPendingApprovals, loadPendingApprovals, savePendingApprovals } from "../approvals/store";
 import type { StoredPendingApproval } from "../approvals/store";
-import { runDoctor } from "../commands/doctor";
 import type { PermissionMode } from "../lib/config";
 import { sanitizeForDisplay } from "../lib/displaySafe";
 import { callMcpTool, listMcpResources, listMcpServers, listMcpTools, readMcpResource } from "../mcp/service";
@@ -55,7 +54,7 @@ import { recordCall, summarizeBySession, summarizeToday, formatUsd } from "../pr
 import { evaluateBudget, formatBudgetConfig, readBudgetFromEnv, type BudgetConfig } from "../provider/budget";
 import { detectProviderCapabilities } from "../provider/capabilities";
 import type { ProviderStatus } from "../provider/types";
-import { createSkillRegistry, createSkillRegistryFromDisk } from "../skills/registry";
+import { createSkillRegistryFromDisk } from "../skills/registry";
 import type { SkillDefinition } from "../skills/registry";
 import { buildSystemPrompt } from "./systemPrompt";
 import {
@@ -1063,7 +1062,7 @@ class LocalQueryEngine implements QueryEngine {
     let reasoningBuf = "";
     const approveTargetId = parseApprovalCommand(trimmed, "/approve");
     let denyTargetId = parseApprovalCommand(trimmed, "/deny");
-    let approveTargetIdMutable = approveTargetId;
+    const approveTargetIdMutable = approveTargetId;
     void approveTargetIdMutable; // 占位避免 unused 警告（rewrite 路径不影响 approve/deny）
     // P0 W2 · ADR-003：新注册表前置于旧 resolveBuiltinReply。
     //   - 命中 reply → 走 builtinReply 分支（老下游无感知）
@@ -1500,7 +1499,7 @@ class LocalQueryEngine implements QueryEngine {
       let allowFallback = true;
       // M1-F：contentBuf / reasoningBuf 已在 submitMessage 顶部 hoist；这里只重置每 turn
       multiTurn: while (true) {
-        let collectedToolCalls: ToolCallEvent[] = [];
+        const collectedToolCalls: ToolCallEvent[] = [];
         // 每个 turn 重置：assistant.text 只存当前 turn content，reasoning 走可选字段
         contentBuf = "";
         reasoningBuf = "";
@@ -2013,7 +2012,7 @@ class LocalQueryEngine implements QueryEngine {
     return buildBuiltinReply(prompt);
   }
 
-  private async resolveCommandReply(prompt: string): Promise<string | undefined> {
+  private async resolveCommandReply(_prompt: string): Promise<string | undefined> {
     // 已迁移到 SlashRegistry（W2-02 batch 4）：
     //   /doctor /summary /export /reload-plugins /debug-tool-call /mcp /wechat
     // 老的 build*/handle* 私有方法保留供 registry 通过 duck-type 调用。
