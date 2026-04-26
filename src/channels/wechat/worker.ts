@@ -145,7 +145,8 @@ export class IlinkWechatWorker {
       dedupDb: this.options.dedupDb,
     });
     const syncCards = this.options.adapter.buildSessionUpdateCards();
-    const cards = [...result.cards, ...syncCards];
+    const outboundCards = this.options.adapter.drainOutboundQueue();
+    const cards = [...result.cards, ...syncCards, ...outboundCards];
 
     for (const card of cards) {
       if (!card.replyTarget) {

@@ -376,10 +376,22 @@ async function main(): Promise<void> {
     }
   });
   queryEngineForShutdown = queryEngine as unknown as { disposeCron?: () => void };
-  // #116 阶段🅐 cron：notify=cli 默认走 transcript 注入；wechat / web 通道桥接
-  // 留待阶段 🅑（需要 wechatService.sendToActive 与 web SSE hub 抽象）。
-  // 当前若用户在任务 notifyChannels 里写 wechat/web，queryEngine 内会 fall-through 为
-  // 无操作（不抛错）+ console.error 警告。
+  // #116 阶段 🅑：cron --notify=wechat 桥接到 wechatService 外发队列
+  //   - 仅 worker 模式真生效（需要 wechat 长轮询通道；webhook 模式无 poll → 队列等用户下次说话才被触发）
+  //   - 没有 active 接收方时（用户从未发过消息）静默丢弃 + console.warn
+  (queryEngine as unknown as {
+    setCronNotifyAdapters?: (a: {
+      wechat?: (text: string) => void;
+      web?: (...args: unknown[]) => void;
+    }) => void;
+  }).setCronNotifyAdapters?.({
+    wechat: (text) => {
+      const ok = wechatService.sendToActive(text);
+      if (!ok) {
+        console.warn("[cron] wechat notify dropped: no active wechat session yet");
+      }
+    },
+  });
   const ingressGateway = new IngressGateway(queryEngine);
 
   // D1: SIGHUP 触发 settings 热重载（hooks + statusLine）。

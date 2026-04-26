@@ -109,6 +109,9 @@ export class WechatBotAdapter {
   private readonly runtimesByUserKey = new Map<string, WechatRuntime>();
   private readonly runtimesBySessionId = new Map<string, WechatRuntime>();
   private sharedRuntime: WechatRuntime | null = null;
+  /** #116 阶段 🅑：外发队列；cron / 系统通知用。worker 每轮 poll 时 drain。 */
+  private readonly outboundQueue: WechatDeliveryCard[] = [];
+  private static readonly OUTBOUND_QUEUE_LIMIT = 100;
 
   constructor(
     private readonly createEngine: () => QueryEngine,
@@ -282,6 +285,73 @@ export class WechatBotAdapter {
     }
 
     return cards;
+  }
+
+  /**
+   * #116 阶段 🅑：把一条外发文本入队，下次 worker poll 时投递给"最后活跃的会话"。
+   *
+   * 行为：
+   *   - 若没有任何 runtime 有 lastContext（用户没发过消息）→ 静默丢弃
+   *   - 队列上限 OUTBOUND_QUEUE_LIMIT，超出按 FIFO 切尾
+   *   - 不格式化 text 自身，调用方自行准备内容（cron 已带 [Cron · ...] 头）
+   *
+   * 返回入队是否成功（false = 无 active 接收方，丢弃了）。
+   */
+  enqueueOutboundText(text: string): boolean {
+    const ctx = this.pickMostRecentContext();
+    if (!ctx) return false;
+    const card: WechatDeliveryCard = {
+      sessionId: ctx.sessionId ?? "outbound",
+      traceId: createTraceId(),
+      contextToken: ctx.sessionId ?? "outbound",
+      markdown: text,
+      pendingApproval: false,
+      replyTarget: {
+        senderId: ctx.context.senderId,
+        senderName: ctx.context.senderName,
+        chatId: ctx.context.chatId,
+        chatType: ctx.context.chatType,
+      },
+    };
+    this.outboundQueue.push(card);
+    while (this.outboundQueue.length > WechatBotAdapter.OUTBOUND_QUEUE_LIMIT) {
+      this.outboundQueue.shift();
+    }
+    return true;
+  }
+
+  /** worker 每轮 poll 抽干外发队列 */
+  drainOutboundQueue(): WechatDeliveryCard[] {
+    if (this.outboundQueue.length === 0) return [];
+    const out = [...this.outboundQueue];
+    this.outboundQueue.length = 0;
+    return out;
+  }
+
+  /** 测试用：当前队列长度 */
+  outboundQueueSize(): number {
+    return this.outboundQueue.length;
+  }
+
+  private pickMostRecentContext():
+    | { context: WechatContextMapping; sessionId: string | null }
+    | null {
+    // sharedRuntime 优先，其次取任一带 lastContext 的 runtime
+    if (this.sharedRuntime?.lastContext) {
+      return {
+        context: this.sharedRuntime.lastContext,
+        sessionId: this.sharedRuntime.queryEngine.getSessionId(),
+      };
+    }
+    for (const runtime of new Set(this.runtimesBySessionId.values())) {
+      if (runtime.lastContext) {
+        return {
+          context: runtime.lastContext,
+          sessionId: runtime.queryEngine.getSessionId(),
+        };
+      }
+    }
+    return null;
   }
 
   buildSessionUpdateCards(): WechatDeliveryCard[] {

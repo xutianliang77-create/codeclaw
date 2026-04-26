@@ -401,9 +401,12 @@ chunks-upserted: 0
 ```
 
 阶段🅐：`cli` 通道。
-阶段🅑：`web` 通道接通——`codeclaw web` 子命令独建 cron host engine，cron 触发后通过
-SSE `cron-result` 事件广播到所有 active web session（chat tab 末尾出现 system 消息）。
-`wechat` 通道仍为占位（需要 wechat outbound API 重设计，推迟到 阶段🅒）。
+阶段🅑（接通）：
+- `web` 通道：`codeclaw web` 子命令独建 cron host engine，cron 触发后通过 SSE `cron-result`
+  事件广播到所有 active web session（chat tab 末尾出现 system 消息）。
+- `wechat` 通道（仅 worker 模式生效）：cron 触发 → wechatService.sendToActive 入外发队列
+  → 下次 worker poll 投递给"最后活跃"的 wechat 会话。webhook 模式无 poll，外发要等用户
+  下次发消息触发；无 active 接收方时静默丢弃 + console.warn。
 
 ### 11.4 任务模板（阶段🅑）
 

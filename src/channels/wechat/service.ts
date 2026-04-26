@@ -8,6 +8,12 @@ import type { SpeechTranscriber } from "../../provider/speech";
 export interface WechatBotService {
   adapter: WechatBotAdapter;
   attachSharedRuntime: (queryEngine: QueryEngine) => void;
+  /**
+   * #116 阶段 🅑：把一条文本入外发队列，下次 worker poll 时投递给最近活跃的 wechat 会话。
+   * 返回 false 表示无 active 接收方（用户从未发过消息），消息被丢弃。
+   * 仅 worker 模式生效（webhook 模式无 poll 通道，外发要等用户下次发消息触发同步）。
+   */
+  sendToActive: (text: string) => boolean;
   start: (options?: { port?: number; authToken?: string | null }) => ReturnType<typeof startWechatWebhookServer>;
   createWorker: (options: {
     tokenFile: string;
@@ -57,6 +63,9 @@ export function createWechatBotService(options: {
     adapter,
     attachSharedRuntime(queryEngine) {
       adapter.attachSharedRuntime(queryEngine);
+    },
+    sendToActive(text) {
+      return adapter.enqueueOutboundText(text);
     },
     start(startOptions) {
       return startWechatWebhookServer({
