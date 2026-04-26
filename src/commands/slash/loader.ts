@@ -47,6 +47,7 @@ import fixCommand from "./builtins/fix";
 import endCommand from "./builtins/end";
 import forgetCommand from "./builtins/forget";
 import rememberCommand from "./builtins/remember";
+import preferencesCommand from "./builtins/preferences";
 
 const BUILTINS: Array<SlashCommand | SlashCommand[]> = [
   helpCommand,
@@ -81,6 +82,7 @@ const BUILTINS: Array<SlashCommand | SlashCommand[]> = [
   endCommand,
   forgetCommand,
   rememberCommand,
+  preferencesCommand,
 ];
 
 export function loadBuiltins(registry: SlashRegistry): number {

@@ -58,6 +58,12 @@ import type { ProviderStatus } from "../provider/types";
 import { createSkillRegistry, createSkillRegistryFromDisk } from "../skills/registry";
 import type { SkillDefinition } from "../skills/registry";
 import { buildSystemPrompt } from "./systemPrompt";
+import {
+  appendProjectCodeclawMd,
+  appendUserCodeclawMd,
+  loadProjectCodeclawMd,
+  loadUserCodeclawMd,
+} from "./codeclawMd";
 import { ToolRegistry, createToolRegistry } from "./tools/registry";
 import type { ToolCallEvent } from "./tools/registry";
 import { registerBuiltinTools } from "./tools/builtins";
@@ -2031,6 +2037,64 @@ class LocalQueryEngine implements QueryEngine {
    *
    * audit_events **故意保留**——不可篡改的审计 trail；reply 里透明告知数量。
    */
+  /**
+   * /preferences 命令支持（M2-end）：show / add / user-add 操作 CODECLAW.md。
+   *   - show：列两层 CODECLAW.md 当前内容（项目级 + 用户级）
+   *   - add <text>：append 一行 markdown bullet 到 <cwd>/CODECLAW.md
+   *   - user-add <text>：append 到 ~/.codeclaw/CODECLAW.md
+   *
+   * argsRaw 是 /preferences 后剩余字符串。第一个 token 当 sub-command。
+   * 不识别 sub-command → 打印 usage。
+   */
+  public runPreferencesCommand(argsRaw: string): string {
+    const trimmed = argsRaw.trim();
+    if (!trimmed) {
+      return [
+        "Usage:",
+        "  /preferences show              show project + user CODECLAW.md",
+        "  /preferences add <text>        append to <cwd>/CODECLAW.md",
+        "  /preferences user-add <text>   append to ~/.codeclaw/CODECLAW.md",
+      ].join("\n");
+    }
+    const spaceIdx = trimmed.search(/\s/);
+    const sub = (spaceIdx >= 0 ? trimmed.slice(0, spaceIdx) : trimmed).toLowerCase();
+    const rest = spaceIdx >= 0 ? trimmed.slice(spaceIdx + 1).trim() : "";
+
+    if (sub === "show") {
+      const userMd = loadUserCodeclawMd();
+      const projectMd = loadProjectCodeclawMd(this.options.workspace);
+      const lines: string[] = [];
+      lines.push("=== User CODECLAW.md (~/.codeclaw/CODECLAW.md) ===");
+      lines.push(userMd ?? "(none)");
+      lines.push("");
+      lines.push(`=== Project CODECLAW.md (${this.options.workspace}/CODECLAW.md) ===`);
+      lines.push(projectMd ?? "(none)");
+      return lines.join("\n");
+    }
+
+    if (sub === "add") {
+      if (!rest) return "Usage: /preferences add <text>";
+      try {
+        const r = appendProjectCodeclawMd(this.options.workspace, rest);
+        return `Appended to ${r.path}:\n  ${r.appended}`;
+      } catch (err) {
+        return `[preferences add] failed: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
+
+    if (sub === "user-add" || sub === "user_add") {
+      if (!rest) return "Usage: /preferences user-add <text>";
+      try {
+        const r = appendUserCodeclawMd(rest);
+        return `Appended to ${r.path}:\n  ${r.appended}`;
+      } catch (err) {
+        return `[preferences user-add] failed: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
+
+    return `Unknown subcommand: ${sub}. Run /preferences for usage.`;
+  }
+
   /**
    * M2-02 /remember 命令支持：把用户给的文本作 user-type 长期记忆落盘。
    * name 自动生成（user_note_<ts>）；description 取前 80 char。

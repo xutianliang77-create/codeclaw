@@ -17,6 +17,8 @@ import os from "node:os";
 
 import {
   MAX_CODECLAW_MD_BYTES,
+  appendProjectCodeclawMd,
+  appendUserCodeclawMd,
   loadProjectCodeclawMd,
   loadUserCodeclawMd,
 } from "../../../src/agent/codeclawMd";
@@ -71,5 +73,55 @@ describe("loadUserCodeclawMd", () => {
 
   it("homeDir 中无 .codeclaw 目录 → null", () => {
     expect(loadUserCodeclawMd(tmpRoot)).toBeNull();
+  });
+});
+
+describe("appendProjectCodeclawMd", () => {
+  it("初次写：自动加 header + bullet", () => {
+    const r = appendProjectCodeclawMd(tmpRoot, "use pnpm");
+    expect(r.appended).toBe("- use pnpm");
+    const txt = loadProjectCodeclawMd(tmpRoot)!;
+    expect(txt).toContain("# CodeClaw Preferences");
+    expect(txt).toContain("- use pnpm");
+  });
+
+  it("已有内容追加新 bullet", () => {
+    appendProjectCodeclawMd(tmpRoot, "use pnpm");
+    appendProjectCodeclawMd(tmpRoot, "回答用中文");
+    const txt = loadProjectCodeclawMd(tmpRoot)!;
+    expect(txt).toContain("- use pnpm");
+    expect(txt).toContain("- 回答用中文");
+  });
+
+  it("用户已带 - 前缀不重复加", () => {
+    const r = appendProjectCodeclawMd(tmpRoot, "- already prefixed");
+    expect(r.appended).toBe("- already prefixed");
+  });
+
+  it("用户带 * 前缀也不重复加", () => {
+    const r = appendProjectCodeclawMd(tmpRoot, "* star prefixed");
+    expect(r.appended).toBe("* star prefixed");
+  });
+
+  it("空字符串抛错", () => {
+    expect(() => appendProjectCodeclawMd(tmpRoot, "")).toThrow(/must not be empty/);
+    expect(() => appendProjectCodeclawMd(tmpRoot, "   ")).toThrow(/must not be empty/);
+  });
+
+  it("超 64KB 抛错", () => {
+    appendProjectCodeclawMd(tmpRoot, "first");
+    const huge = "x".repeat(MAX_CODECLAW_MD_BYTES);
+    expect(() => appendProjectCodeclawMd(tmpRoot, huge)).toThrow(/exceed/);
+  });
+});
+
+describe("appendUserCodeclawMd", () => {
+  it("自动创建 ~/.codeclaw 目录 + 文件", () => {
+    const home = path.join(tmpRoot, "no-codeclaw-yet");
+    mkdirSync(home, { recursive: true });
+    const r = appendUserCodeclawMd("中文回答", home);
+    expect(r.path.endsWith(".codeclaw/CODECLAW.md")).toBe(true);
+    expect(r.appended).toBe("- 中文回答");
+    expect(loadUserCodeclawMd(home)).toContain("- 中文回答");
   });
 });

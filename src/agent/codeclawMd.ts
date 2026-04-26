@@ -8,7 +8,7 @@
  * 内容直接拼进 system prompt（不解析、不渲染）。
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
@@ -37,3 +37,35 @@ function readMdSafely(p: string): string | null {
     return null;
   }
 }
+
+/** /preferences add：把 line 追加到项目级 CODECLAW.md（自动创建文件 + 一行一条 markdown bullet） */
+export function appendProjectCodeclawMd(workspace: string, line: string): { path: string; appended: string } {
+  const p = path.join(workspace, "CODECLAW.md");
+  return appendLineSafely(p, line);
+}
+
+/** /preferences user-add：追加到用户级 CODECLAW.md（自动创建 ~/.codeclaw 目录） */
+export function appendUserCodeclawMd(line: string, homeDir: string = os.homedir()): { path: string; appended: string } {
+  const dir = path.join(homeDir, ".codeclaw");
+  mkdirSync(dir, { recursive: true });
+  const p = path.join(dir, "CODECLAW.md");
+  return appendLineSafely(p, line);
+}
+
+function appendLineSafely(p: string, raw: string): { path: string; appended: string } {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    throw new Error("preference text must not be empty");
+  }
+  // 单行偏好 → 自动加 markdown bullet 前缀（如果用户已经有 - 或 * 前缀就不加）
+  const bullet = /^[-*]\s/.test(trimmed) ? trimmed : `- ${trimmed}`;
+  const existing = existsSync(p) ? readFileSync(p, "utf8") : "";
+  const sep = existing.length === 0 ? "" : existing.endsWith("\n") ? "" : "\n";
+  const finalContent = existing.length === 0 ? `# CodeClaw Preferences\n\n${bullet}\n` : `${existing}${sep}${bullet}\n`;
+  if (Buffer.byteLength(finalContent, "utf8") > MAX_CODECLAW_MD_BYTES) {
+    throw new Error(`CODECLAW.md would exceed ${MAX_CODECLAW_MD_BYTES} bytes; edit manually to compact`);
+  }
+  writeFileSync(p, finalContent, "utf8");
+  return { path: p, appended: bullet };
+}
+
