@@ -62,6 +62,7 @@ import { ToolRegistry, createToolRegistry } from "./tools/registry";
 import type { ToolCallEvent } from "./tools/registry";
 import { registerBuiltinTools } from "./tools/builtins";
 import { checkTokenBudget, estimateToolsSchemaTokens, warnIfBudgetExceeded } from "./tokenBudget";
+import { autoCompactIfNeeded } from "./autoCompact";
 import { detectLocalTool, inspectLocalTool, isHandledLocalToolResult, runLocalTool } from "../tools/local";
 import type { LocalToolName } from "../tools/local";
 import type {
@@ -1302,7 +1303,7 @@ class LocalQueryEngine implements QueryEngine {
         lastError = null;
         allowFallback = true;
 
-        // M1-D：Token 预算检查（warn-only，不动 messages；M2-01 在这里挂 auto-compact）
+        // M1-D：Token 预算检查（warn-only）+ M2-01：超阈值时真压缩旧 turn
         if (this.currentProvider) {
           const toolsSchemaTokens = toolSchemas ? estimateToolsSchemaTokens(toolSchemas) : 0;
           const budgetReport = checkTokenBudget(
@@ -1312,6 +1313,44 @@ class LocalQueryEngine implements QueryEngine {
           );
           warnIfBudgetExceeded(budgetReport);
           this.lastEstimatedTokens = budgetReport.estimatedTokens;
+
+          // M2-01：≥95% utilization 触发 autoCompact（旧 turn → 摘要 assistant message）；
+          // channel/userId 缺失时跳过（不能 saveMemoryDigest）但 stream 继续，仅 warn
+          if (budgetReport.shouldHardCut && this.options.channel && this.options.userId) {
+            try {
+              const compactResult = await autoCompactIfNeeded(
+                this.messages,
+                this.currentProvider,
+                {
+                  keepRecentTurns: 5,
+                  hardCutFallback: true,
+                  invoker: createProviderSummarizer(this.currentProvider),
+                  sessionId: this.sessionId,
+                  channel: this.options.channel,
+                  userId: this.options.userId,
+                  dataDb: this.dataDb,
+                  abortSignal: this.abortController?.signal,
+                }
+              );
+              if (compactResult.compacted) {
+                // messages 是 readonly 引用——用 splice 原地替换内容保持引用稳定
+                this.messages.splice(0, this.messages.length, ...compactResult.messages);
+                this.autoCompactCount += 1;
+                this.notifyListeners();
+                this.audit({
+                  actor: "agent",
+                  action: "memory.auto-compact",
+                  decision: "allow",
+                  reason: `compacted ${compactResult.compactedTurnCount} messages`,
+                });
+                yield this.phaseEvent("compacting");
+              }
+            } catch (err) {
+              process.stderr.write(
+                `[auto-compact] failed: ${err instanceof Error ? err.message : String(err)}\n`
+              );
+            }
+          }
         }
 
         while (true) {
