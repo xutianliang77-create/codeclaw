@@ -76,7 +76,15 @@ import { runHooks } from "../hooks/runner";
 import type { HookSettings } from "../hooks/settings";
 import { registerTaskTool } from "./tools/taskTool";
 import { registerRagSearchTool } from "./tools/ragTool";
+import { registerGraphQueryTool } from "./tools/graphTool";
 import { runIndex, runSearch, runStatus, runClear, runEmbed, runHybridSearch, formatStatus } from "../rag/api";
+import {
+  runBuild as runGraphBuild,
+  runStatus as runGraphStatus,
+  runQuery as runGraphQuery,
+  formatStatus as formatGraphStatus,
+  formatQueryResult as formatGraphQuery,
+} from "../graph/api";
 import { checkTokenBudget, estimateToolsSchemaTokens, warnIfBudgetExceeded } from "./tokenBudget";
 import { autoCompactIfNeeded } from "./autoCompact";
 import { detectLocalTool, inspectLocalTool, isHandledLocalToolResult, runLocalTool } from "../tools/local";
@@ -796,6 +804,10 @@ class LocalQueryEngine implements QueryEngine {
       // #75 M4 RAG：注册 rag_search 让 LLM 用关键字找代码。env CODECLAW_RAG=false 关。
       if (process.env.CODECLAW_RAG !== "false") {
         registerRagSearchTool(this.toolRegistry, { workspace: options.workspace });
+      }
+      // #76 M4 CodebaseGraph：注册 graph_query 让 LLM 查 callers / imports 等。
+      if (process.env.CODECLAW_GRAPH !== "false") {
+        registerGraphQueryTool(this.toolRegistry, { workspace: options.workspace });
       }
     }
     // M3-04：lifecycle hooks 配置；缺省视为无 hook
@@ -2626,6 +2638,48 @@ class LocalQueryEngine implements QueryEngine {
       model,
       ...(provider?.apiKey ? { apiKey: provider.apiKey } : {}),
     };
+  }
+
+  // M4-#76 step e：/graph 命令分发
+  private runGraphCommand(argsRaw: string): string {
+    const trimmed = argsRaw.trim();
+    if (!trimmed || trimmed === "status") {
+      return formatGraphStatus(runGraphStatus(this.options.workspace));
+    }
+    const [sub, ...rest] = trimmed.split(/\s+/);
+    if (sub === "build") {
+      const r = runGraphBuild(this.options.workspace);
+      return r.summary;
+    }
+    if (sub === "callers") {
+      const name = rest[0];
+      const calleePath = rest[1];
+      if (!name) return "Usage: /graph callers <name> [callee_path]";
+      return formatGraphQuery(
+        runGraphQuery(this.options.workspace, "callers", name, calleePath)
+      );
+    }
+    if (sub === "callees") {
+      const filePath = rest[0];
+      if (!filePath) return "Usage: /graph callees <file_path>";
+      return formatGraphQuery(runGraphQuery(this.options.workspace, "callees", filePath));
+    }
+    if (sub === "dependents") {
+      const filePath = rest[0];
+      if (!filePath) return "Usage: /graph dependents <file_path>";
+      return formatGraphQuery(runGraphQuery(this.options.workspace, "dependents", filePath));
+    }
+    if (sub === "dependencies") {
+      const filePath = rest[0];
+      if (!filePath) return "Usage: /graph dependencies <file_path>";
+      return formatGraphQuery(runGraphQuery(this.options.workspace, "dependencies", filePath));
+    }
+    if (sub === "symbol") {
+      const arg = rest.join(" ").trim();
+      if (!arg) return "Usage: /graph symbol <name|path>";
+      return formatGraphQuery(runGraphQuery(this.options.workspace, "symbol", arg));
+    }
+    return "Usage: /graph | /graph build | /graph callers <name> | /graph callees <path> | /graph dependents <path> | /graph dependencies <path> | /graph symbol <name|path>";
   }
 
   private buildInitReply(): string {
