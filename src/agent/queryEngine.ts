@@ -63,6 +63,7 @@ import type { ToolCallEvent } from "./tools/registry";
 import { registerBuiltinTools } from "./tools/builtins";
 import { registerMemoryTools } from "./tools/memoryTools";
 import { clearAllMemories, writeMemory, type MemoryType } from "../memory/projectMemory/store";
+import { EXIT_PLAN_SENTINEL, registerPlanModeTool } from "./tools/planMode";
 import { checkTokenBudget, estimateToolsSchemaTokens, warnIfBudgetExceeded } from "./tokenBudget";
 import { autoCompactIfNeeded } from "./autoCompact";
 import { detectLocalTool, inspectLocalTool, isHandledLocalToolResult, runLocalTool } from "../tools/local";
@@ -712,6 +713,10 @@ class LocalQueryEngine implements QueryEngine {
       if (process.env.CODECLAW_PROJECT_MEMORY !== "false") {
         registerMemoryTools(this.toolRegistry);
       }
+      // M2-03：ExitPlanMode tool（plan mode 必备）；env CODECLAW_PLAN_MODE_STRICT=false 显式关
+      if (process.env.CODECLAW_PLAN_MODE_STRICT !== "false") {
+        registerPlanModeTool(this.toolRegistry);
+      }
     }
     // #81：把 user skill manifest 的 commands[] 桥接到 slashRegistry
     // handler 行为 = 自动激活该 skill（等价 /skills use <name>）；冲突 builtin 时 skip
@@ -1295,8 +1300,6 @@ class LocalQueryEngine implements QueryEngine {
       const MAX_TOOL_TURNS = 25;
       let toolTurns = 0;
       const hasNativeTools = this.toolRegistry.list().length > 0;
-      // 同一 schema 形状给 stream tools 与 token budget 估算两处复用
-      const toolSchemas = hasNativeTools ? this.buildStreamToolSchemas() : undefined;
       let lastError: Error | null = null;
       let allowFallback = true;
       // M1-F：contentBuf / reasoningBuf 已在 submitMessage 顶部 hoist；这里只重置每 turn
@@ -1308,6 +1311,8 @@ class LocalQueryEngine implements QueryEngine {
         let reactiveCompactTriggered = false;
         lastError = null;
         allowFallback = true;
+        // M2-03：每 turn 重新构造 toolSchemas，让 ExitPlanMode 切 mode 后下一 turn 拿全工具
+        const toolSchemas = hasNativeTools ? this.buildStreamToolSchemas() : undefined;
 
         // M1-D：Token 预算检查（warn-only）+ M2-01：超阈值时真压缩旧 turn
         if (this.currentProvider) {
@@ -1573,6 +1578,24 @@ class LocalQueryEngine implements QueryEngine {
             toolName: call.name,
             status: invokeResult.ok ? "completed" : "failed",
           };
+
+          // M2-03：ExitPlanMode sentinel → 切 default mode（plan→execute 阶段切换）
+          if (
+            call.name === "ExitPlanMode" &&
+            invokeResult.ok &&
+            invokeResult.content.startsWith(EXIT_PLAN_SENTINEL)
+          ) {
+            const planMd = invokeResult.content.slice(EXIT_PLAN_SENTINEL.length).trim();
+            this.permissionMode = "default";
+            this.permissions.setMode("default");
+            this.audit({
+              actor: "agent",
+              action: "plan.exit",
+              decision: "allow",
+              reason: `plan submitted (${planMd.length} chars)`,
+              details: { plan: planMd.slice(0, 500) },
+            });
+          }
         }
 
         // 准备下一轮 assistant 流：新 messageId、清空 output；message-start 事件让上层 UI 拉新条
@@ -2977,7 +3000,9 @@ class LocalQueryEngine implements QueryEngine {
    * 共享的 {name, description, inputSchema} 形状。注：仅在 hasNativeTools 时调用。
    */
   private buildStreamToolSchemas(): ToolSchemaSpec[] {
-    return this.toolRegistry.list().map((t) => ({
+    // M2-03：plan mode 时只暴露 read-only + memory_write + ExitPlanMode；
+    // 其他模式全量。listForMode 内部硬编码白名单。
+    return this.toolRegistry.listForMode(this.permissionMode).map((t) => ({
       name: t.name,
       description: t.description,
       inputSchema: t.inputSchema,

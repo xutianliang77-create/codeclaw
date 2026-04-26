@@ -80,6 +80,25 @@ export class ToolRegistry {
     return Array.from(this.tools.values()).sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  /**
+   * 按 PermissionMode 过滤可暴露给 LLM 的 tools（M2-03）。
+   * - plan: 只读 + memory_write + ExitPlanMode（write/append/replace/bash 全砍）
+   * - 其他 mode：全量
+   *
+   * 默认 read-only 集 = read/glob/symbol/definition/references；可由 caller 通过
+   * planModeAllowedTools 参数扩展（如 user 注册了自定义 read-only tool）。
+   */
+  listForMode(
+    mode: string,
+    planModeAllowedTools?: ReadonlySet<string>
+  ): ToolDefinition[] {
+    if (mode !== "plan") return this.list();
+    const allowed =
+      planModeAllowedTools ??
+      new Set(["read", "glob", "symbol", "definition", "references", "memory_write", "ExitPlanMode"]);
+    return this.list().filter((t) => allowed.has(t.name));
+  }
+
   /** OpenAI tools 数组：[{type:"function", function:{name,description,parameters}}, ...] */
   openAiSchemas(): Array<{
     type: "function";

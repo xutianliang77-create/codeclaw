@@ -178,6 +178,54 @@ describe("queryEngine native tool_use multi-turn", () => {
     expect(engine.getMessages().at(-1)?.text).toBe("plain answer");
   });
 
+  it("M2-03：plan mode → LLM 调 ExitPlanMode → engine 切 default mode + 后续轮次拿全工具", async () => {
+    let callIndex = 0;
+    const requests: Array<{ tools?: Array<{ function: { name: string } }> }> = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as { tools?: Array<{ function: { name: string } }> });
+      callIndex += 1;
+      if (callIndex === 1) {
+        // turn 1 (plan mode)：LLM 调 ExitPlanMode 提交 plan
+        return sseResponse(
+          sseFrames([
+            { choices: [{ delta: { tool_calls: [{ index: 0, id: "ep_1", function: { name: "ExitPlanMode" } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"plan":"1. read foo.txt\\n2. modify it"}' } }] } }] },
+            { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+          ])
+        );
+      }
+      // turn 2 (default mode)：LLM 看到 tool 结果就回答（mode 已切，工具全量可见）
+      return sseResponse(
+        sseFrames([
+          { choices: [{ delta: { content: "Plan accepted, executing now." }, finish_reason: "stop" }] },
+        ])
+      );
+    }) as unknown as typeof fetch;
+
+    const engine = createQueryEngine({
+      currentProvider: provider(),
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace,
+      fetchImpl,
+    });
+    await collect(engine.submitMessage("帮我修个 bug"));
+
+    expect(callIndex).toBe(2);
+    // turn 1 在 plan mode：tools 数组只含 read-only + memory_write + ExitPlanMode；不含 bash/write
+    const turn1Tools = (requests[0].tools ?? []).map((t) => t.function.name);
+    expect(turn1Tools).toContain("ExitPlanMode");
+    expect(turn1Tools).toContain("read");
+    expect(turn1Tools).not.toContain("bash");
+    expect(turn1Tools).not.toContain("write");
+    // turn 2 mode 切到 default：tools 全量含 bash/write
+    const turn2Tools = (requests[1].tools ?? []).map((t) => t.function.name);
+    expect(turn2Tools).toContain("bash");
+    expect(turn2Tools).toContain("write");
+    // engine 当前 permissionMode 已切回 default
+    expect(engine.getRuntimeState().permissionMode).toBe("default");
+  });
+
   it("LLM 没有调工具时 multi-turn 退化为单回合（即使 env 开启）", async () => {
     let callCount = 0;
     const fetchImpl = (async () => {
