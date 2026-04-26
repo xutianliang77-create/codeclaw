@@ -15,6 +15,7 @@ import { loadRuntimeSelection } from "./provider/registry";
 import { runPlainRepl } from "./repl/plain";
 import { McpManager } from "./mcp/manager";
 import { loadMcpConfig } from "./mcp/config";
+import { loadSettings } from "./hooks/settings";
 import { startGatewayServer } from "./sdk/httpServer";
 import { VERSION } from "./version";
 import { appendFileSync, mkdirSync } from "node:fs";
@@ -249,6 +250,16 @@ async function main(): Promise<void> {
     void mcpManager.closeAll().catch(() => undefined);
   });
 
+  // M3-04：加载 settings.json（hooks + statusLine 配置）；解析失败不阻塞主进程
+  let settings;
+  try {
+    settings = loadSettings(workspace);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`CodeClaw settings load failed (continuing without hooks): ${msg}`);
+    settings = undefined;
+  }
+
   const queryEngine = createQueryEngine({
     currentProvider: runtime.selection?.current ?? null,
     fallbackProvider: runtime.selection?.fallback ?? null,
@@ -257,6 +268,7 @@ async function main(): Promise<void> {
     autoCompactThreshold: runtime.config?.memory.l1AutoCompactThreshold,
     approvalsDir: paths.approvalsDir,
     mcpManager,
+    settings,
     wechat: {
       tokenFile: configuredWechatTokenFile,
       baseUrl: configuredWechatBaseUrl,

@@ -123,6 +123,11 @@ export interface QueryEngineOptions {
    * /mcp 命令也优先走 manager；不传则降级到 in-process service.ts（workspace-mcp）。
    */
   mcpManager?: import("../mcp/manager").McpManager;
+  /**
+   * M3-04：lifecycle hooks 配置（已 parse 后的 settings）。
+   * 不传则按"无 hook"处理。5 个事件 PreToolUse/PostToolUse/UserPromptSubmit/Stop/SessionStart。
+   */
+  settings?: import("../hooks/settings").CodeclawSettings;
   wechat?: {
     tokenFile?: string;
     baseUrl?: string;

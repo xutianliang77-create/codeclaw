@@ -72,6 +72,8 @@ import { clearAllMemories, writeMemory, type MemoryType } from "../memory/projec
 import { EXIT_PLAN_SENTINEL, registerPlanModeTool } from "./tools/planMode";
 import { bridgeMcpTools } from "../mcp/bridge";
 import { applySkillBanner } from "./skillBanner";
+import { runHooks } from "../hooks/runner";
+import type { HookSettings } from "../hooks/settings";
 import { checkTokenBudget, estimateToolsSchemaTokens, warnIfBudgetExceeded } from "./tokenBudget";
 import { autoCompactIfNeeded } from "./autoCompact";
 import { detectLocalTool, inspectLocalTool, isHandledLocalToolResult, runLocalTool } from "../tools/local";
@@ -627,6 +629,8 @@ class LocalQueryEngine implements QueryEngine {
   private readonly recentGapSignatures: string[] = [];
   private pendingOrchestrationApprovals: PendingOrchestrationApproval[] = [];
   private activeSkill: SkillDefinition | null = null;
+  /** M3-04：lifecycle hooks 配置（在 constructor 末尾从 options.settings 装入） */
+  private hooksConfig: HookSettings = {};
   // #86：成本预算配置（构造时从 options.budget ?? env 决定）
   private readonly budgetConfig: BudgetConfig;
   private readonly slashRegistry = new SlashRegistry();
@@ -775,6 +779,8 @@ class LocalQueryEngine implements QueryEngine {
         bridgeMcpTools(options.mcpManager, this.toolRegistry);
       }
     }
+    // M3-04：lifecycle hooks 配置；缺省视为无 hook
+    this.hooksConfig = options.settings?.hooks ?? {};
     // #81：把 user skill manifest 的 commands[] 桥接到 slashRegistry
     // handler 行为 = 自动激活该 skill（等价 /skills use <name>）；冲突 builtin 时 skip
     for (const skill of this.skillRegistry.list()) {
@@ -876,6 +882,20 @@ class LocalQueryEngine implements QueryEngine {
     }
 
     this.lastEstimatedTokens = estimateMessageTokens(this.messages);
+
+    // M3-04 SessionStart：fire-and-forget；副作用型 hook，不阻塞 constructor 返回
+    void runHooks(
+      {
+        type: "SessionStart",
+        data: {
+          sessionId: this.sessionId,
+          workspace: this.options.workspace,
+          permissionMode: this.permissionMode,
+          startedAt: Date.now(),
+        },
+      },
+      this.hooksConfig
+    ).catch(() => undefined);
   }
 
   async *submitMessage(prompt: string, options?: QuerySubmitOptions): AsyncGenerator<EngineEvent> {
@@ -883,6 +903,39 @@ class LocalQueryEngine implements QueryEngine {
     let trimmed = prompt.trim();
     if (!trimmed) {
       return;
+    }
+
+    // M3-04 UserPromptSubmit：在消息进 transcript 之前过 hook；阻塞型，blocked 直接 return
+    // slash 命令（/ 开头）跳过 hook（不是真 user prompt，且容易触发误拦）
+    if (!trimmed.startsWith("/")) {
+      const hookResult = await runHooks(
+        {
+          type: "UserPromptSubmit",
+          data: {
+            prompt: trimmed,
+            sessionId: this.sessionId,
+            workspace: this.options.workspace,
+            permissionMode: this.permissionMode,
+          },
+        },
+        this.hooksConfig
+      );
+      if (hookResult.blocked) {
+        const messageId = createId("msg");
+        this.messages.push({
+          id: messageId,
+          role: "assistant",
+          text: `[UserPromptSubmit hook blocked] ${hookResult.blockReason ?? "no reason"}`,
+          source: "local",
+        });
+        this.notifyListeners();
+        yield {
+          type: "message-complete",
+          messageId,
+          text: `[UserPromptSubmit hook blocked] ${hookResult.blockReason ?? "no reason"}`,
+        };
+        return;
+      }
     }
 
     // /ask 装弹后的下一轮（且本轮不是 /ask 自己）→ 标记本轮末尾 restore
@@ -1653,6 +1706,37 @@ class LocalQueryEngine implements QueryEngine {
           }
 
           // allow / skip-evaluate（memory_*/ExitPlanMode）→ 正常 invoke
+
+          // M3-04 PreToolUse hook：在真 invoke 之前给 user 拦截机会；blocked 时合成
+          // role:tool message 让 LLM 看到拒绝理由，跳过 invoke 进入下一轮
+          const preHookResult = await runHooks(
+            {
+              type: "PreToolUse",
+              data: {
+                toolName: call.name,
+                toolArgs: call.args,
+                sessionId: this.sessionId,
+                workspace: this.options.workspace,
+                permissionMode: this.permissionMode,
+              },
+            },
+            this.hooksConfig
+          );
+          if (preHookResult.blocked) {
+            const blockedText = `[PreToolUse hook blocked] ${preHookResult.blockReason ?? "no reason"}`;
+            this.messages.push({
+              id: createId("tool"),
+              role: "tool",
+              text: blockedText,
+              source: "local",
+              toolCallId: call.id,
+              toolName: call.name,
+            });
+            this.notifyListeners();
+            yield { type: "tool-end", toolName: call.name, status: "blocked" };
+            continue;
+          }
+
           yield { type: "tool-start", toolName: call.name, detail: detailPreview };
           const invokeResult = await this.toolRegistry.invoke(call.name, call.args, {
             workspace: this.options.workspace,
@@ -1672,6 +1756,22 @@ class LocalQueryEngine implements QueryEngine {
             toolName: call.name,
             status: invokeResult.ok ? "completed" : "failed",
           };
+
+          // M3-04 PostToolUse hook：fire-and-forget；副作用型（lint / 通知 / 审计转发）
+          void runHooks(
+            {
+              type: "PostToolUse",
+              data: {
+                toolName: call.name,
+                toolArgs: call.args,
+                result: { ok: invokeResult.ok, content: invokeResult.content, isError: invokeResult.isError },
+                sessionId: this.sessionId,
+                workspace: this.options.workspace,
+                permissionMode: this.permissionMode,
+              },
+            },
+            this.hooksConfig
+          ).catch(() => undefined);
 
           // M2-03：ExitPlanMode sentinel → 切 default mode（plan→execute 阶段切换）
           if (
@@ -1740,6 +1840,21 @@ class LocalQueryEngine implements QueryEngine {
       messageId,
       text: finalText
     };
+
+    // M3-04 Stop hook：fire-and-forget；副作用型（统计 / 通知 / 外部系统集成）
+    void runHooks(
+      {
+        type: "Stop",
+        data: {
+          finalText,
+          sessionId: this.sessionId,
+          workspace: this.options.workspace,
+          permissionMode: this.permissionMode,
+        },
+      },
+      this.hooksConfig
+    ).catch(() => undefined);
+
     yield this.phaseEvent("completed");
   }
 
