@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { ragEmbed, ragIndex, ragSearch, ragStatus, type RagHit, type RagStatus as RagStatusT } from "@/api/endpoints";
+import CodeViewer from "../CodeViewer";
 
 interface Props {
   onError(msg: string | null): void;
@@ -102,14 +103,21 @@ export default function RagPanel({ onError }: Props) {
       <ol className="space-y-2 list-none">
         {hits.map((h, i) => {
           const score = h.rrfScore != null ? `rrf=${h.rrfScore.toFixed(4)}` : `bm25=${(h.score ?? 0).toFixed(2)}`;
+          const content = (h.content ?? "").slice(0, 4000);
+          // 大块 / 看着像代码的命中走 Monaco（含行号 + 折叠）；短小走 pre
+          const useMonaco = content.length > 200 || /\.(ts|tsx|js|jsx|py|go|rs|java|c|h|cpp)$/.test(h.relPath);
           return (
             <li key={i} className="border border-border rounded p-2.5">
               <div className="text-xs text-muted font-mono mb-1">
                 [{i + 1}] {h.relPath}:{h.lineStart}-{h.lineEnd} {score} {h.source ?? ""}
               </div>
-              <pre className="bg-bg p-2 rounded text-xs font-mono max-h-64 overflow-auto whitespace-pre-wrap">
-                {(h.content ?? "").slice(0, 1200)}
-              </pre>
+              {useMonaco ? (
+                <CodeViewer code={content} filePath={h.relPath} maxHeight={320} />
+              ) : (
+                <pre className="bg-bg p-2 rounded text-xs font-mono max-h-64 overflow-auto whitespace-pre-wrap">
+                  {content}
+                </pre>
+              )}
             </li>
           );
         })}

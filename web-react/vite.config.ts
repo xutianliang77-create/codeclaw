@@ -30,13 +30,17 @@ export default defineConfig({
     outDir: "dist",
     sourcemap: true,
     target: "es2022",
-    // 161KB gzip 的 vendor 在生产可接受；调高阈值避免误报
-    chunkSizeWarningLimit: 700,
+    // vendor 162KB gzip + Monaco 主包（lazy）971KB gzip 都 OK；调高阈值避免误报
+    chunkSizeWarningLimit: 1100,
     // 手动拆分体积大头：vendor 包含 react/markdown/highlight（避免循环），d3 / virtual 单拆
     rollupOptions: {
       output: {
         manualChunks(id) {
           if (id.includes("node_modules")) {
+            // Monaco 通过 React.lazy 异步加载，让 rollup 自动拆 chunk（不并入 vendor）
+            if (id.includes("monaco-editor") || id.includes("@monaco-editor")) {
+              return undefined;
+            }
             if (id.includes("d3-")) return "d3";
             if (id.includes("@tanstack")) return "virtual";
             // react / react-dom / react-markdown / remark / rehype / highlight.js 都进 vendor
