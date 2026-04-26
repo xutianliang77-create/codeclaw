@@ -8,10 +8,17 @@
  * sqlite 打开成本可接受（< 5ms）。如未来变频繁可改 lazy singleton。
  */
 
-import { openRagDb } from "./store";
+import {
+  openRagDb,
+  countEmbeddedChunks,
+  listChunksMissingEmbedding,
+  setEmbedding,
+} from "./store";
 import { indexWorkspace, summarizeIndexProgress, type IndexProgress } from "./indexer";
 import { searchKeyword, formatSearchHits } from "./searcher";
 import type { SearchHit } from "./indexer";
+import { embedTexts, vectorToBlob, type EmbedOptions } from "./embedding";
+import { searchHybrid, type HybridHit } from "./hybrid";
 
 export interface RagIndexResult {
   ok: true;
@@ -51,6 +58,7 @@ export function runSearch(
 
 export interface RagStatusResult {
   chunkCount: number;
+  embeddedCount: number;
   lastIndexedAt: number | null;
   workspaceMeta: string | null;
 }
@@ -61,6 +69,7 @@ export function runStatus(workspace: string): RagStatusResult {
     const chunkCount = (handle.db.prepare("SELECT COUNT(*) AS n FROM rag_chunks").get() as {
       n: number;
     }).n;
+    const embeddedCount = countEmbeddedChunks(handle.db);
     const lastRow = handle.db.prepare("SELECT value FROM rag_meta WHERE key = ?").get("last_indexed_at") as
       | { value: string }
       | undefined;
@@ -69,6 +78,7 @@ export function runStatus(workspace: string): RagStatusResult {
       | undefined;
     return {
       chunkCount,
+      embeddedCount,
       lastIndexedAt: lastRow ? Number.parseInt(lastRow.value, 10) : null,
       workspaceMeta: wsRow?.value ?? null,
     };
@@ -94,7 +104,89 @@ export function formatStatus(s: RagStatusResult): string {
   const lastIndexed = s.lastIndexedAt ? new Date(s.lastIndexedAt).toISOString() : "never";
   return [
     `chunks: ${s.chunkCount}`,
+    `embedded: ${s.embeddedCount}/${s.chunkCount}`,
     `last-indexed: ${lastIndexed}`,
     `workspace: ${s.workspaceMeta ?? "(empty)"}`,
   ].join("\n");
+}
+
+/* ---------- step c: 批量 embed ---------- */
+
+export interface RagEmbedResult {
+  embeddedNow: number;
+  embeddedTotal: number;
+  remaining: number;
+  durationMs: number;
+}
+
+export async function runEmbed(
+  workspace: string,
+  embedOpts: EmbedOptions,
+  options: { batch?: number; maxChunks?: number } = {}
+): Promise<RagEmbedResult> {
+  const start = Date.now();
+  const handle = openRagDb(workspace);
+  try {
+    const limit = Math.min(options.maxChunks ?? 500, 5000);
+    const missing = listChunksMissingEmbedding(handle.db, limit);
+    if (missing.length === 0) {
+      return {
+        embeddedNow: 0,
+        embeddedTotal: countEmbeddedChunks(handle.db),
+        remaining: 0,
+        durationMs: Date.now() - start,
+      };
+    }
+    const texts = missing.map((m) => m.content);
+    const vectors = await embedTexts(texts, {
+      ...embedOpts,
+      ...(options.batch ? { batchSize: options.batch } : {}),
+    });
+    for (let i = 0; i < missing.length && i < vectors.length; i++) {
+      setEmbedding(handle.db, missing[i].chunkId, vectorToBlob(vectors[i]));
+    }
+    const remaining = listChunksMissingEmbedding(handle.db, 1).length;
+    return {
+      embeddedNow: missing.length,
+      embeddedTotal: countEmbeddedChunks(handle.db),
+      remaining,
+      durationMs: Date.now() - start,
+    };
+  } finally {
+    handle.close();
+  }
+}
+
+/* ---------- step d: hybrid search ---------- */
+
+export interface RagHybridResult {
+  ok: true;
+  hits: HybridHit[];
+  text: string;
+}
+
+export async function runHybridSearch(
+  workspace: string,
+  query: string,
+  embedOpts: EmbedOptions,
+  topK: number = 8
+): Promise<RagHybridResult> {
+  const handle = openRagDb(workspace);
+  try {
+    const hits = await searchHybrid(handle.db, query, embedOpts, { topK });
+    return { ok: true, hits, text: formatHybridHits(hits) };
+  } finally {
+    handle.close();
+  }
+}
+
+export function formatHybridHits(hits: HybridHit[]): string {
+  if (hits.length === 0) return "(no matches)";
+  return hits
+    .map((h, i) => {
+      const head = `[${i + 1}] ${h.relPath}:${h.lineStart}-${h.lineEnd}  rrf=${h.rrfScore.toFixed(4)}  src=${h.source}${h.hits.length ? `  hits=${h.hits.join(",")}` : ""}`;
+      const body = h.content.length > 600 ? `${h.content.slice(0, 600)}\n...[truncated]` : h.content;
+      return `${head}\n---\n${body}\n`;
+    })
+    .join("\n");
 }

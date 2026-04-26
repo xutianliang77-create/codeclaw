@@ -208,3 +208,43 @@ export function getMeta(db: Database.Database, key: string): string | undefined 
 export function clearAll(db: Database.Database): void {
   db.exec("DELETE FROM rag_terms; DELETE FROM rag_chunks; DELETE FROM rag_meta;");
 }
+
+/* ---------- Embedding helpers (M4-#75 step c) ---------- */
+
+export function setEmbedding(db: Database.Database, chunkId: string, blob: Buffer): void {
+  db.prepare("UPDATE rag_chunks SET embedding = ? WHERE chunk_id = ?").run(blob, chunkId);
+}
+
+export function getEmbedding(db: Database.Database, chunkId: string): Buffer | undefined {
+  const row = db.prepare("SELECT embedding FROM rag_chunks WHERE chunk_id = ?").get(chunkId) as
+    | { embedding: Buffer | null }
+    | undefined;
+  return row?.embedding ?? undefined;
+}
+
+export function listChunksMissingEmbedding(
+  db: Database.Database,
+  limit: number = 1000
+): Array<{ chunkId: string; content: string }> {
+  return (
+    db
+      .prepare("SELECT chunk_id, content FROM rag_chunks WHERE embedding IS NULL LIMIT ?")
+      .all(limit) as Array<{ chunk_id: string; content: string }>
+  ).map((r) => ({ chunkId: r.chunk_id, content: r.content }));
+}
+
+export function listAllEmbeddings(
+  db: Database.Database
+): Array<{ chunkId: string; embedding: Buffer }> {
+  return (
+    db
+      .prepare("SELECT chunk_id, embedding FROM rag_chunks WHERE embedding IS NOT NULL")
+      .all() as Array<{ chunk_id: string; embedding: Buffer }>
+  ).map((r) => ({ chunkId: r.chunk_id, embedding: r.embedding }));
+}
+
+export function countEmbeddedChunks(db: Database.Database): number {
+  return (db.prepare("SELECT COUNT(*) AS n FROM rag_chunks WHERE embedding IS NOT NULL").get() as {
+    n: number;
+  }).n;
+}

@@ -76,7 +76,7 @@ import { runHooks } from "../hooks/runner";
 import type { HookSettings } from "../hooks/settings";
 import { registerTaskTool } from "./tools/taskTool";
 import { registerRagSearchTool } from "./tools/ragTool";
-import { runIndex, runSearch, runStatus, runClear, formatStatus } from "../rag/api";
+import { runIndex, runSearch, runStatus, runClear, runEmbed, runHybridSearch, formatStatus } from "../rag/api";
 import { checkTokenBudget, estimateToolsSchemaTokens, warnIfBudgetExceeded } from "./tokenBudget";
 import { autoCompactIfNeeded } from "./autoCompact";
 import { detectLocalTool, inspectLocalTool, isHandledLocalToolResult, runLocalTool } from "../tools/local";
@@ -2558,7 +2558,7 @@ class LocalQueryEngine implements QueryEngine {
     return lines.join("\n");
   }
 
-  // M4-#75 step e：/rag 命令分发；保持 stateless（每次操作打开 db → 用完关）
+  // M4-#75 step c-e：/rag 命令分发；保持 stateless（每次操作打开 db → 用完关）
   private async runRagCommand(argsRaw: string): Promise<string> {
     const trimmed = argsRaw.trim();
     if (!trimmed || trimmed === "status") {
@@ -2573,14 +2573,59 @@ class LocalQueryEngine implements QueryEngine {
     if (sub === "search") {
       const query = rest.join(" ").trim();
       if (!query) return "Usage: /rag search <query>";
-      const r = runSearch(this.options.workspace, query, 8);
-      return r.text;
+      // 自动选 hybrid：当有 embedding 数据 + 当前 provider 配 embed model 时用 hybrid，否则 BM25
+      const status = runStatus(this.options.workspace);
+      const embedOpts = this.resolveEmbedOptions();
+      if (status.embeddedCount > 0 && embedOpts) {
+        try {
+          const r = await runHybridSearch(this.options.workspace, query, embedOpts, 8);
+          return r.text;
+        } catch (err) {
+          // hybrid 失败（embed API 不可达等）→ 降级 BM25
+          const fallbackText = `[hybrid failed, falling back to BM25] ${err instanceof Error ? err.message : String(err)}\n\n`;
+          return fallbackText + runSearch(this.options.workspace, query, 8).text;
+        }
+      }
+      return runSearch(this.options.workspace, query, 8).text;
+    }
+    if (sub === "embed") {
+      const embedOpts = this.resolveEmbedOptions();
+      if (!embedOpts) {
+        return "Embedding requires a configured provider with embed model. Set CODECLAW_RAG_EMBED_MODEL env or run with provider supporting embeddings.";
+      }
+      const r = await runEmbed(this.options.workspace, embedOpts);
+      return [
+        `embedded-now: ${r.embeddedNow}`,
+        `embedded-total: ${r.embeddedTotal}`,
+        `remaining: ${r.remaining}`,
+        `duration: ${r.durationMs}ms`,
+      ].join("\n");
     }
     if (sub === "clear") {
       const r = runClear(this.options.workspace);
       return `cleared: ${r.cleared} chunk(s). Re-run /rag index to rebuild.`;
     }
-    return "Usage: /rag | /rag index | /rag search <q> | /rag status | /rag clear";
+    return "Usage: /rag | /rag index | /rag embed | /rag search <q> | /rag status | /rag clear";
+  }
+
+  /**
+   * 从 currentProvider + env 推 embed 配置；
+   *   - env CODECLAW_RAG_EMBED_MODEL 优先（覆盖 provider model）
+   *   - env CODECLAW_RAG_EMBED_BASE_URL 可单独指向 embed 服务
+   *   - 否则用 currentProvider 的 baseUrl + apiKey + model
+   */
+  private resolveEmbedOptions(): import("../rag/embedding").EmbedOptions | null {
+    const envModel = process.env.CODECLAW_RAG_EMBED_MODEL;
+    const envBaseUrl = process.env.CODECLAW_RAG_EMBED_BASE_URL;
+    const provider = this.currentProvider;
+    const baseUrl = envBaseUrl ?? provider?.baseUrl;
+    const model = envModel ?? "bge-m3";
+    if (!baseUrl) return null;
+    return {
+      baseUrl,
+      model,
+      ...(provider?.apiKey ? { apiKey: provider.apiKey } : {}),
+    };
   }
 
   private buildInitReply(): string {
