@@ -52,6 +52,14 @@ export interface HandlerDeps {
     current: ProviderStatus | null;
     fallback: ProviderStatus | null;
   };
+  /** A2：workspace 路径，给 RAG / Graph / hooks reload handler 用 */
+  workspace?: string;
+  /** A2：MCP manager；不注入 → MCP 端点返 503 service-unavailable */
+  mcpManager?: import("../../mcp/manager").McpManager;
+  /** A2：hooks 当前配置取值器；reload 后由 cli SIGHUP 触发更新此引用所返值 */
+  hooksConfigRef?: () => import("../../hooks/settings").HookSettings | undefined;
+  /** A2：触发 hooks 配置热重载并广播给所有 session engine */
+  reloadHooks?: () => import("../../hooks/settings").CodeclawSettings;
 }
 
 function jsonResponse(res: ServerResponse, status: number, body: unknown): void {
@@ -434,5 +442,389 @@ export async function handleStream(
     clearInterval(heartbeat);
     session.emitter.off("event", onEvent);
     session.emitter.off("close", onClose);
+  });
+}
+
+/* =====================================================================
+ * #114 阶段 A · M3 + RAG + Graph 端点（13 个 handler）
+ *
+ * 统一行为：
+ *   - 全部 Bearer 鉴权（authenticate 复用）
+ *   - 错误统一格式 `{error:{code,message}}` 4xx/5xx
+ *   - workspace / mcpManager / hooksConfigRef 来自 deps（startWebServer 注入）
+ * ===================================================================== */
+
+function errorBody(code: string, message: string): { error: { code: string; message: string } } {
+  return { error: { code, message } };
+}
+
+// GET /v1/web/mcp/servers
+export async function handleMcpListServers(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  if (!authenticate(req, res, deps)) {
+    return;
+  }
+  if (!deps.mcpManager) {
+    jsonResponse(res, 503, errorBody("mcp-disabled", "mcp manager not wired in this build"));
+    return;
+  }
+  jsonResponse(res, 200, { servers: deps.mcpManager.listServers() });
+}
+
+// GET /v1/web/mcp/tools?server=<name>
+export async function handleMcpListTools(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  serverName: string | null
+): Promise<void> {
+  if (!authenticate(req, res, deps)) {
+    return;
+  }
+  if (!deps.mcpManager) {
+    jsonResponse(res, 503, errorBody("mcp-disabled", "mcp manager not wired in this build"));
+    return;
+  }
+  const all = deps.mcpManager.listAllTools();
+  const filtered = serverName ? all.filter((x) => x.server === serverName) : all;
+  jsonResponse(res, 200, {
+    tools: filtered.map((x) => ({
+      server: x.server,
+      name: x.tool.name,
+      description: x.tool.description,
+      inputSchema: x.tool.inputSchema,
+    })),
+  });
+}
+
+// POST /v1/web/mcp/call   body: { server, tool, args }
+export async function handleMcpCall(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  if (!authenticate(req, res, deps)) {
+    return;
+  }
+  if (!deps.mcpManager) {
+    jsonResponse(res, 503, errorBody("mcp-disabled", "mcp manager not wired in this build"));
+    return;
+  }
+  let body: { server?: string; tool?: string; args?: unknown };
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    jsonResponse(res, 400, errorBody("bad-json", String(err)));
+    return;
+  }
+  if (!body.server || !body.tool) {
+    jsonResponse(res, 400, errorBody("missing-fields", "server and tool are required"));
+    return;
+  }
+  try {
+    const result = await deps.mcpManager.callTool(body.server, body.tool, body.args ?? {});
+    jsonResponse(res, 200, { ok: true, ...result });
+  } catch (err) {
+    jsonResponse(res, 502, errorBody("mcp-call-failed", err instanceof Error ? err.message : String(err)));
+  }
+}
+
+// GET /v1/web/hooks
+export async function handleHooksGet(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  if (!authenticate(req, res, deps)) {
+    return;
+  }
+  const hooks = deps.hooksConfigRef?.() ?? {};
+  jsonResponse(res, 200, { events: hooks });
+}
+
+// POST /v1/web/hooks/reload
+export async function handleHooksReload(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  if (!authenticate(req, res, deps)) {
+    return;
+  }
+  if (!deps.reloadHooks) {
+    jsonResponse(res, 503, errorBody("reload-disabled", "hooks reload not wired"));
+    return;
+  }
+  try {
+    const next = deps.reloadHooks();
+    jsonResponse(res, 200, { ok: true, events: next.hooks ?? {} });
+  } catch (err) {
+    jsonResponse(res, 500, errorBody("reload-failed", err instanceof Error ? err.message : String(err)));
+  }
+}
+
+// GET /v1/web/rag/status
+export async function handleRagStatus(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  if (!authenticate(req, res, deps)) {
+    return;
+  }
+  if (!deps.workspace) {
+    jsonResponse(res, 500, errorBody("no-workspace", "workspace path not configured"));
+    return;
+  }
+  try {
+    const { runStatus } = await import("../../rag/api");
+    jsonResponse(res, 200, runStatus(deps.workspace));
+  } catch (err) {
+    jsonResponse(res, 500, errorBody("rag-status-failed", err instanceof Error ? err.message : String(err)));
+  }
+}
+
+// POST /v1/web/rag/index
+export async function handleRagIndex(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  if (!authenticate(req, res, deps)) {
+    return;
+  }
+  if (!deps.workspace) {
+    jsonResponse(res, 500, errorBody("no-workspace", "workspace path not configured"));
+    return;
+  }
+  try {
+    const { runIndex } = await import("../../rag/api");
+    jsonResponse(res, 200, runIndex(deps.workspace));
+  } catch (err) {
+    jsonResponse(res, 500, errorBody("rag-index-failed", err instanceof Error ? err.message : String(err)));
+  }
+}
+
+// POST /v1/web/rag/embed   body: { maxChunks?, batch? }
+export async function handleRagEmbed(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  if (!authenticate(req, res, deps)) {
+    return;
+  }
+  if (!deps.workspace) {
+    jsonResponse(res, 500, errorBody("no-workspace", "workspace path not configured"));
+    return;
+  }
+  let body: { maxChunks?: number; batch?: number } = {};
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    body = {};
+  }
+  const provider = deps.providers?.current ?? null;
+  const baseUrl = process.env.CODECLAW_RAG_EMBED_BASE_URL ?? provider?.baseUrl;
+  const model = process.env.CODECLAW_RAG_EMBED_MODEL ?? "bge-m3";
+  if (!baseUrl) {
+    jsonResponse(res, 503, errorBody("embed-not-configured", "no provider baseUrl + CODECLAW_RAG_EMBED_BASE_URL"));
+    return;
+  }
+  try {
+    const { runEmbed } = await import("../../rag/api");
+    const opts: { maxChunks?: number; batch?: number } = {};
+    if (body.maxChunks !== undefined) opts.maxChunks = body.maxChunks;
+    if (body.batch !== undefined) opts.batch = body.batch;
+    const r = await runEmbed(
+      deps.workspace,
+      { baseUrl, model, ...(provider?.apiKey ? { apiKey: provider.apiKey } : {}) },
+      opts
+    );
+    jsonResponse(res, 200, r);
+  } catch (err) {
+    jsonResponse(res, 500, errorBody("rag-embed-failed", err instanceof Error ? err.message : String(err)));
+  }
+}
+
+// POST /v1/web/rag/search   body: { query, topK? }
+export async function handleRagSearch(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  if (!authenticate(req, res, deps)) {
+    return;
+  }
+  if (!deps.workspace) {
+    jsonResponse(res, 500, errorBody("no-workspace", "workspace path not configured"));
+    return;
+  }
+  let body: { query?: string; topK?: number };
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    jsonResponse(res, 400, errorBody("bad-json", String(err)));
+    return;
+  }
+  if (!body.query || typeof body.query !== "string") {
+    jsonResponse(res, 400, errorBody("missing-query", "query is required"));
+    return;
+  }
+  const topK = body.topK ?? 8;
+  try {
+    const { runSearch, runStatus, runHybridSearch } = await import("../../rag/api");
+    const status = runStatus(deps.workspace);
+    const provider = deps.providers?.current ?? null;
+    const baseUrl = process.env.CODECLAW_RAG_EMBED_BASE_URL ?? provider?.baseUrl;
+    const model = process.env.CODECLAW_RAG_EMBED_MODEL ?? "bge-m3";
+    if (status.embeddedCount > 0 && baseUrl) {
+      try {
+        const r = await runHybridSearch(
+          deps.workspace,
+          body.query,
+          { baseUrl, model, ...(provider?.apiKey ? { apiKey: provider.apiKey } : {}) },
+          topK
+        );
+        jsonResponse(res, 200, { mode: "hybrid", hits: r.hits });
+        return;
+      } catch {
+        // fall through to BM25
+      }
+    }
+    const r = runSearch(deps.workspace, body.query, topK);
+    jsonResponse(res, 200, { mode: "bm25", hits: r.hits });
+  } catch (err) {
+    jsonResponse(res, 500, errorBody("rag-search-failed", err instanceof Error ? err.message : String(err)));
+  }
+}
+
+// GET /v1/web/graph/status
+export async function handleGraphStatus(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  if (!authenticate(req, res, deps)) {
+    return;
+  }
+  if (!deps.workspace) {
+    jsonResponse(res, 500, errorBody("no-workspace", "workspace path not configured"));
+    return;
+  }
+  try {
+    const { runStatus } = await import("../../graph/api");
+    jsonResponse(res, 200, runStatus(deps.workspace));
+  } catch (err) {
+    jsonResponse(res, 500, errorBody("graph-status-failed", err instanceof Error ? err.message : String(err)));
+  }
+}
+
+// POST /v1/web/graph/build
+export async function handleGraphBuild(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  if (!authenticate(req, res, deps)) {
+    return;
+  }
+  if (!deps.workspace) {
+    jsonResponse(res, 500, errorBody("no-workspace", "workspace path not configured"));
+    return;
+  }
+  try {
+    const { runBuild } = await import("../../graph/api");
+    jsonResponse(res, 200, runBuild(deps.workspace));
+  } catch (err) {
+    jsonResponse(res, 500, errorBody("graph-build-failed", err instanceof Error ? err.message : String(err)));
+  }
+}
+
+// POST /v1/web/graph/query   body: { type, arg, arg2? }
+export async function handleGraphQuery(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  if (!authenticate(req, res, deps)) {
+    return;
+  }
+  if (!deps.workspace) {
+    jsonResponse(res, 500, errorBody("no-workspace", "workspace path not configured"));
+    return;
+  }
+  let body: { type?: string; arg?: string; arg2?: string };
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    jsonResponse(res, 400, errorBody("bad-json", String(err)));
+    return;
+  }
+  const ALLOWED = ["callers", "callees", "dependents", "dependencies", "symbol"] as const;
+  type GraphQueryType = (typeof ALLOWED)[number];
+  if (!body.type || !ALLOWED.includes(body.type as GraphQueryType)) {
+    jsonResponse(res, 400, errorBody("bad-type", `type must be one of ${ALLOWED.join("|")}`));
+    return;
+  }
+  if (!body.arg) {
+    jsonResponse(res, 400, errorBody("missing-arg", "arg is required"));
+    return;
+  }
+  try {
+    const { runQuery } = await import("../../graph/api");
+    const result = runQuery(deps.workspace, body.type as GraphQueryType, body.arg, body.arg2);
+    jsonResponse(res, 200, { result });
+  } catch (err) {
+    jsonResponse(res, 500, errorBody("graph-query-failed", err instanceof Error ? err.message : String(err)));
+  }
+}
+
+// GET /v1/web/status-line
+export async function handleStatusLine(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  if (!authenticate(req, res, deps)) {
+    return;
+  }
+  const provider = deps.providers?.current ?? null;
+  // 阶段 A：构造一行 default status；不跑 statusLine.command（命令行执行更适合 cli）
+  const text = [
+    provider?.displayName ?? "no-provider",
+    provider?.model ?? "no-model",
+    `sessions=${deps.store.size()}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  jsonResponse(res, 200, {
+    text,
+    kind: "default" as const,
+    lastUpdate: Date.now(),
+  });
+}
+
+// GET /v1/web/sessions/<id>/subagents
+export async function handleSubagents(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  sessionId: string
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+  const session = deps.store.get(sessionId, auth.userId);
+  if (!session) {
+    jsonResponse(res, 404, errorBody("session-not-found", `unknown session: ${sessionId}`));
+    return;
+  }
+  // 阶段 A：runner 暂未持久化中间状态；返回 placeholder（阶段 B 加 instrumentation）
+  jsonResponse(res, 200, {
+    subagents: [],
+    note: "subagent traces are not yet streamed in stage A; coming in stage B",
   });
 }

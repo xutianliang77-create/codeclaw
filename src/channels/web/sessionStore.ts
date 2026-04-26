@@ -125,4 +125,15 @@ export class SessionStore {
   size(): number {
     return this.map.size;
   }
+
+  /** 给 SIGHUP / 设置热重载用：遍历所有 active engines（不暴露 emitter） */
+  forEachEngine(fn: (engine: QueryEngine, sessionId: string) => void): void {
+    for (const [sessionId, s] of this.map.entries()) {
+      try {
+        fn(s.engine, sessionId);
+      } catch {
+        // 单 engine 处理失败不阻塞其它
+      }
+    }
+  }
 }

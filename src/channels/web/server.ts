@@ -35,12 +35,29 @@ import {
   handlePatchProvider,
   handleProviders,
   handleStream,
+  handleMcpListServers,
+  handleMcpListTools,
+  handleMcpCall,
+  handleHooksGet,
+  handleHooksReload,
+  handleRagStatus,
+  handleRagIndex,
+  handleRagEmbed,
+  handleRagSearch,
+  handleGraphStatus,
+  handleGraphBuild,
+  handleGraphQuery,
+  handleStatusLine,
+  handleSubagents,
   type HandlerDeps,
 } from "./handlers";
 import { SessionStore } from "./sessionStore";
 import type { QueryEngineOptions } from "../../agent/types";
 import { createQueryEngine } from "../../agent/queryEngine";
 import { openDataDb } from "../../storage/db";
+import type { McpManager } from "../../mcp/manager";
+import type { CodeclawSettings, HookSettings } from "../../hooks/settings";
+import { loadSettings } from "../../hooks/settings";
 
 export interface StartWebServerOptions {
   /** 监听端口；0 = 随机（测试用）；默认 7180 */
@@ -53,6 +70,16 @@ export interface StartWebServerOptions {
   engineDefaults: Omit<QueryEngineOptions, "channel" | "userId">;
   /** 静态文件根目录；默认 <cwd>/web；测试可传空字符串禁用 */
   staticRoot?: string;
+  /**
+   * MCP manager 引用；A2 修补传入后 web 端 LLM 能用 mcp__<server>__<tool>
+   * + 可视面板查 server / tools / call。不传时 MCP 相关 endpoint 返 503。
+   */
+  mcpManager?: McpManager;
+  /**
+   * 当前 hooks 配置取值器；返回值随 cli SIGHUP 热重载切换。
+   * 不传则 web 端 /v1/web/hooks 返当前 engineDefaults.settings 快照（无热更）。
+   */
+  hooksConfigRef?: () => HookSettings | undefined;
 }
 
 const MIME_TYPES: Record<string, string> = {
@@ -99,6 +126,8 @@ export interface WebServerHandle {
   store: SessionStore;
   /** 优雅关闭：停接受新连接 + 关闭现有 session emitters */
   close(): Promise<void>;
+  /** SIGHUP 时由 cli 调；遍历所有 active engines 同步 hooks 配置 */
+  broadcastSettingsReload(next: CodeclawSettings): void;
 }
 
 function notFound(res: ServerResponse): void {
@@ -168,6 +197,65 @@ async function dispatch(
     return handleStream(req, res, deps, sessionId);
   }
 
+  // ===== A.2: M3 + RAG + Graph endpoints =====
+  // GET /v1/web/mcp/servers
+  if (url.pathname === "/v1/web/mcp/servers" && method === "GET") {
+    return handleMcpListServers(req, res, deps);
+  }
+  // GET /v1/web/mcp/tools?server=<name>
+  if (url.pathname === "/v1/web/mcp/tools" && method === "GET") {
+    return handleMcpListTools(req, res, deps, url.searchParams.get("server"));
+  }
+  // POST /v1/web/mcp/call
+  if (url.pathname === "/v1/web/mcp/call" && method === "POST") {
+    return handleMcpCall(req, res, deps);
+  }
+  // GET /v1/web/hooks
+  if (url.pathname === "/v1/web/hooks" && method === "GET") {
+    return handleHooksGet(req, res, deps);
+  }
+  // POST /v1/web/hooks/reload
+  if (url.pathname === "/v1/web/hooks/reload" && method === "POST") {
+    return handleHooksReload(req, res, deps);
+  }
+  // GET /v1/web/rag/status
+  if (url.pathname === "/v1/web/rag/status" && method === "GET") {
+    return handleRagStatus(req, res, deps);
+  }
+  // POST /v1/web/rag/index
+  if (url.pathname === "/v1/web/rag/index" && method === "POST") {
+    return handleRagIndex(req, res, deps);
+  }
+  // POST /v1/web/rag/embed
+  if (url.pathname === "/v1/web/rag/embed" && method === "POST") {
+    return handleRagEmbed(req, res, deps);
+  }
+  // POST /v1/web/rag/search
+  if (url.pathname === "/v1/web/rag/search" && method === "POST") {
+    return handleRagSearch(req, res, deps);
+  }
+  // GET /v1/web/graph/status
+  if (url.pathname === "/v1/web/graph/status" && method === "GET") {
+    return handleGraphStatus(req, res, deps);
+  }
+  // POST /v1/web/graph/build
+  if (url.pathname === "/v1/web/graph/build" && method === "POST") {
+    return handleGraphBuild(req, res, deps);
+  }
+  // POST /v1/web/graph/query
+  if (url.pathname === "/v1/web/graph/query" && method === "POST") {
+    return handleGraphQuery(req, res, deps);
+  }
+  // GET /v1/web/status-line
+  if (url.pathname === "/v1/web/status-line" && method === "GET") {
+    return handleStatusLine(req, res, deps);
+  }
+  // GET /v1/web/sessions/<id>/subagents
+  const subMatch = /^\/v1\/web\/sessions\/(.+)\/subagents$/.exec(url.pathname);
+  if (subMatch && method === "GET") {
+    return handleSubagents(req, res, deps, decodeURIComponent(subMatch[1]));
+  }
+
   // 静态文件
   if (method === "GET" && staticRoot) {
     if (url.pathname === "/") {
@@ -217,6 +305,8 @@ export function startWebServer(opts: StartWebServerOptions): Promise<WebServerHa
       // singleton 冲突或文件不可用 → 静默降级
     }
   }
+  // A2: hooksConfigRef + 静态 fallback；reload 路径在 handler 内调 loadSettings
+  let hooksFallback: HookSettings | undefined = opts.engineDefaults.settings?.hooks;
   const deps: HandlerDeps = {
     store,
     auth,
@@ -224,6 +314,19 @@ export function startWebServer(opts: StartWebServerOptions): Promise<WebServerHa
     providers: {
       current: opts.engineDefaults.currentProvider ?? null,
       fallback: opts.engineDefaults.fallbackProvider ?? null,
+    },
+    workspace: opts.engineDefaults.workspace,
+    ...(opts.mcpManager ? { mcpManager: opts.mcpManager } : {}),
+    hooksConfigRef: () => opts.hooksConfigRef?.() ?? hooksFallback,
+    reloadHooks: () => {
+      const next = loadSettings(opts.engineDefaults.workspace);
+      hooksFallback = next.hooks;
+      // 回填到所有 active engine
+      store.forEachEngine((engine) => {
+        const e = engine as { setHooksConfig?: (h: HookSettings) => void };
+        e.setHooksConfig?.(next.hooks);
+      });
+      return next;
     },
   };
   const staticRoot = opts.staticRoot === "" ? "" : opts.staticRoot ?? defaultStaticRoot();
@@ -259,6 +362,13 @@ export function startWebServer(opts: StartWebServerOptions): Promise<WebServerHa
         async close() {
           await new Promise<void>((r, j) => {
             server.close((err) => (err ? j(err) : r()));
+          });
+        },
+        broadcastSettingsReload(next) {
+          hooksFallback = next.hooks;
+          store.forEachEngine((engine) => {
+            const e = engine as { setHooksConfig?: (h: HookSettings) => void };
+            e.setHooksConfig?.(next.hooks);
           });
         },
       });

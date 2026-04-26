@@ -35,21 +35,100 @@
     <button id="logout-btn" class="hidden">登出</button>
   </section>
 
-  <main id="chat" class="chat hidden">
-    <div id="messages" class="messages" aria-live="polite"></div>
-    <form id="composer" class="composer">
-      <div id="attachment-tray" class="attachment-tray hidden"></div>
-      <div class="composer-row">
-        <label class="attach-btn" for="attach-input" title="附加图片（拖拽也支持）">📎</label>
-        <input id="attach-input" type="file" accept="image/*" hidden />
-        <textarea id="input" placeholder="输入消息（Enter 发送 · Shift+Enter 换行）" rows="2"></textarea>
-        <button id="send-btn" type="submit">发送</button>
-      </div>
-    </form>
-  </main>
+  <!-- A.3：tab bar + 多 panel 布局（在已 connected 后整体显示） -->
+  <nav id="tabs" class="tabs hidden">
+    <button class="tab active" data-tab="chat">Chat</button>
+    <button class="tab" data-tab="rag">RAG</button>
+    <button class="tab" data-tab="graph">Graph</button>
+    <button class="tab" data-tab="mcp">MCP</button>
+    <button class="tab" data-tab="hooks">Hooks</button>
+  </nav>
 
-  <footer>
-    <span>本地 only · token 仅存浏览器 localStorage · 后端 SSE 推流</span>
+  <div id="workspace" class="workspace hidden">
+    <!-- A.8: 多会话侧栏 -->
+    <aside id="sessions-sidebar" class="sessions-sidebar">
+      <button id="new-session-btn" class="new-session-btn">+ 新会话</button>
+      <ul id="session-list" class="session-list"></ul>
+    </aside>
+
+    <main id="panels" class="panels">
+      <section id="chat" class="panel active" data-panel="chat">
+        <div id="messages" class="messages" aria-live="polite"></div>
+        <form id="composer" class="composer">
+          <div id="attachment-tray" class="attachment-tray hidden"></div>
+          <div class="composer-row">
+            <label class="attach-btn" for="attach-input" title="附加图片（拖拽也支持）">📎</label>
+            <input id="attach-input" type="file" accept="image/*" hidden />
+            <textarea id="input" placeholder="输入消息（Enter 发送 · Shift+Enter 换行）" rows="2"></textarea>
+            <button id="send-btn" type="submit">发送</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="panel-rag" class="panel hidden" data-panel="rag">
+        <div class="panel-toolbar">
+          <button id="rag-refresh-status">刷新状态</button>
+          <button id="rag-index-btn">索引 workspace</button>
+          <button id="rag-embed-btn">补充 embedding</button>
+          <span id="rag-status-text" class="muted">...</span>
+        </div>
+        <form id="rag-search-form" class="panel-form">
+          <input id="rag-query" type="text" placeholder="关键字 / 自然语言搜代码..." autocomplete="off" />
+          <button type="submit">搜索</button>
+        </form>
+        <ol id="rag-results" class="rag-results"></ol>
+      </section>
+
+      <section id="panel-graph" class="panel hidden" data-panel="graph">
+        <div class="panel-toolbar">
+          <button id="graph-refresh-status">刷新状态</button>
+          <button id="graph-build-btn">重建图</button>
+          <span id="graph-status-text" class="muted">...</span>
+        </div>
+        <form id="graph-query-form" class="panel-form">
+          <select id="graph-type">
+            <option value="callers">callers — 谁调用了 symbol</option>
+            <option value="callees">callees — 文件调了谁</option>
+            <option value="dependents">dependents — 谁 import 了文件</option>
+            <option value="dependencies">dependencies — 文件 import 了谁</option>
+            <option value="symbol">symbol — 按名 / 路径找符号</option>
+          </select>
+          <input id="graph-arg" type="text" placeholder="symbol 名 / 文件路径" />
+          <input id="graph-arg2" type="text" placeholder="可选：限定 callee 路径" />
+          <button type="submit">查询</button>
+        </form>
+        <pre id="graph-result" class="graph-result"></pre>
+      </section>
+
+      <section id="panel-mcp" class="panel hidden" data-panel="mcp">
+        <div class="panel-toolbar">
+          <button id="mcp-refresh">刷新</button>
+          <span id="mcp-summary" class="muted">...</span>
+        </div>
+        <ul id="mcp-server-list" class="mcp-server-list"></ul>
+        <h3 class="panel-section-title">Test call</h3>
+        <form id="mcp-test-form" class="panel-form">
+          <input id="mcp-test-server" type="text" placeholder="server name" />
+          <input id="mcp-test-tool" type="text" placeholder="tool name" />
+          <textarea id="mcp-test-args" rows="3" placeholder='{"path":"/data/x.txt"}'></textarea>
+          <button type="submit">调用</button>
+        </form>
+        <pre id="mcp-test-result" class="mcp-test-result"></pre>
+      </section>
+
+      <section id="panel-hooks" class="panel hidden" data-panel="hooks">
+        <div class="panel-toolbar">
+          <button id="hooks-reload">重载 settings.json</button>
+          <span id="hooks-summary" class="muted">...</span>
+        </div>
+        <pre id="hooks-content" class="hooks-content"></pre>
+      </section>
+    </main>
+  </div>
+
+  <footer id="status-line" class="status-line muted hidden">
+    <span id="status-line-text">...</span>
+    <span class="status-meta">本地 only · token 仅存浏览器 localStorage · 后端 SSE 推流</span>
   </footer>
 
   <!-- 第三方依赖：本地拷贝离线可用（vendor/）。defer 保证 DOMContentLoaded 后执行 -->
@@ -57,5 +136,6 @@
   <script src="/static/vendor/purify.min.js" defer></script>
   <script src="/static/vendor/highlight.min.js" defer></script>
   <script src="/static/app.js" defer></script>
+  <script src="/static/panels.js" defer></script>
 </body>
 </html>

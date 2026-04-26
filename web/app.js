@@ -35,6 +35,10 @@ const els = {
   settingsBody: $("settings-body"),
   attachInput: $("attach-input"),
   attachmentTray: $("attachment-tray"),
+  // A.3: 多面板布局 + 状态栏（首屏 hidden，连接成功后显示）
+  workspace: $("workspace"),
+  tabs: $("tabs"),
+  statusLine: $("status-line"),
 };
 
 const state = {
@@ -115,13 +119,19 @@ async function connect() {
 
     setStatus("已连接", true);
     els.authBar.classList.add("hidden");
-    els.chat.classList.remove("hidden");
+    els.workspace?.classList.remove("hidden");
+    els.tabs?.classList.remove("hidden");
+    els.statusLine?.classList.remove("hidden");
     els.logoutBtn.classList.remove("hidden");
     els.cost.classList.remove("hidden");
     els.settingsBtn.classList.remove("hidden");
     refreshCost();
     state.costTimer = setInterval(refreshCost, 5000);
     openStream();
+    // A.3：让 panels.js 在连接后初始化（panel 切换 / 数据加载）
+    if (typeof window.codeclawPanels?.onConnected === "function") {
+      try { window.codeclawPanels.onConnected(state.token); } catch { /* noop */ }
+    }
   } catch (err) {
     setStatus("连接失败", false);
     appendMessage("error", String(err));
@@ -468,7 +478,9 @@ function logout() {
     state.costTimer = null;
   }
   els.authBar.classList.remove("hidden");
-  els.chat.classList.add("hidden");
+  els.workspace?.classList.add("hidden");
+  els.tabs?.classList.add("hidden");
+  els.statusLine?.classList.add("hidden");
   els.logoutBtn.classList.add("hidden");
   els.cost.classList.add("hidden");
   els.cost.textContent = "";
@@ -476,6 +488,9 @@ function logout() {
   closeSettings();
   els.messages.innerHTML = "";
   setStatus("已登出", false);
+  if (typeof window.codeclawPanels?.onDisconnected === "function") {
+    try { window.codeclawPanels.onDisconnected(); } catch { /* noop */ }
+  }
 }
 
 // ───────────── 事件绑定 ─────────────
