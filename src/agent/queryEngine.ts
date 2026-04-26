@@ -82,6 +82,50 @@ import type {
   WechatLoginStateView
 } from "./types";
 
+/**
+ * M2-04：把 ToolCallEvent 映射成 PermissionManager.evaluate 的输入。
+ *   - read/glob/symbol/definition/references → target=args.file_path/pattern/query
+ *   - bash → command=args.command
+ *   - write/append/replace → target=args.file_path
+ *   - memory_write/memory_remove/ExitPlanMode → null（跳过 evaluate，自动 allow）
+ *   - 未知 tool（MCP / 用户扩展）→ 当 mcp-call → evaluate 返 medium → 走 ask 路径
+ */
+function buildPermissionInputFromToolCall(
+  call: ToolCallEvent
+): import("../permissions/manager").ToolPermissionInput | null {
+  const args = (call.args ?? {}) as Record<string, unknown>;
+  const t = call.name;
+  switch (t) {
+    case "read":
+    case "glob":
+      return {
+        tool: t,
+        target: typeof args.file_path === "string" ? args.file_path : typeof args.pattern === "string" ? args.pattern : "",
+      };
+    case "symbol":
+    case "definition":
+    case "references":
+      return {
+        tool: t,
+        target: typeof args.query === "string" ? args.query : "",
+      };
+    case "bash":
+      return { tool: "bash", command: typeof args.command === "string" ? args.command : "" };
+    case "write":
+    case "append":
+      return { tool: t, target: typeof args.file_path === "string" ? args.file_path : "" };
+    case "replace":
+      return { tool: "replace", target: typeof args.file_path === "string" ? args.file_path : "" };
+    case "memory_write":
+    case "memory_remove":
+    case "ExitPlanMode":
+      return null; // 不走 evaluate；自动 allow
+    default:
+      // MCP / 用户扩展 tool → 当 mcp-call medium，走 ask 路径
+      return { tool: "mcp-call", server: "unknown", toolName: t };
+  }
+}
+
 function createId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -1558,8 +1602,41 @@ class LocalQueryEngine implements QueryEngine {
 
         for (const call of collectedToolCalls) {
           const detailPreview = JSON.stringify(call.args ?? {}).slice(0, 100);
+
+          // M2-04：在 invoke 前同步 evaluate；deny / ask 都 push role:"tool" 阻 LLM 重试
+          // 真异步 pending + /approve 恢复留 M3-04 hooks 阶段做
+          const permInput = buildPermissionInputFromToolCall(call);
+          const decision = permInput ? this.permissions.evaluate(permInput) : null;
+          if (decision && decision.behavior !== "allow") {
+            yield { type: "tool-start", toolName: call.name, detail: detailPreview };
+            const denialReason =
+              decision.behavior === "deny"
+                ? `User policy denied this tool call. Reason: ${decision.reason}. ` +
+                  `Do not retry the same call; consider alternatives.`
+                : `Approval required for ${call.name} (${decision.risk} risk). ` +
+                  `Reason: ${decision.reason}. Run /mode bypassPermissions or /mode dontAsk to allow, or change approach.`;
+            this.messages.push({
+              id: createId("tool"),
+              role: "tool",
+              text: denialReason,
+              source: "local",
+              toolCallId: call.id,
+              toolName: call.name,
+            });
+            this.notifyListeners();
+            this.audit({
+              actor: "agent",
+              action: `tool.${call.name}`,
+              decision: decision.behavior === "deny" ? "deny" : "pending",
+              resource: detailPreview,
+              reason: decision.reason,
+            });
+            yield { type: "tool-end", toolName: call.name, status: "blocked" };
+            continue; // 不调 invoke
+          }
+
+          // allow / skip-evaluate（memory_*/ExitPlanMode）→ 正常 invoke
           yield { type: "tool-start", toolName: call.name, detail: detailPreview };
-          // tool runner 暂未消费 abortSignal；这里传 undefined 即可（abortController 已被 stream 路径置空）
           const invokeResult = await this.toolRegistry.invoke(call.name, call.args, {
             workspace: this.options.workspace,
             permissionManager: this.permissions,

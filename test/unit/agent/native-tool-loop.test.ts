@@ -226,6 +226,122 @@ describe("queryEngine native tool_use multi-turn", () => {
     expect(engine.getRuntimeState().permissionMode).toBe("default");
   });
 
+  it("M2-04：evaluate(deny) → push role:tool 否决 + 不调 invoke", async () => {
+    let callIndex = 0;
+    const requests: Array<{ messages: Array<Record<string, unknown>> }> = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as { messages: Array<Record<string, unknown>> });
+      callIndex += 1;
+      if (callIndex === 1) {
+        // turn 1：LLM 调 bash 高危命令（含 rm 触发 deny）
+        return sseResponse(
+          sseFrames([
+            { choices: [{ delta: { tool_calls: [{ index: 0, id: "b1", function: { name: "bash" } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"command":"rm -rf /"}' } }] } }] },
+            { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+          ])
+        );
+      }
+      // turn 2：LLM 看到 deny 改口
+      return sseResponse(
+        sseFrames([
+          { choices: [{ delta: { content: "Sorry, I cannot do that." }, finish_reason: "stop" }] },
+        ])
+      );
+    }) as unknown as typeof fetch;
+
+    const engine = createQueryEngine({
+      currentProvider: provider(),
+      fallbackProvider: null,
+      permissionMode: "acceptEdits", // high risk → deny
+      workspace,
+      fetchImpl,
+    });
+    await collect(engine.submitMessage("clean up everything"));
+
+    expect(callIndex).toBe(2);
+    // turn 2 messages 含一条 role:"tool" 且 content 含 denial reason
+    const turn2Msgs = requests[1].messages as Array<{ role: string; content?: string }>;
+    const denialTool = turn2Msgs.find((m) => m.role === "tool");
+    expect(denialTool).toBeDefined();
+    expect(String(denialTool?.content)).toMatch(/User policy denied|denied this tool call/);
+    // engine.getMessages 含 tool role + 最终 assistant
+    expect(engine.getMessages().filter((m) => m.role === "tool").length).toBeGreaterThanOrEqual(1);
+    expect(engine.getMessages().at(-1)?.text).toContain("cannot");
+  });
+
+  it("M2-04：evaluate(ask) → 同样 push role:tool 阻 LLM 重试（保守降级）", async () => {
+    let callIndex = 0;
+    const requests: Array<{ messages: Array<Record<string, unknown>> }> = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as { messages: Array<Record<string, unknown>> });
+      callIndex += 1;
+      if (callIndex === 1) {
+        // turn 1：default mode + write tool（medium → ask）
+        return sseResponse(
+          sseFrames([
+            { choices: [{ delta: { tool_calls: [{ index: 0, id: "w1", function: { name: "write" } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"file_path":"x.ts","content":"y"}' } }] } }] },
+            { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+          ])
+        );
+      }
+      return sseResponse(
+        sseFrames([
+          { choices: [{ delta: { content: "OK skipping" }, finish_reason: "stop" }] },
+        ])
+      );
+    }) as unknown as typeof fetch;
+
+    const engine = createQueryEngine({
+      currentProvider: provider(),
+      fallbackProvider: null,
+      permissionMode: "default",
+      workspace,
+      fetchImpl,
+    });
+    await collect(engine.submitMessage("write x.ts"));
+
+    const turn2Msgs = requests[1].messages as Array<{ role: string; content?: string }>;
+    const askTool = turn2Msgs.find((m) => m.role === "tool");
+    expect(askTool).toBeDefined();
+    expect(String(askTool?.content)).toContain("Approval required");
+  });
+
+  it("M2-04：evaluate(allow) → 正常 invoke（read low risk 在 default mode）", async () => {
+    writeFileSync(path.join(workspace, "ok.txt"), "all-good-content");
+    let callIndex = 0;
+    const fetchImpl = (async () => {
+      callIndex += 1;
+      if (callIndex === 1) {
+        return sseResponse(
+          sseFrames([
+            { choices: [{ delta: { tool_calls: [{ index: 0, id: "r1", function: { name: "read" } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"file_path":"ok.txt"}' } }] } }] },
+            { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+          ])
+        );
+      }
+      return sseResponse(
+        sseFrames([
+          { choices: [{ delta: { content: "Got: all-good-content" }, finish_reason: "stop" }] },
+        ])
+      );
+    }) as unknown as typeof fetch;
+    const engine = createQueryEngine({
+      currentProvider: provider(),
+      fallbackProvider: null,
+      permissionMode: "default",
+      workspace,
+      fetchImpl,
+    });
+    await collect(engine.submitMessage("read ok.txt"));
+    // tool message 是真读到的内容，不是 denial
+    const toolMsg = engine.getMessages().find((m) => m.role === "tool");
+    expect(toolMsg?.text).toContain("all-good-content");
+    expect(toolMsg?.text).not.toContain("denied");
+  });
+
   it("LLM 没有调工具时 multi-turn 退化为单回合（即使 env 开启）", async () => {
     let callCount = 0;
     const fetchImpl = (async () => {
