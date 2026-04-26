@@ -62,77 +62,70 @@ const DEFAULT_ROLE = `你是 CodeClaw —— 一个本地优先的 CLI 编程助
 export function buildSystemPrompt(input: SystemPromptInput): string {
   const sections: string[] = [];
 
-  sections.push("## Role");
-  sections.push(input.agentRole ?? DEFAULT_ROLE);
-
-  const userMd = loadUserCodeclawMd();
-  if (userMd) {
-    sections.push("## User Preferences");
-    sections.push(userMd);
+  // 通用：title + body 双 push；body 为空跳过
+  function addSection(title: string, body: string | undefined | null): void {
+    if (!body) return;
+    sections.push(`## ${title}`);
+    sections.push(body);
   }
 
-  const projectMd = loadProjectCodeclawMd(input.workspace);
-  if (projectMd) {
-    sections.push("## Project Conventions");
-    sections.push(projectMd);
+  // 通用：list-source 渲染成 "- a — b" 列表段，空列表跳过
+  function addListSection<T>(
+    title: string,
+    items: T[] | null | undefined,
+    formatLine: (item: T) => string
+  ): void {
+    if (!items || items.length === 0) return;
+    addSection(title, items.map(formatLine).join("\n"));
   }
 
-  if (input.slashRegistry) {
-    const cmds = input.slashRegistry.list();
-    if (cmds.length > 0) {
-      sections.push("## Available Slash Commands");
-      sections.push(
-        cmds
-          .map((c) => `- ${c.name}  — ${c.summary ?? c.description ?? "(no description)"}`)
-          .join("\n")
-      );
+  addSection("Role", input.agentRole ?? DEFAULT_ROLE);
+  addSection("User Preferences", loadUserCodeclawMd());
+  addSection("Project Conventions", loadProjectCodeclawMd(input.workspace));
+
+  addListSection(
+    "Available Slash Commands",
+    input.slashRegistry?.list(),
+    (c) => `- ${c.name}  — ${c.summary ?? c.description ?? "(no description)"}`
+  );
+
+  addListSection(
+    "Available Skills",
+    input.skillRegistry?.list(),
+    (s) => {
+      const tag = s.source === "builtin" ? "[builtin]" : "[user]";
+      return `- ${tag} ${s.name}  — ${s.description ?? ""}`;
     }
-  }
-
-  if (input.skillRegistry) {
-    const skills = input.skillRegistry.list();
-    if (skills.length > 0) {
-      sections.push("## Available Skills");
-      const lines = skills.map((s) => {
-        const tag = s.source === "builtin" ? "[builtin]" : "[user]";
-        return `- ${tag} ${s.name}  — ${s.description ?? ""}`;
-      });
-      sections.push(lines.join("\n"));
-    }
-  }
+  );
   if (input.activeSkill) {
     sections.push(`**Active skill**: ${input.activeSkill.name}\n${input.activeSkill.prompt}`);
   }
 
-  if (input.toolRegistry) {
-    const tools = input.toolRegistry.list();
-    if (tools.length > 0) {
-      sections.push("## Available Tools");
-      sections.push(
-        tools.map((t) => `- ${t.name}  — ${t.description}`).join("\n")
-      );
-    }
-  }
+  addListSection(
+    "Available Tools",
+    input.toolRegistry?.list(),
+    (t) => `- ${t.name}  — ${t.description}`
+  );
 
-  const ctxLines: string[] = [];
-  ctxLines.push(`- Working directory: ${input.workspace}`);
-  ctxLines.push(`- Permission mode: ${input.permissionMode}`);
+  // Runtime Context：固定字段 + git 探测（gitSummaryProvider 可被测试覆盖）
+  const ctxLines: string[] = [
+    `- Working directory: ${input.workspace}`,
+    `- Permission mode: ${input.permissionMode}`,
+  ];
   if (input.provider) {
     ctxLines.push(`- Active provider: ${input.provider.type} (${input.provider.model})`);
   }
-  const gitProvider = input.gitSummaryProvider ?? tryGitSummary;
-  const git = gitProvider(input.workspace);
+  const git = (input.gitSummaryProvider ?? tryGitSummary)(input.workspace);
   if (git) {
     ctxLines.push(`- Git: branch=${git.branch}, dirty=${git.dirty}`);
   }
-  sections.push("## Runtime Context");
-  sections.push(ctxLines.join("\n"));
+  addSection("Runtime Context", ctxLines.join("\n"));
 
+  // M2/M3 hook：调用方注入额外段（如 Memory / status line）
   if (input.extraSections) {
     for (const ex of input.extraSections) {
       if (!ex.body.trim()) continue;
-      sections.push(`## ${ex.title}`);
-      sections.push(ex.body);
+      addSection(ex.title, ex.body);
     }
   }
 

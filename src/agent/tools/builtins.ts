@@ -18,17 +18,13 @@
 
 import { runLocalTool } from "../../tools/local";
 import { isHandledToolExecutionOutcome } from "../../tools/types";
-import type { ToolDefinition, ToolInvokeContext, ToolInvokeResult, ToolRegistry } from "./registry";
-
-interface ReadArgs { file_path: string; offset?: number; limit?: number }
-interface BashArgs { command: string }
-interface GlobArgs { pattern: string }
-interface SymbolArgs { query: string }
-interface DefinitionArgs { query: string }
-interface ReferencesArgs { query: string }
-interface WriteArgs { file_path: string; content: string }
-interface AppendArgs { file_path: string; content: string }
-interface ReplaceArgs { file_path: string; find: string; replace: string }
+import type {
+  ToolDefinition,
+  ToolInputSchema,
+  ToolInvokeContext,
+  ToolInvokeResult,
+  ToolRegistry,
+} from "./registry";
 
 function asString(v: unknown, name: string): string {
   if (typeof v !== "string") throw new Error(`${name} must be a string`);
@@ -54,176 +50,39 @@ async function runViaLocal(
   return { ok: true, content: outcome.output };
 }
 
-function readDef(): ToolDefinition {
-  return {
-    name: "read",
-    description: "读取 workspace 内文件全文（默认前 12000 字符）。仅支持单文件路径。",
-    inputSchema: {
-      type: "object",
-      properties: {
-        file_path: { type: "string", description: "absolute or workspace-relative path" },
-      },
-      required: ["file_path"],
-    },
-    async invoke(args, ctx) {
-      const { file_path } = args as ReadArgs;
-      const p = asString(file_path, "file_path");
-      return runViaLocal(`/read ${p}`, ctx);
-    },
+/**
+ * 把若干必填 string 字段拼成 `/<slash> <v1> [:: <v2> :: ...]` 后交给 runLocalTool。
+ * 单字段 → `/cmd <v>`；多字段 → `/cmd <v1> :: <v2> :: ...`（与原 inline 实现等价）。
+ */
+function defineSimpleTool(spec: {
+  name: string;
+  description: string;
+  slash: string;
+  fields: Array<{ key: string; description?: string }>;
+}): ToolDefinition {
+  const properties: Record<string, unknown> = {};
+  for (const f of spec.fields) {
+    properties[f.key] = f.description
+      ? { type: "string", description: f.description }
+      : { type: "string" };
+  }
+  const inputSchema: ToolInputSchema = {
+    type: "object",
+    properties,
+    required: spec.fields.map((f) => f.key),
   };
-}
-
-function bashDef(): ToolDefinition {
   return {
-    name: "bash",
-    description: "在 workspace 执行 bash 命令；输出截断 12000 字符。受 PermissionManager 审批。",
-    inputSchema: {
-      type: "object",
-      properties: {
-        command: { type: "string", description: "shell command" },
-      },
-      required: ["command"],
-    },
+    name: spec.name,
+    description: spec.description,
+    inputSchema,
     async invoke(args, ctx) {
-      const { command } = args as BashArgs;
-      return runViaLocal(`/bash ${asString(command, "command")}`, ctx);
-    },
-  };
-}
-
-function globDef(): ToolDefinition {
-  return {
-    name: "glob",
-    description: "按 glob 模式搜索 workspace 文件（最多 200 条）。",
-    inputSchema: {
-      type: "object",
-      properties: {
-        pattern: { type: "string", description: "glob pattern, e.g. **/*.ts" },
-      },
-      required: ["pattern"],
-    },
-    async invoke(args, ctx) {
-      const { pattern } = args as GlobArgs;
-      return runViaLocal(`/glob ${asString(pattern, "pattern")}`, ctx);
-    },
-  };
-}
-
-function symbolDef(): ToolDefinition {
-  return {
-    name: "symbol",
-    description: "在 workspace 内查询符号（function/class/var）。支持模糊匹配。",
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "symbol name or fragment" },
-      },
-      required: ["query"],
-    },
-    async invoke(args, ctx) {
-      const { query } = args as SymbolArgs;
-      return runViaLocal(`/symbol ${asString(query, "query")}`, ctx);
-    },
-  };
-}
-
-function definitionDef(): ToolDefinition {
-  return {
-    name: "definition",
-    description: "查询某符号的定义位置（LSP go-to-definition）。",
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "symbol name" },
-      },
-      required: ["query"],
-    },
-    async invoke(args, ctx) {
-      const { query } = args as DefinitionArgs;
-      return runViaLocal(`/definition ${asString(query, "query")}`, ctx);
-    },
-  };
-}
-
-function referencesDef(): ToolDefinition {
-  return {
-    name: "references",
-    description: "查询某符号的所有引用位置（LSP find-references）。",
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "symbol name" },
-      },
-      required: ["query"],
-    },
-    async invoke(args, ctx) {
-      const { query } = args as ReferencesArgs;
-      return runViaLocal(`/references ${asString(query, "query")}`, ctx);
-    },
-  };
-}
-
-function writeDef(): ToolDefinition {
-  return {
-    name: "write",
-    description: "覆写文件全文（先备份）。受 PermissionManager 审批。",
-    inputSchema: {
-      type: "object",
-      properties: {
-        file_path: { type: "string" },
-        content: { type: "string" },
-      },
-      required: ["file_path", "content"],
-    },
-    async invoke(args, ctx) {
-      const { file_path, content } = args as WriteArgs;
-      const p = asString(file_path, "file_path");
-      const c = asString(content, "content");
-      return runViaLocal(`/write ${p} :: ${c}`, ctx);
-    },
-  };
-}
-
-function appendDef(): ToolDefinition {
-  return {
-    name: "append",
-    description: "在文件尾追加内容。受 PermissionManager 审批。",
-    inputSchema: {
-      type: "object",
-      properties: {
-        file_path: { type: "string" },
-        content: { type: "string" },
-      },
-      required: ["file_path", "content"],
-    },
-    async invoke(args, ctx) {
-      const { file_path, content } = args as AppendArgs;
-      const p = asString(file_path, "file_path");
-      const c = asString(content, "content");
-      return runViaLocal(`/append ${p} :: ${c}`, ctx);
-    },
-  };
-}
-
-function replaceDef(): ToolDefinition {
-  return {
-    name: "replace",
-    description: "在文件内做精确字符串替换。受 PermissionManager 审批。",
-    inputSchema: {
-      type: "object",
-      properties: {
-        file_path: { type: "string" },
-        find: { type: "string", description: "exact text to match" },
-        replace: { type: "string", description: "replacement text" },
-      },
-      required: ["file_path", "find", "replace"],
-    },
-    async invoke(args, ctx) {
-      const { file_path, find, replace } = args as ReplaceArgs;
-      const p = asString(file_path, "file_path");
-      const f = asString(find, "find");
-      const r = asString(replace, "replace");
-      return runViaLocal(`/replace ${p} :: ${f} :: ${r}`, ctx);
+      const obj = (args ?? {}) as Record<string, unknown>;
+      const values = spec.fields.map((f) => asString(obj[f.key], f.key));
+      const prompt =
+        values.length === 1
+          ? `${spec.slash} ${values[0]}`
+          : `${spec.slash} ${values.join(" :: ")}`;
+      return runViaLocal(prompt, ctx);
     },
   };
 }
@@ -241,13 +100,80 @@ export const BUILTIN_TOOL_NAMES = [
 ] as const;
 
 export function registerBuiltinTools(registry: ToolRegistry): void {
-  registry.register(readDef());
-  registry.register(bashDef());
-  registry.register(globDef());
-  registry.register(symbolDef());
-  registry.register(definitionDef());
-  registry.register(referencesDef());
-  registry.register(writeDef());
-  registry.register(appendDef());
-  registry.register(replaceDef());
+  registry.register(
+    defineSimpleTool({
+      name: "read",
+      description: "读取 workspace 内文件全文（默认前 12000 字符）。仅支持单文件路径。",
+      slash: "/read",
+      fields: [{ key: "file_path", description: "absolute or workspace-relative path" }],
+    })
+  );
+  registry.register(
+    defineSimpleTool({
+      name: "bash",
+      description: "在 workspace 执行 bash 命令；输出截断 12000 字符。受 PermissionManager 审批。",
+      slash: "/bash",
+      fields: [{ key: "command", description: "shell command" }],
+    })
+  );
+  registry.register(
+    defineSimpleTool({
+      name: "glob",
+      description: "按 glob 模式搜索 workspace 文件（最多 200 条）。",
+      slash: "/glob",
+      fields: [{ key: "pattern", description: "glob pattern, e.g. **/*.ts" }],
+    })
+  );
+  registry.register(
+    defineSimpleTool({
+      name: "symbol",
+      description: "在 workspace 内查询符号（function/class/var）。支持模糊匹配。",
+      slash: "/symbol",
+      fields: [{ key: "query", description: "symbol name or fragment" }],
+    })
+  );
+  registry.register(
+    defineSimpleTool({
+      name: "definition",
+      description: "查询某符号的定义位置（LSP go-to-definition）。",
+      slash: "/definition",
+      fields: [{ key: "query", description: "symbol name" }],
+    })
+  );
+  registry.register(
+    defineSimpleTool({
+      name: "references",
+      description: "查询某符号的所有引用位置（LSP find-references）。",
+      slash: "/references",
+      fields: [{ key: "query", description: "symbol name" }],
+    })
+  );
+  registry.register(
+    defineSimpleTool({
+      name: "write",
+      description: "覆写文件全文（先备份）。受 PermissionManager 审批。",
+      slash: "/write",
+      fields: [{ key: "file_path" }, { key: "content" }],
+    })
+  );
+  registry.register(
+    defineSimpleTool({
+      name: "append",
+      description: "在文件尾追加内容。受 PermissionManager 审批。",
+      slash: "/append",
+      fields: [{ key: "file_path" }, { key: "content" }],
+    })
+  );
+  registry.register(
+    defineSimpleTool({
+      name: "replace",
+      description: "在文件内做精确字符串替换。受 PermissionManager 审批。",
+      slash: "/replace",
+      fields: [
+        { key: "file_path" },
+        { key: "find", description: "exact text to match" },
+        { key: "replace", description: "replacement text" },
+      ],
+    })
+  );
 }

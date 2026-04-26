@@ -49,6 +49,7 @@ import type {
 import type { ExecutionAction } from "../orchestration/types";
 import { PermissionManager } from "../permissions/manager";
 import { ProviderRequestError, streamProviderResponse } from "../provider/client";
+import type { ToolSchemaSpec } from "../provider/client";
 import { runWithProviderChain, type RunChainResult } from "../provider/chain";
 import { recordCall, summarizeBySession, summarizeToday, formatUsd } from "../provider/costTracker";
 import { evaluateBudget, formatBudgetConfig, readBudgetFromEnv, type BudgetConfig } from "../provider/budget";
@@ -1284,6 +1285,8 @@ class LocalQueryEngine implements QueryEngine {
       const MAX_TOOL_TURNS = 25;
       let toolTurns = 0;
       const hasNativeTools = this.toolRegistry.list().length > 0;
+      // 同一 schema 形状给 stream tools 与 token budget 估算两处复用
+      const toolSchemas = hasNativeTools ? this.buildStreamToolSchemas() : undefined;
       let lastError: Error | null = null;
       let allowFallback = true;
       multiTurn: while (true) {
@@ -1294,15 +1297,7 @@ class LocalQueryEngine implements QueryEngine {
 
         // M1-D：Token 预算检查（warn-only，不动 messages；M2-01 在这里挂 auto-compact）
         if (this.currentProvider) {
-          const toolsSchemaTokens = hasNativeTools
-            ? estimateToolsSchemaTokens(
-                this.toolRegistry.list().map((t) => ({
-                  name: t.name,
-                  description: t.description,
-                  inputSchema: t.inputSchema,
-                }))
-              )
-            : 0;
+          const toolsSchemaTokens = toolSchemas ? estimateToolsSchemaTokens(toolSchemas) : 0;
           const budgetReport = checkTokenBudget(
             this.getProviderMessages(),
             this.currentProvider,
@@ -1353,13 +1348,7 @@ class LocalQueryEngine implements QueryEngine {
                   }
                 },
                 // M1-B.2：注入 tools schema + 收集 LLM 发起的 tool_call
-                tools: hasNativeTools
-                  ? this.toolRegistry.list().map((t) => ({
-                      name: t.name,
-                      description: t.description,
-                      inputSchema: t.inputSchema,
-                    }))
-                  : undefined,
+                tools: toolSchemas,
                 onToolCall: hasNativeTools
                   ? (call) => collectedToolCalls.push(call)
                   : undefined,
@@ -2881,6 +2870,18 @@ class LocalQueryEngine implements QueryEngine {
       message.includes("context") &&
       (message.includes("too long") || message.includes("length") || message.includes("limit"))
     );
+  }
+
+  /**
+   * M1-B.2：把 toolRegistry 投影成 streamProviderResponse 与 token budget 估算
+   * 共享的 {name, description, inputSchema} 形状。注：仅在 hasNativeTools 时调用。
+   */
+  private buildStreamToolSchemas(): ToolSchemaSpec[] {
+    return this.toolRegistry.list().map((t) => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: t.inputSchema,
+    }));
   }
 
   private getProviderMessages(): EngineMessage[] {
