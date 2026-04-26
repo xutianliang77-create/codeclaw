@@ -286,10 +286,30 @@ ink CLI 底部出现 cyan 状态条；命令失败降级显示 `[status line fai
 
 ```bash
 export CODECLAW_WEB_TOKEN=your-strong-token
-codeclaw web
+codeclaw web                                  # 默认 127.0.0.1:7180
+codeclaw web --port=8080 --host=0.0.0.0       # 局域网共享（注意自负安全）
 ```
 
-浏览器打开 `http://127.0.0.1:7180`，token 填同值。每个浏览器会话独立 queryEngine 实例。
+浏览器打开 `http://127.0.0.1:7180`，token 填同值；每个浏览器会话独立 queryEngine 实例。
+
+**阶段 A 已上**：5 个 tab + 多会话侧栏 + 状态栏
+
+| Tab | 功能 |
+|---|---|
+| Chat | 与 LLM 对话（与 CLI / Wechat 同 SSE 流）|
+| RAG | `/rag index` `/rag embed` `/rag search` 的 GUI；展示 chunk / embedding 状态 |
+| Graph | `/graph build` + 5 类查询（callers / callees / dependents / dependencies / symbol）|
+| MCP | server 状态卡片 + tools 浏览 + test-call 调试器（mcpManager 注入后可用）|
+| Hooks | settings.json hooks 树形展示 + 热重载按钮（等价 SIGHUP 信号）|
+
+**多会话**：左侧栏可见所有 active session；阶段 A 仅展示 + 新建（切会话 SSE 重连留 阶段 B）。
+
+**状态栏**：底部 cyan 一行；每 5s `GET /v1/web/status-line` 轮询。
+
+**已知限制（阶段 A）**：
+- subagent 工作树仅返 placeholder（`{subagents:[], note:"coming in stage B"}`）；后端尚未推流
+- 索引 / 构建大型 workspace 时无进度条，同步等待 + spinner（阶段 B 加 SSE 子流）
+- wechat / web 通道的 cron `--notify=` 仍为占位（阶段 🅑 cron 接通）
 
 ### WeChat
 
@@ -302,7 +322,71 @@ codeclaw wechat --worker       # iLink 长轮询模式
 
 ---
 
-## 11. 故障速查
+## 11. 工作流：定时任务（cron）
+
+`/cron` 在 codeclaw 进程内做定时调度，三类 task：
+
+| kind | 含义 | 示例 |
+|---|---|---|
+| `slash` | 跑 builtin slash 命令 | `slash:/rag\ index` |
+| `prompt` | 让 LLM 自由处理一段 prompt（无 `/` 前缀） | `prompt:"review this week's commits"` |
+| `shell` | spawn shell 子进程 | `shell:"npm audit"` |
+
+**重要约束**：cron 只在 codeclaw 在前台时跑。要 24×7 跑请走 OS-level cron（crontab）调
+`scripts/nightly.mjs` 类似入口；本节内置 cron 与之互不干扰。
+
+### 11.1 添加任务
+
+```bash
+/cron add rag-daily "0 2 * * *" slash:/rag\ index --notify=cli
+/cron add weekly-review "0 9 * * 1" prompt:"review repo this week" --notify=cli
+/cron add audit-hourly "@hourly" "shell:npm audit --production"
+```
+
+支持的 schedule：
+- 标准 5 字段 `分 时 日 月 周`，含 `*` `1,3,5` `1-5` `*/15`
+- 别名 `@hourly` / `@daily` / `@weekly` / `@monthly`
+- 区间 `@every 30s` / `@every 5m` / `@every 1h`
+
+时间使用本地时区（与 crontab(5) 一致）。DST 切换日推荐用 `@every` 表达式避开。
+
+### 11.2 列 / 切 / 跑 / 看
+
+```bash
+/cron                      # 等价 /cron list
+/cron list                 # 表格：id / name / schedule / kind / enabled / last-run
+/cron disable rag-daily    # 暂停（不删除）
+/cron enable rag-daily     # 重新启用
+/cron run-now rag-daily    # 立刻跑一次（不影响下次定时）
+/cron logs rag-daily --tail=5    # 最近 5 次运行历史
+/cron remove rag-daily     # 永久删除
+```
+
+### 11.3 通知去向 (`--notify`)
+
+任务跑完后默认仅写 jsonl 日志。加 `--notify=cli` 把摘要注入当前 chat（一条 local 消息）：
+
+```
+[Cron · rag-daily · ok · 1234ms]
+files-scanned: 856
+files-indexed: 0
+chunks-upserted: 0
+```
+
+阶段🅐 仅 `cli` 通道完整可用；`wechat` / `web` 选项为占位，未连接对应通道时 fall-through
+为 console.warn 警告，不阻塞 task 运行。
+
+### 11.4 行为速记
+
+- 调度精度：30s tick + ±60s 漂移补偿；同任务 1 分钟内最多 1 次触发
+- 默认超时：slash/prompt 5 min；shell 1 min；用 `--timeout=10m` / `30s` 覆盖
+- 任务异常 fail-soft：jsonl 记错 + 标 `lastRunStatus=error`，不阻塞其它任务
+- 关闭：`CODECLAW_CRON=false codeclaw` 紧急回退；删 `~/.codeclaw/cron.json` 清空所有任务
+- 配置文件：`~/.codeclaw/cron.json`（手动编辑请保持合法 JSON；损坏文件会自动备份成 `.bak.<ts>`）
+
+---
+
+## 12. 故障速查
 
 | 现象 | 命令 |
 |---|---|
@@ -316,7 +400,7 @@ codeclaw wechat --worker       # iLink 长轮询模式
 
 ---
 
-## 12. 速记：常用键 + 命令
+## 13. 速记：常用键 + 命令
 
 | | |
 |---|---|

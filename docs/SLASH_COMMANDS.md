@@ -1,6 +1,6 @@
 # CodeClaw Slash 命令清单
 
-> 版本：M3 + P2-M4 全套（2026-04-26）· 共 35 个 builtin 命令
+> 版本：M3 + P2-M4 + #116 cron（2026-04-26）· 共 36 个 builtin 命令
 > 所有命令在 CLI/Web/WeChat 入口均通过 `SlashRegistry` 同一实现派发。
 > 实现位置：`src/commands/slash/builtins/*.ts`，注册入口 `src/commands/slash/loader.ts`。
 
@@ -10,7 +10,7 @@
 |---|---|
 | help | `/help` |
 | session | `/ask` `/end` `/export` `/forget` `/init` `/resume` `/session` `/status` |
-| workflow | `/commit` `/fix` `/orchestrate` `/plan` `/review` |
+| workflow | `/commit` `/cron` `/fix` `/orchestrate` `/plan` `/review` |
 | memory | `/compact` `/graph` `/memory` `/preferences` `/rag` `/remember` `/summary` |
 | observability | `/context` `/cost` `/debug-tool-call` `/diff` `/doctor` |
 | permission | `/approvals` `/mode` |
@@ -122,6 +122,33 @@
 - **summary**: review skill 下的 plan + execute，不改文件
 - **用法**: `/review <goal>`
 - **注**: 提议的风险步骤会进 pending orchestration approvals
+
+### `/cron <list | add | remove | enable | disable | run-now | logs>`
+- **risk**: medium
+- **summary**: 定时任务（slash / prompt / shell 三类，仅在 codeclaw 在前台时跑）
+- **用法**:
+  - `/cron` 等价 `/cron list`，列所有任务
+  - `/cron add <name> <schedule> <kind>:<payload> [--notify=cli[,wechat,web]] [--timeout=Nm|Ns|Nh]`
+  - `/cron remove|enable|disable|run-now <id-or-name>`
+  - `/cron logs <id-or-name> [--tail=N]`
+- **schedule**:
+  - 标准 5 字段：`分 时 日 月 周`，含 `*` `1,3,5` `1-5` `*/15`
+  - 别名：`@hourly` / `@daily` / `@weekly` / `@monthly`
+  - 区间：`@every 30s` / `@every 5m` / `@every 1h`
+- **kind**:
+  - `slash:/cmd args`：跑 builtin slash 命令
+  - `prompt:"text"`：把 text 当 user prompt 发给 LLM
+  - `shell:cmd`：spawn shell 执行外部命令
+- **示例**:
+  - `/cron add rag-daily "0 2 * * *" slash:/rag\ index --notify=cli`
+  - `/cron add weekly "0 9 * * 1" prompt:"review repo this week" --notify=cli`
+  - `/cron add audit "@hourly" "shell:npm audit --production"`
+- **注**:
+  - 任务结果默认仅写 jsonl 日志；`--notify=cli` 注入当前 chat 一条 local 消息
+  - 阶段🅐 仅 cli 通道完整可用；wechat / web 是预留枚举，未连通时 console.warn
+  - 默认超时：slash/prompt 5 min，shell 1 min；任务 fail-soft（jsonl 记错，不阻塞别的任务）
+  - 配置文件：`~/.codeclaw/cron.json`；运行历史 `~/.codeclaw/cron-runs/<task-id>/<YYYY-MM-DD>.jsonl`
+  - 关闭：env `CODECLAW_CRON=false` 或删 `cron.json`
 
 ---
 

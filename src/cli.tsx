@@ -84,8 +84,9 @@ async function main(): Promise<void> {
     process.exit(runSkillSubcommand(restArgs));
   }
 
+  // web 子命令需要 mcpManager / settings / runtime selection（A2 修补）；
+  // 真正的 dispatch 在下方 settings 加载之后；这里只做 token 早期检查。
   if (command === "web") {
-    const { startWebServer } = await import("./channels/web/server");
     const { readWebAuthConfig } = await import("./channels/web/auth");
     const auth = readWebAuthConfig();
     if (!auth.bearerToken) {
@@ -95,27 +96,6 @@ async function main(): Promise<void> {
       );
       process.exit(2);
     }
-    const portArg = restArgs.find((a) => a.startsWith("--port="))?.split("=")[1];
-    const hostArg = restArgs.find((a) => a.startsWith("--host="))?.split("=")[1];
-    const port = portArg ? Number(portArg) : 7180;
-    const host = hostArg ?? "127.0.0.1";
-    const handle = await startWebServer({
-      port,
-      host,
-      auth,
-      engineDefaults: {
-        currentProvider: null,
-        fallbackProvider: null,
-        permissionMode: "plan",
-        workspace: process.cwd(),
-      },
-    });
-    console.log(`CodeClaw Web listening on http://${handle.host}:${handle.port}`);
-    console.log("Open it in your browser. Set the same CODECLAW_WEB_TOKEN value in the auth bar.");
-    process.on("SIGINT", () => {
-      void handle.close().finally(() => process.exit(0));
-    });
-    return;
   }
 
   if (command === "setup") {
@@ -199,12 +179,21 @@ async function main(): Promise<void> {
   };
   process.on("beforeExit", () => {
     void shutdownMcp();
+    queryEngineForShutdown?.disposeCron?.();
   });
   for (const sig of ["SIGINT", "SIGTERM"] as const) {
     process.on(sig, () => {
+      try {
+        queryEngineForShutdown?.disposeCron?.();
+      } catch {
+        // 关 scheduler 不阻塞退出
+      }
       void shutdownMcp().finally(() => process.exit(0));
     });
   }
+  // queryEngine 在下方才创建；用 let 容纳后续赋值，闭包内引用。
+  // 单独 Type cast 是为了避免循环引用 / partial type 报错。
+  let queryEngineForShutdown: { disposeCron?: () => void } | null = null;
 
   // M3-04：加载 settings.json（hooks + statusLine 配置）；解析失败不阻塞主进程。
   // D1：支持 SIGHUP 触发热重载（settings 引用通过 reloadSettings 切换；queryEngine
@@ -218,6 +207,55 @@ async function main(): Promise<void> {
       return undefined;
     }
   })();
+
+  // A1：`codeclaw web` 子命令在此 dispatch；engineDefaults 已能 capture mcpManager + settings + 选定 provider。
+  // 早期校验已在 setup 区块完成（CODECLAW_WEB_TOKEN 缺失则 process.exit）。
+  if (command === "web") {
+    const { startWebServer } = await import("./channels/web/server");
+    const { readWebAuthConfig } = await import("./channels/web/auth");
+    const auth = readWebAuthConfig();
+    const portArg = restArgs.find((a) => a.startsWith("--port="))?.split("=")[1];
+    const hostArg = restArgs.find((a) => a.startsWith("--host="))?.split("=")[1];
+    const port = portArg ? Number(portArg) : 7180;
+    const host = hostArg ?? "127.0.0.1";
+    const handle = await startWebServer({
+      port,
+      host,
+      auth,
+      mcpManager,
+      hooksConfigRef: () => settings?.hooks,
+      engineDefaults: {
+        currentProvider: runtime.selection?.current ?? null,
+        fallbackProvider: runtime.selection?.fallback ?? null,
+        permissionMode: runtime.config?.defaults.permissionMode ?? "plan",
+        workspace,
+        approvalsDir: paths.approvalsDir,
+        ...(runtime.config?.memory.l1AutoCompactThreshold !== undefined
+          ? { autoCompactThreshold: runtime.config.memory.l1AutoCompactThreshold }
+          : {}),
+        mcpManager,
+        settings,
+      },
+    });
+    console.log(`CodeClaw Web listening on http://${handle.host}:${handle.port}`);
+    console.log("Open it in your browser. Set the same CODECLAW_WEB_TOKEN value in the auth bar.");
+    // SIGHUP 同步 settings 到所有已有 web sessions
+    process.on("SIGHUP", () => {
+      try {
+        const next = loadSettings(workspace);
+        settings = next;
+        handle.broadcastSettingsReload(next);
+        console.log("CodeClaw web settings reloaded (SIGHUP)");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`CodeClaw web settings reload failed: ${msg}`);
+      }
+    });
+    process.on("SIGINT", () => {
+      void handle.close().then(() => shutdownMcp()).finally(() => process.exit(0));
+    });
+    return;
+  }
 
   // A2：wechat / web 共用同一组 mcpManager + settings；factory 闭包延迟 capture，
   // 每次 wechat 收到消息派生新 engine 时都注入这两个字段。
@@ -301,6 +339,11 @@ async function main(): Promise<void> {
       loginManager: wechatLoginManager
     }
   });
+  queryEngineForShutdown = queryEngine as unknown as { disposeCron?: () => void };
+  // #116 阶段🅐 cron：notify=cli 默认走 transcript 注入；wechat / web 通道桥接
+  // 留待阶段 🅑（需要 wechatService.sendToActive 与 web SSE hub 抽象）。
+  // 当前若用户在任务 notifyChannels 里写 wechat/web，queryEngine 内会 fall-through 为
+  // 无操作（不抛错）+ console.error 警告。
   const ingressGateway = new IngressGateway(queryEngine);
 
   // D1: SIGHUP 触发 settings 热重载（hooks + statusLine）。

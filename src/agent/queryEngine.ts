@@ -85,6 +85,9 @@ import {
   formatStatus as formatGraphStatus,
   formatQueryResult as formatGraphQuery,
 } from "../graph/api";
+import { CronManager } from "../cron/manager";
+import { dispatchCronCmd, formatRunSummary } from "../cron/format";
+import type { CronNotifyChannel, CronRun, CronTask } from "../cron/types";
 import { checkTokenBudget, estimateToolsSchemaTokens, warnIfBudgetExceeded } from "./tokenBudget";
 import { autoCompactIfNeeded } from "./autoCompact";
 import { detectLocalTool, inspectLocalTool, isHandledLocalToolResult, runLocalTool } from "../tools/local";
@@ -647,6 +650,12 @@ class LocalQueryEngine implements QueryEngine {
   setHooksConfig(next: HookSettings): void {
     this.hooksConfig = next ?? {};
   }
+
+  /** #116 阶段🅐：cron 调度器；仅主 cli engine 启用，其他 channel 为 null */
+  private cronManager: CronManager | null = null;
+  /** cron 通知去向适配器：cli.tsx 负责注入 wechat / web 实现；缺省仅 cli inject */
+  private cronWechatNotify: ((text: string, task: CronTask, run: CronRun) => void) | null = null;
+  private cronWebNotify: ((task: CronTask, run: CronRun) => void) | null = null;
   // #86：成本预算配置（构造时从 options.budget ?? env 决定）
   private readonly budgetConfig: BudgetConfig;
   private readonly slashRegistry = new SlashRegistry();
@@ -918,6 +927,35 @@ class LocalQueryEngine implements QueryEngine {
     }
 
     this.lastEstimatedTokens = estimateMessageTokens(this.messages);
+
+    // #116 阶段🅐 cron：仅在 main cli engine 启用 scheduler
+    //   - vitest 默认禁用（避免测试环境写 ~/.codeclaw/cron.json + 起 setInterval）
+    //   - env CODECLAW_CRON=false 显式禁用
+    //   - 非 cli channel（subagent / wechat / web 派生 engine）禁用，避免重复 fire
+    const cronChannel = options.channel ?? "cli";
+    const cronEnabled =
+      !isVitest &&
+      process.env.CODECLAW_CRON !== "false" &&
+      cronChannel === "cli";
+    if (cronEnabled) {
+      try {
+        this.cronManager = new CronManager({
+          engineFactory: (task) => this.createCronChildEngine(task),
+          notify: (channels, task, run) => this.deliverCronNotifications(channels, task, run),
+          onError: (taskId, err) => {
+            console.error(
+              `cron task ${taskId} runtime error: ${err instanceof Error ? err.message : String(err)}`
+            );
+          },
+        });
+        this.cronManager.start();
+      } catch (err) {
+        // store 损坏 / 文件权限 → 降级为禁用，但不阻塞主 engine 启动
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`CodeClaw cron init failed (continuing without scheduler): ${msg}`);
+        this.cronManager = null;
+      }
+    }
 
     // M3-04 SessionStart：fire-and-forget；副作用型 hook，不阻塞 constructor 返回
     void runHooks(
@@ -2691,6 +2729,91 @@ class LocalQueryEngine implements QueryEngine {
       return formatGraphQuery(runGraphQuery(this.options.workspace, "symbol", arg));
     }
     return "Usage: /graph | /graph build | /graph callers <name> | /graph callees <path> | /graph dependents <path> | /graph dependencies <path> | /graph symbol <name|path>";
+  }
+
+  // #116 阶段🅐：/cron 命令分发
+  private async runCronCommand(argsRaw: string): Promise<string> {
+    if (!this.cronManager) {
+      return process.env.CODECLAW_CRON === "false"
+        ? "cron is disabled (CODECLAW_CRON=false)"
+        : "cron is not initialized in this channel";
+    }
+    return dispatchCronCmd(this.cronManager, argsRaw);
+  }
+
+  /** 构造 cron 子任务用的临时 QueryEngine（只读 provider/workspace；不写 audit/data） */
+  private createCronChildEngine(task: CronTask): QueryEngine {
+    return createQueryEngine({
+      currentProvider: this.options.currentProvider,
+      fallbackProvider: this.options.fallbackProvider,
+      permissionMode: this.options.permissionMode,
+      workspace: task.workspace ?? this.options.workspace,
+      ...(this.options.autoCompactThreshold !== undefined
+        ? { autoCompactThreshold: this.options.autoCompactThreshold }
+        : {}),
+      auditDbPath: null,
+      dataDbPath: null,
+      ...(this.options.fetchImpl ? { fetchImpl: this.options.fetchImpl } : {}),
+      ...(this.options.mcpManager ? { mcpManager: this.options.mcpManager } : {}),
+    });
+  }
+
+  /** 把 cron 运行结果按 channel 派发到 cli/wechat/web；缺省 cli=注入 transcript */
+  private deliverCronNotifications(
+    channels: CronNotifyChannel[],
+    task: CronTask,
+    run: CronRun
+  ): void {
+    const text = formatRunSummary(task, run);
+    for (const ch of channels) {
+      try {
+        if (ch === "cli") {
+          this.appendCronCliMessage(text);
+        } else if (ch === "wechat") {
+          if (this.cronWechatNotify) this.cronWechatNotify(text, task, run);
+          else console.warn(`cron task '${task.name}': wechat notify not wired in this build`);
+        } else if (ch === "web") {
+          if (this.cronWebNotify) this.cronWebNotify(task, run);
+          else console.warn(`cron task '${task.name}': web notify not wired in this build`);
+        }
+      } catch (err) {
+        console.error(
+          `cron notify ${ch} failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+  }
+
+  /** cron CLI 通知：在 transcript 末尾插入一条 local 消息（非阻塞，不重算 token 预算） */
+  private appendCronCliMessage(text: string): void {
+    this.messages.push({
+      id: createId("msg"),
+      role: "assistant",
+      text,
+      source: "local",
+    });
+    this.notifyListeners();
+  }
+
+  /** cli.tsx 注入：wechat / web 通知适配器（调用方负责健壮性） */
+  setCronNotifyAdapters(adapters: {
+    wechat?: (text: string, task: CronTask, run: CronRun) => void;
+    web?: (task: CronTask, run: CronRun) => void;
+  }): void {
+    this.cronWechatNotify = adapters.wechat ?? null;
+    this.cronWebNotify = adapters.web ?? null;
+  }
+
+  /** cli.tsx 关闭流程使用：停 scheduler + 释放资源（idempotent） */
+  disposeCron(): void {
+    if (!this.cronManager) return;
+    this.cronManager.stop();
+    this.cronManager = null;
+  }
+
+  /** 测试 / 调试用：暴露 manager 句柄；非 cli channel 为 null */
+  getCronManager(): CronManager | null {
+    return this.cronManager;
   }
 
   private buildInitReply(): string {

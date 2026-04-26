@@ -152,10 +152,17 @@ API 文档见 [HTTP_API.md](./HTTP_API.md)。
 
 ```bash
 export CODECLAW_WEB_TOKEN=your-strong-token   # 必需，否则拒启
-codeclaw web --port 7180 --host 127.0.0.1
+codeclaw web --port=7180 --host=127.0.0.1
 ```
 
 浏览器打开 `http://127.0.0.1:7180`，token 输入同 env 值。
+
+#114 阶段 A 改进：`codeclaw web` 现在与 CLI 共享 mcpManager + settings + provider 链，
+因此 web 端的 LLM 也能用 MCP 工具，hooks（PreToolUse / PostToolUse / 等）也会触发。
+SIGHUP 信号会同步到所有 active web session，等价于 ink CLI 的热重载行为。
+
+阶段 A 暴露的 panel：Chat / RAG / Graph / MCP / Hooks 共 5 个；多会话侧栏；状态栏 5s 轮询。
+完整使用见 [USAGE.md §10 Web 段](./USAGE.md)。
 
 ### 5.5 WeChat（iLink）
 
@@ -266,6 +273,7 @@ codeclaw skill remove <name>
 | `CODECLAW_SUBAGENT=false` | 关闭 Task subagent tool |
 | `CODECLAW_RAG=false` | 关闭 rag_search native tool |
 | `CODECLAW_GRAPH=false` | 关闭 graph_query native tool |
+| `CODECLAW_CRON=false` | 关闭主 cli engine 内置 cron 调度器（仅影响内置 cron，不影响 OS cron）|
 | `CODECLAW_TOKEN_WARN_THRESHOLD=0.7` | token 用量 70% 时 warn（默认）|
 | `CODECLAW_AUTO_COMPACT_THRESHOLD=0.95` | token 用量 95% 触发 autoCompact（默认）|
 | `CODECLAW_RAG_EMBED_MODEL=bge-m3` | RAG 用的 embedding 模型 |
@@ -288,6 +296,8 @@ codeclaw skill remove <name>
 ├── CODECLAW.md               # 用户级偏好
 ├── mcp.json                  # MCP server 配置
 ├── settings.json             # hooks + statusLine
+├── cron.json                 # 内置 cron 任务定义（#116）
+├── cron-runs/<task-id>/      # 任务运行历史 jsonl，按日切
 ├── data.db                   # 全局：sessions / tasks / memory_digest / approvals / cost
 ├── audit.db                  # 审计链
 ├── sessions/                 # transcript JSONL
