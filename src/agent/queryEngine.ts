@@ -71,6 +71,7 @@ import { registerMemoryTools } from "./tools/memoryTools";
 import { clearAllMemories, writeMemory, type MemoryType } from "../memory/projectMemory/store";
 import { EXIT_PLAN_SENTINEL, registerPlanModeTool } from "./tools/planMode";
 import { bridgeMcpTools } from "../mcp/bridge";
+import { applySkillBanner } from "./skillBanner";
 import { checkTokenBudget, estimateToolsSchemaTokens, warnIfBudgetExceeded } from "./tokenBudget";
 import { autoCompactIfNeeded } from "./autoCompact";
 import { detectLocalTool, inspectLocalTool, isHandledLocalToolResult, runLocalTool } from "../tools/local";
@@ -3267,7 +3268,10 @@ class LocalQueryEngine implements QueryEngine {
       text: systemText,
       source: "local"
     };
-    return [systemMessage, ...providerMessages];
+    const base: EngineMessage[] = [systemMessage, ...providerMessages];
+    // M3-03：active skill 时给最后一条 user message 加 banner，让 LLM 在长 multi-turn
+    // 中持续意识到当前 skill 约束。banner 短，不重复 system prompt 里的完整 skill.prompt。
+    return this.activeSkill ? applySkillBanner(base, this.activeSkill) : base;
   }
 
   private buildProviderFailureMessage(error: Error): string {
