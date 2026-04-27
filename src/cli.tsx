@@ -317,7 +317,9 @@ async function main(): Promise<void> {
         settings,
       },
     });
-    console.log(`CodeClaw Web listening on http://${handle.host}:${handle.port}/next/`);
+    console.log(
+      `CodeClaw Web · http://${handle.host}:${handle.port}/   (legacy UI: /legacy/)`
+    );
     console.log(
       "在浏览器打开上面的地址，登录时粘贴 token（`cat ~/.codeclaw/web-auth.json` 可查）。"
     );

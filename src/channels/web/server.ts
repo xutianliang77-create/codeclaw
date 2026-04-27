@@ -310,30 +310,49 @@ async function dispatch(
     return handleCronRemove(req, res, deps, decodeURIComponent(cronTaskMatch[1]));
   }
 
-  // 静态文件
-  if (method === "GET" && staticRoot) {
-    if (url.pathname === "/" || url.pathname === "/legacy" || url.pathname === "/legacy/") {
-      if (serveStaticFile(res, staticRoot, "index.html")) return;
-    }
-    const staticMatch = /^\/static\/(.+)$/.exec(url.pathname);
-    if (staticMatch) {
-      if (serveStaticFile(res, staticRoot, staticMatch[1])) return;
-    }
-  }
-
-  // #115 阶段 B：/next 双 URL 共存；React 版从 dist/public-react 或 dev web-react/dist
+  // P3.2（v0.7.0 起）：根路径 / 和 /next/ 都服务新 React 版（dist/public-react）；
+  // 旧版 /legacy/ 仍可访问 dist/public（保留 1-2 版兼容期，之后可彻底删 web/）
   if (method === "GET") {
     const reactRoot = reactStaticRoot();
     if (reactRoot) {
-      if (url.pathname === "/next" || url.pathname === "/next/") {
+      // 新版：/ 和 /next/ 都进 React UI
+      if (
+        url.pathname === "/" ||
+        url.pathname === "/next" ||
+        url.pathname === "/next/"
+      ) {
         if (serveStaticFile(res, reactRoot, "index.html")) return;
       }
+      // /next/<asset> 走 React 资源
       const nextMatch = /^\/next\/(.+)$/.exec(url.pathname);
       if (nextMatch) {
         if (serveStaticFile(res, reactRoot, nextMatch[1])) return;
-        // SPA fallback：让 React Router 处理深链（阶段 B 暂未引入 router，仅返 index.html）
+        // SPA fallback：深链未命中具体资源 → 返 index.html 让 React 处理
         if (serveStaticFile(res, reactRoot, "index.html")) return;
       }
+      // 兼容：/<asset> 直接走 React assets（vite 默认指向根的 /assets/...）
+      const rootAssetMatch = /^\/(assets\/.+|favicon\.ico|robots\.txt|manifest\.webmanifest)$/.exec(
+        url.pathname
+      );
+      if (rootAssetMatch) {
+        if (serveStaticFile(res, reactRoot, rootAssetMatch[1])) return;
+      }
+    }
+  }
+
+  // 旧版 /legacy/ 仍服务 dist/public
+  if (method === "GET" && staticRoot) {
+    if (url.pathname === "/legacy" || url.pathname === "/legacy/") {
+      if (serveStaticFile(res, staticRoot, "index.html")) return;
+    }
+    const legacyMatch = /^\/legacy\/(.+)$/.exec(url.pathname);
+    if (legacyMatch) {
+      if (serveStaticFile(res, staticRoot, legacyMatch[1])) return;
+    }
+    // /static/<asset> 旧版资源路径（保留兼容）
+    const staticMatch = /^\/static\/(.+)$/.exec(url.pathname);
+    if (staticMatch) {
+      if (serveStaticFile(res, staticRoot, staticMatch[1])) return;
     }
   }
   // 静态根禁用 / 文件不存在时给 / 一个占位（保留以前 server.test 兼容）

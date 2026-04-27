@@ -221,8 +221,9 @@ describe("Web server · 路由 misc", () => {
     expect(r.status).toBe(200);
   });
 
-  it("GET / 返回的 HTML 含 markdown 库 script 标签", async () => {
-    const r = await fetch(`${baseUrl}/`);
+  it("GET /legacy/ 返回的 HTML 含 markdown 库 script 标签（旧版）", async () => {
+    // P3.2 起 / 默认升新 React UI；旧版（marked/purify/highlight 库）降级到 /legacy/
+    const r = await fetch(`${baseUrl}/legacy/`);
     const body = await r.text();
     expect(body).toContain("marked.min.js");
     expect(body).toContain("purify.min.js");
