@@ -113,3 +113,43 @@ describe("parseTsFile · call sites", () => {
     expect(call?.line).toBe(3);
   });
 });
+
+describe("parseTsFile · 动态 import（P5.3）", () => {
+  it("const { X } = await import('path') → named binding", () => {
+    const r = parseTsFile(
+      "x.ts",
+      `async function run() {\n  const { createQueryEngine } = await import("./qe");\n  createQueryEngine({});\n}`
+    );
+    const imp = r.imports.find((i) => i.module === "./qe");
+    expect(imp).toBeDefined();
+    expect(imp?.namedBindings).toEqual([
+      { imported: "createQueryEngine", local: "createQueryEngine" },
+    ]);
+  });
+
+  it("const { X as Y } = await import 形式", () => {
+    const r = parseTsFile(
+      "x.ts",
+      `async function r() { const { foo: bar } = await import("./m"); }`
+    );
+    const imp = r.imports.find((i) => i.module === "./m");
+    expect(imp?.namedBindings).toEqual([{ imported: "foo", local: "bar" }]);
+  });
+
+  it("const ns = await import('path') → namespace binding", () => {
+    const r = parseTsFile(
+      "x.ts",
+      `async function r() { const m = await import("./m"); m.foo(); }`
+    );
+    const imp = r.imports.find((i) => i.module === "./m");
+    expect(imp?.namespaceBinding).toBe("m");
+  });
+
+  it("动态字符串拼接路径不解析（保守跳过）", () => {
+    const r = parseTsFile(
+      "x.ts",
+      'async function r() { const m = await import("./prefix" + suffix); }'
+    );
+    expect(r.imports.find((i) => i.module.includes("prefix"))).toBeUndefined();
+  });
+});

@@ -73,6 +73,14 @@ export function parseTsFile(filename: string, content: string): ParseResult {
       }
     }
 
+    // P5.3：识别 `const { X } = await import("path")` / `const X = await import("path")`
+    //  形式（任意层级，不限 top-level）。返回与静态 import 相同的 ParsedImport 结构，
+    //  让 builder.importBindings 正确解析。
+    if (ts.isVariableDeclaration(node)) {
+      const dyn = parseDynamicImportDeclaration(node);
+      if (dyn) imports.push(dyn);
+    }
+
     if (isTopLevel) {
       const sym = parseTopLevelSymbol(node, lineOf);
       if (sym) symbols.push(sym);
@@ -153,6 +161,48 @@ function parseTopLevelSymbol(
     return { name: "default", kind: "export", line: lineOf(node.getStart()), exported: true };
   }
   return null;
+}
+
+/**
+ * P5.3：解析 `const { X } = await import("path")` / `const X = await import("path")`
+ *
+ * 返回与静态 ImportDeclaration 等价的 ParsedImport（含 named / namespace 绑定），
+ * 让下游 builder.importBindings 正确路由 calleePath。
+ *
+ * 仅支持纯字符串路径（动态拼接路径不解析）。
+ */
+function parseDynamicImportDeclaration(decl: ts.VariableDeclaration): ParsedImport | null {
+  const init = decl.initializer;
+  if (!init) return null;
+
+  // 剥 await 包装：await import(...) 或 import(...)
+  const callExpr = ts.isAwaitExpression(init) ? init.expression : init;
+  if (!ts.isCallExpression(callExpr)) return null;
+  if (callExpr.expression.kind !== ts.SyntaxKind.ImportKeyword) return null;
+
+  const arg = callExpr.arguments[0];
+  if (!arg || !ts.isStringLiteral(arg)) return null;
+  const module = arg.text;
+
+  const out: ParsedImport = { module, namedBindings: [] };
+
+  if (ts.isObjectBindingPattern(decl.name)) {
+    // const { X, Y as Z } = await import("path")
+    for (const el of decl.name.elements) {
+      if (!ts.isIdentifier(el.name)) continue;
+      const local = el.name.text;
+      const imported =
+        el.propertyName && ts.isIdentifier(el.propertyName) ? el.propertyName.text : local;
+      out.namedBindings.push({ imported, local });
+    }
+  } else if (ts.isIdentifier(decl.name)) {
+    // const ns = await import("path") → 当 namespace 处理（ns.X 形式调用归到该 module）
+    out.namespaceBinding = decl.name.text;
+  } else {
+    return null; // 嵌套 binding pattern 等不支持
+  }
+
+  return out;
 }
 
 function hasExportModifier(node: ts.Node): boolean {
