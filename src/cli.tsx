@@ -20,6 +20,7 @@ import { startGatewayServer } from "./sdk/httpServer";
 import { VERSION } from "./version";
 import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * 启动前检测 better-sqlite3 native binding 是否能在当前平台加载
@@ -258,6 +259,25 @@ async function main(): Promise<void> {
     const hostArg = restArgs.find((a) => a.startsWith("--host="))?.split("=")[1];
     const port = portArg ? Number(portArg) : 7180;
     const host = hostArg ?? "127.0.0.1";
+
+    // P1.4 防御：检测 dist/public-react 是否就绪；缺失给清晰提示
+    {
+      const fs = await import("node:fs");
+      const fsPath = await import("node:path");
+      const here = fsPath.dirname(fileURLToPath(import.meta.url));
+      const reactIndex = fsPath.resolve(here, "../dist/public-react/index.html");
+      const altIndex = fsPath.resolve(here, "../web-react/dist/index.html");
+      if (!fs.existsSync(reactIndex) && !fs.existsSync(altIndex)) {
+        console.warn(
+          "[web] dist/public-react/index.html 不存在；/next/ 新版 UI 暂不可用。"
+        );
+        console.warn(
+          "[web] 修复：`npm run build:web && npm run build`，再重启 web。"
+        );
+        console.warn("[web] 旧版 UI 仍可访问 /legacy/。");
+      }
+    }
+
     // cronHost 创建在 startWebServer 之后（chicken-egg：cronHost 需要 handle.store 做 broadcast，
     // server deps 又需要 cronManager）。用 lazy ref 解开循环：startWebServer 拿到 ref，
     // cronHost 创建后填充 cronHostRef，handler 调时取最新。

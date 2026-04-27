@@ -56,4 +56,37 @@ try {
     }`
   );
   // 不 process.exit(1)；root install 视为成功，仅警告
+  process.exit(0);
+}
+
+// P1.4：装完前端 deps 后，如果 dist/public-react 缺失也顺便 build 一次
+// （首次 clone 流程：npm install 一步拿到可用产物；再次 install 不会重复 build）
+const distPublicReact = path.join(repoRoot, "dist", "public-react", "index.html");
+if (existsSync(distPublicReact)) {
+  console.log("[post-install] dist/public-react already built, skip build");
+  process.exit(0);
+}
+
+if (process.env.CODECLAW_SKIP_WEB_BUILD === "true") {
+  console.log("[post-install] CODECLAW_SKIP_WEB_BUILD=true, skip build");
+  console.log(
+    "[post-install] 提示：稍后跑 `npm run build:web && npm run build` 才能让 /next/ 可用"
+  );
+  process.exit(0);
+}
+
+console.log("[post-install] building web-react and dist (one-time, ~30-60s) ...");
+try {
+  execSync("npm run build:web", { cwd: repoRoot, stdio: "inherit" });
+  execSync("npm run build", { cwd: repoRoot, stdio: "inherit" });
+  console.log("[post-install] ✓ build complete; dist/public-react ready");
+} catch (err) {
+  console.warn(
+    `[post-install] build failed (CLI 仍可用；/next/ 暂时不可访问): ${
+      err instanceof Error ? err.message : String(err)
+    }`
+  );
+  console.warn(
+    "[post-install] 修复后跑：`npm run build:web && npm run build`"
+  );
 }
