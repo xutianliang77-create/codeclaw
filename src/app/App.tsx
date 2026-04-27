@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import { SafeTextInput } from "./SafeTextInput";
 import type { EngineMessage, EnginePhase, PendingApprovalView, QueryEngine } from "../agent/types";
@@ -133,6 +133,10 @@ export function App({
   const [runtimeState, setRuntimeState] = useState(initialRuntimeState);
   const [messages, setMessages] = useState<EngineMessage[]>(queryEngine.getMessages());
   const [isRunning, setIsRunning] = useState(false);
+  // P4.1（v0.7.0）：Mac+ink 5 单次 Enter 触发多个 useInput callback 同 React tick 内执行；
+  // useState 守卫是异步 schedule，所有 callback 看到 isRunning=false 全通过 → 双发。
+  // useRef 同步 mark 防止：第二次进入 handleSubmit 立刻看到 true → return。
+  const isRunningRef = useRef(false);
   const [toolStatus, setToolStatus] = useState<string | null>(
     initialPendingApproval
       ? `${initialPendingApproval.toolName} pending approval (${initialPendingApproval.totalPending})`
@@ -211,7 +215,8 @@ export function App({
 
   async function handleSubmit(value: string): Promise<void> {
     const trimmed = value.trim();
-    if (!trimmed || isRunning) {
+    // P4.1：ref 同步守卫 + state 异步守卫双保险
+    if (!trimmed || isRunningRef.current || isRunning) {
       return;
     }
 
@@ -220,6 +225,7 @@ export function App({
       return;
     }
 
+    isRunningRef.current = true;
     setInput("");
     setIsRunning(true);
 
@@ -338,6 +344,7 @@ export function App({
             ]
           : nextMessages
       );
+      isRunningRef.current = false;
       setIsRunning(false);
     }
   }
