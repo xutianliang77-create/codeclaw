@@ -34,6 +34,8 @@ export default function CronPanel({ onError }: Props) {
   const [cronUnavailable, setCronUnavailable] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [runs, setRuns] = useState<CronRun[]>([]);
+  // P5.2：run-now 完成时短暂显示 toast，4s 后自动消失（替代 window.alert）
+  const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   async function refresh() {
     try {
@@ -84,11 +86,22 @@ export default function CronPanel({ onError }: Props) {
     try {
       const { run } = await runCronNow(t.id);
       onError(null);
-      window.alert(
-        `[${t.name}] ${run.status} · ${run.endedAt - run.startedAt}ms\n\n${run.output.slice(0, 1024)}${
-          run.error ? `\n\nERROR: ${run.error}` : ""
-        }`
-      );
+      // P5.2：不再 window.alert；改 toast + 自动选中该任务 + 拉最新 runs 历史展示
+      const ms = run.endedAt - run.startedAt;
+      setToast({
+        kind: run.status === "success" ? "ok" : "err",
+        text: `[${t.name}] ${run.status} · ${ms}ms${run.error ? `   ERROR: ${run.error}` : ""}`,
+      });
+      // 4s 后自动清掉 toast
+      window.setTimeout(() => setToast(null), 4000);
+      // 自动定位 runs panel 到该任务
+      setSelectedTaskId(t.id);
+      try {
+        const r = await listCronRuns(t.id, 20);
+        setRuns(r.runs);
+      } catch {
+        // 拉历史失败不阻塞 toast
+      }
       await refresh();
     } catch (err) {
       onError(`run-now 失败：${(err as Error).message}`);
@@ -146,7 +159,29 @@ export default function CronPanel({ onError }: Props) {
   }
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full relative">
+      {/* P5.2：run-now 完成 toast（替代 window.alert）；4s 后自动消失 */}
+      {toast && (
+        <div
+          className={
+            "absolute top-2 left-1/2 -translate-x-1/2 z-10 px-3 py-2 rounded shadow-lg text-xs " +
+            (toast.kind === "ok"
+              ? "bg-ok/20 text-ok border border-ok"
+              : "bg-danger/20 text-danger border border-danger")
+          }
+        >
+          <div className="flex items-center gap-2">
+            <span className="font-mono">{toast.text}</span>
+            <button
+              onClick={() => setToast(null)}
+              className="ml-2 text-muted hover:text-fg"
+              aria-label="dismiss"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
       {/* 左：任务列表 */}
       <div className="flex-1 p-3 overflow-y-auto border-r border-border min-w-0">
         <div className="flex items-center justify-between mb-3">
