@@ -181,3 +181,58 @@ describe("SlashRegistry.generateHelp", () => {
     expect(help).toContain("[help]");
   });
 });
+
+describe("SlashRegistry.suggestForUnknown (P4.5)", () => {
+  it("/skill (typo of /skills) → 推荐 /skills", () => {
+    const reg = new SlashRegistry();
+    reg.register(echoCommand("/skills"));
+    const out = reg.suggestForUnknown("/skill");
+    expect(out).toContain('Unknown command "/skill"');
+    expect(out).toContain("/skills");
+  });
+
+  it("/cro (距离 2) → 推荐 /cron", () => {
+    const reg = new SlashRegistry();
+    reg.register(echoCommand("/cron"));
+    const out = reg.suggestForUnknown("/cro");
+    expect(out).toContain("/cron");
+  });
+
+  it("距离 > 2 → 提示 /help", () => {
+    const reg = new SlashRegistry();
+    reg.register(echoCommand("/cron"));
+    const out = reg.suggestForUnknown("/foobarbaz");
+    expect(out).toContain("/help");
+  });
+
+  it("已注册的命令 → null（不应误触发）", () => {
+    const reg = new SlashRegistry();
+    reg.register(echoCommand("/foo"));
+    expect(reg.suggestForUnknown("/foo")).toBeNull();
+  });
+
+  it("非 slash 形态 prompt → null（不拦 LLM）", () => {
+    const reg = new SlashRegistry();
+    reg.register(echoCommand("/foo"));
+    expect(reg.suggestForUnknown("hello world")).toBeNull();
+    expect(reg.suggestForUnknown("/foo bar")).toBeNull(); // 第一段是已注册
+    expect(reg.suggestForUnknown("/$invalid")).toBeNull(); // 非 word
+  });
+
+  it("alias 也参与匹配", () => {
+    const reg = new SlashRegistry();
+    reg.register(echoCommand("/cron", ["/schedule"]));
+    const out = reg.suggestForUnknown("/scedule"); // typo of alias
+    expect(out).toContain("/schedule");
+  });
+
+  it("命中多个候选时取距离最近的前 3", () => {
+    const reg = new SlashRegistry();
+    reg.register(echoCommand("/skill"));
+    reg.register(echoCommand("/skills"));
+    reg.register(echoCommand("/skull")); // 1 字差
+    const out = reg.suggestForUnknown("/skil");
+    // /skill (dist 1) /skills (dist 2) /skull (dist 2) all ≤ 2
+    expect(out).toContain("/skill");
+  });
+});

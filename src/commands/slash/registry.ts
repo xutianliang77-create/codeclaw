@@ -83,6 +83,54 @@ export class SlashRegistry {
     return { command, argsRaw: rest, argv };
   }
 
+  /**
+   * P4.5：prompt 看起来像 slash 命令但未匹配 → 给 did-you-mean 提示。
+   *
+   * 触发条件：trimmed 以 / 开头 + 第一段是 \w+（字母数字下划线连字符）+ 不含 space 之前不是已注册命令
+   * - Levenshtein ≤ 2 → 给最近 1-3 个候选
+   * - 距离 > 2 → 提示 /help 列表
+   * - 未触发（不像 slash 命令）返 null，由调用方放行 LLM
+   */
+  suggestForUnknown(prompt: string): string | null {
+    const trimmed = prompt.trimStart();
+    if (!trimmed.startsWith("/")) return null;
+
+    const spaceIdx = trimmed.search(/\s/);
+    const head = (spaceIdx >= 0 ? trimmed.slice(0, spaceIdx) : trimmed).toLowerCase();
+    // 第一段必须是 word-like：/foo / /foo-bar / /foo_bar OK；/$bar 不触发
+    if (!/^\/[\w-]+$/.test(head)) return null;
+
+    // 已经匹配了就不该走这里
+    if (this.resolveAliased(head)) return null;
+
+    // 收集所有命令名 + alias
+    const allNames = new Set<string>();
+    for (const cmd of this.commands.values()) {
+      allNames.add(cmd.name.toLowerCase());
+      if (cmd.aliases) {
+        for (const a of cmd.aliases) allNames.add(a.toLowerCase());
+      }
+    }
+
+    const candidates: Array<{ name: string; dist: number }> = [];
+    for (const n of allNames) {
+      const d = levenshtein(head, n);
+      if (d <= 2) {
+        candidates.push({ name: n, dist: d });
+      }
+    }
+    candidates.sort((a, b) => a.dist - b.dist || a.name.localeCompare(b.name));
+
+    if (candidates.length === 0) {
+      return `Unknown command "${head}". Type /help to list available commands.\n未知命令 "${head}"。输入 /help 查看可用命令。`;
+    }
+    const top = candidates.slice(0, 3).map((c) => c.name);
+    return (
+      `Unknown command "${head}". Did you mean: ${top.join(", ")}?\n` +
+      `未知命令 "${head}"。是不是想用：${top.join(", ")}？`
+    );
+  }
+
   /** 运行命令（匹配 + 调 handler）。未命中返回 null。 */
   async dispatch(
     prompt: string,
@@ -166,6 +214,28 @@ export class SlashRegistry {
 /** 便捷工厂：给一个快速注册函数 */
 export function defineCommand(cmd: SlashCommand): SlashCommand {
   return cmd;
+}
+
+/**
+ * 简单 Levenshtein 距离（用于 /skill → /skills 这类 typo 提示）。
+ * 字符串通常 < 20 字符，O(mn) 足够。
+ */
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const prev = new Array<number>(b.length + 1);
+  const curr = new Array<number>(b.length + 1);
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
+  }
+  return prev[b.length];
 }
 
 /** 给 handler 快速拼 reply 的糖 */

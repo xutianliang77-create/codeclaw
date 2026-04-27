@@ -1089,9 +1089,25 @@ class LocalQueryEngine implements QueryEngine {
       }
       this.lastEstimatedTokens = estimateMessageTokens(this.messages);
     }
-    const builtinReply = slashReply !== null ? slashReply : this.resolveBuiltinReply(trimmed);
+    let builtinReply = slashReply !== null ? slashReply : this.resolveBuiltinReply(trimmed);
     const commandReply = builtinReply === null ? await this.resolveCommandReply(trimmed) : undefined;
     const localToolName = builtinReply === null ? detectLocalTool(trimmed) : null;
+    // P4.5：所有 resolver（slash registry / builtinReply / commandReply / local-tool /
+    // parseApprovalCommand）都没接住，且 prompt 像 /word 形态 → did-you-mean 提示。
+    if (
+      slashReply === null &&
+      slashDispatch === null &&
+      builtinReply === null &&
+      commandReply === undefined &&
+      localToolName === null &&
+      approveTargetId === undefined &&
+      denyTargetId === undefined
+    ) {
+      const suggestion = this.slashRegistry.suggestForUnknown(trimmed);
+      if (suggestion) {
+        builtinReply = suggestion;
+      }
+    }
 
     yield {
       type: "message-start",
