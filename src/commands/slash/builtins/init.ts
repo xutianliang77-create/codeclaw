@@ -17,6 +17,7 @@ export default defineCommand({
   category: "session",
   risk: "low",
   summary: "Run init self-check (deps / dirs / provider / tokenFile).",
+  summaryZh: "跑初始化自检（依赖 / 目录 / provider / token 文件）",
   handler(ctx) {
     if (!isHolder(ctx.queryEngine)) {
       return reply("init command unavailable: runtime missing buildInitReply");

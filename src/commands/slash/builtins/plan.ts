@@ -17,6 +17,7 @@ export default defineCommand({
   category: "workflow",
   risk: "low",
   summary: "Build an orchestration plan from a goal (no side effects).",
+  summaryZh: "给目标产出 orchestration 计划（不写）",
   helpDetail:
     "Usage:\n" +
     "  /plan <goal>            generate plan steps for <goal>",

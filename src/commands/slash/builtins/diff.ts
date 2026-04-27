@@ -17,6 +17,7 @@ export default defineCommand({
   category: "observability",
   risk: "low",
   summary: "List files this session has modified or created.",
+  summaryZh: "列本会话修改 / 新建的文件",
   handler(ctx) {
     if (!isHolder(ctx.queryEngine)) {
       return reply("diff command unavailable: runtime missing buildDiffReply");

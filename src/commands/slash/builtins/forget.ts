@@ -53,6 +53,7 @@ export default defineCommand({
   category: "session",
   risk: "high",
   summary: "Delete L2 Memory digests by all / session / since.",
+  summaryZh: "按 all / session / 时间删除 L2 Memory 摘要",
   helpDetail:
     "Deletes saved session digests from ~/.codeclaw/data.db memory_digest table.\n" +
     "Audit log and sessions table are NOT affected (use separate cleanup tools).\n" +

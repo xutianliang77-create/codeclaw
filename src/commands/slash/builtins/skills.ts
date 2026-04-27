@@ -17,6 +17,7 @@ export default defineCommand({
   category: "plugin",
   risk: "low",
   summary: "List available skills, or activate/deactivate a skill.",
+  summaryZh: "列出 skill 或启用 / 关闭",
   helpDetail:
     "Usage:\n" +
     "  /skills [list]         list all skills\n" +

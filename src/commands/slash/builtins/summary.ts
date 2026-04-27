@@ -17,6 +17,7 @@ export default defineCommand({
   category: "memory",
   risk: "low",
   summary: "Show the latest compaction summary, if any.",
+  summaryZh: "显示最近一次压缩摘要（如果有）",
   handler(ctx) {
     if (!isHolder(ctx.queryEngine)) {
       return reply("summary command unavailable: runtime missing buildSummaryReply");

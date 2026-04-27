@@ -19,6 +19,7 @@ export default defineCommand({
   category: "memory",
   risk: "low",
   summary: "Compact older messages into a summary, keep recent ones.",
+  summaryZh: "压缩旧消息成摘要，保留近期对话",
   helpDetail:
     "Usage:\n" +
     "  /compact            use default keep-recent\n" +

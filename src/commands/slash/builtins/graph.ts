@@ -26,6 +26,7 @@ export default defineCommand({
   category: "memory",
   risk: "low",
   summary: "Build / query the workspace CodebaseGraph (TS/JS imports + call graph).",
+  summaryZh: "构建 / 查询工作区代码图（imports + 调用图）",
   helpDetail:
     "Usage:\n" +
     "  /graph                          show status\n" +

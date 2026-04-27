@@ -46,6 +46,7 @@ export default defineCommand({
   category: "workflow",
   risk: "low",
   summary: "Preview pending git changes (status + diff stat). Read-only.",
+  summaryZh: "预览待提交的 git 改动（status + diff stat），只读",
   helpDetail:
     "Read-only preview. Runs:\n" +
     "  git status --porcelain\n" +

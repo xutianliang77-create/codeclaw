@@ -20,6 +20,7 @@ export default defineCommand({
   category: "workflow",
   risk: "high",
   summary: "Plan + execute + reflect for a goal (may request user approvals).",
+  summaryZh: "规划 + 执行 + 反思一个目标（可能要审批）",
   helpDetail:
     "Usage:\n" +
     "  /orchestrate <goal>     full Planner→Executor→Reflector cycle for <goal>\n" +

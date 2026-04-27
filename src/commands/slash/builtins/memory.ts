@@ -17,6 +17,7 @@ export default defineCommand({
   category: "memory",
   risk: "low",
   summary: "Show compaction summary count and recent compaction state.",
+  summaryZh: "显示压缩摘要数量与最近压缩状态",
   handler(ctx) {
     if (!isHolder(ctx.queryEngine)) {
       return reply("memory command unavailable: runtime missing buildMemoryReply");

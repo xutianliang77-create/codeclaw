@@ -69,8 +69,10 @@ export interface SlashCommand {
   aliases?: string[];
   category: SlashCategory;
   risk: SlashRisk;
-  /** 一行简介（用于 /help 列表） */
+  /** 一行简介（英文；用于 /help 列表 + LLM 识别）。LLM-facing 不双语。 */
   summary: string;
+  /** P6b（v0.7.0）：可选中文简介；/help 渲染时拼成「summary · summaryZh」并排格式。 */
+  summaryZh?: string;
   /** 多行详细帮助（用于 /help <cmd>） */
   helpDetail?: string;
   /** 是否需要在 permission-mode != "plan" 才能跑（副作用命令） */

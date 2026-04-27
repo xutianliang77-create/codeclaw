@@ -17,6 +17,7 @@ export default defineCommand({
   category: "integration",
   risk: "medium",
   summary: "List MCP servers / tools / resources, or call an MCP tool.",
+  summaryZh: "列 MCP servers / tools / resources，或调 MCP tool",
   helpDetail:
     "Usage:\n" +
     "  /mcp servers                  list configured servers\n" +

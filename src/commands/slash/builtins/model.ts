@@ -17,6 +17,7 @@ export default defineCommand({
   category: "provider",
   risk: "medium",
   summary: "Show or switch the active model id.",
+  summaryZh: "查看或切换当前 model",
   helpDetail:
     "Usage:\n" +
     "  /model                show current model\n" +

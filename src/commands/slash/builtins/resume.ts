@@ -17,6 +17,7 @@ export default defineCommand({
   category: "session",
   risk: "low",
   summary: "Resume after interruption — show pending approvals or session summary.",
+  summaryZh: "中断后恢复——显示待审批或会话摘要",
   handler(ctx) {
     if (!isHolder(ctx.queryEngine)) {
       return reply("resume command unavailable: runtime missing buildResumeReply");

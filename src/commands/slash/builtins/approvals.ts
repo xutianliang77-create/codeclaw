@@ -17,6 +17,7 @@ export default defineCommand({
   category: "permission",
   risk: "low",
   summary: "List pending tool / orchestration approvals.",
+  summaryZh: "列出待审批的工具 / 编排请求",
   handler(ctx) {
     if (!isHolder(ctx.queryEngine)) {
       return reply("approvals command unavailable: runtime missing buildApprovalsReply");

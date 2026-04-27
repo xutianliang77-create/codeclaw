@@ -29,6 +29,7 @@ export default defineCommand({
   category: "memory",
   risk: "low",
   summary: "Show or append to CODECLAW.md (project + user level).",
+  summaryZh: "查看或追加 CODECLAW.md（项目 + 用户级）",
   helpDetail:
     "Read or append entries to CODECLAW.md, which is auto-injected as User Preferences /\n" +
     "Project Conventions sections in the system prompt every turn.\n" +

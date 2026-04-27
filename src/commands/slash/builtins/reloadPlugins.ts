@@ -17,6 +17,7 @@ export default defineCommand({
   category: "plugin",
   risk: "low",
   summary: "Reload skills / hooks registry from disk.",
+  summaryZh: "从磁盘重载 skills / hooks 注册表",
   handler(ctx) {
     if (!isHolder(ctx.queryEngine)) {
       return reply(

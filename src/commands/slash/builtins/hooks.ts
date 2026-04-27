@@ -17,6 +17,7 @@ export default defineCommand({
   category: "plugin",
   risk: "low",
   summary: "List registered lifecycle / tool hooks.",
+  summaryZh: "列出已注册的生命周期 / 工具 hook",
   handler(ctx) {
     if (!isHolder(ctx.queryEngine)) {
       return reply("hooks command unavailable: runtime missing buildHooksReply");

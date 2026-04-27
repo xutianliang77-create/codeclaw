@@ -17,6 +17,7 @@ export default defineCommand({
   category: "workflow",
   risk: "medium",
   summary: "Schedule slash / prompt / shell tasks (codeclaw-foreground only).",
+  summaryZh: "安排 slash / prompt / shell 定时任务（前台运行时生效）",
   helpDetail:
     "Usage:\n" +
     "  /cron                                              list tasks\n" +

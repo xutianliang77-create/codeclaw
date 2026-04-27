@@ -19,6 +19,7 @@ export default defineCommand({
   category: "observability",
   risk: "low",
   summary: "Show session activity snapshot (messages, tokens, files, approvals).",
+  summaryZh: "显示会话活动快照（消息 / token / 文件 / 审批）",
   helpDetail:
     "Shows current-session counters. Real input/output token usage from the provider\n" +
     "is not yet wired (planned for P0 W3); the token figure here is a local heuristic.",

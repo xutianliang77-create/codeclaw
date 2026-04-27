@@ -197,7 +197,9 @@ export class SlashRegistry {
       const width = Math.max(...cmds.map((c) => c.name.length));
       lines.push(`\n[${cat}]`);
       for (const c of cmds) {
-        lines.push(`  ${c.name.padEnd(width)}  ${c.summary}`);
+        // P6b：summaryZh 存在时拼「英 · 中」并排；不存在则只显示英文
+        const summaryDisplay = c.summaryZh ? `${c.summary}  ·  ${c.summaryZh}` : c.summary;
+        lines.push(`  ${c.name.padEnd(width)}  ${summaryDisplay}`);
       }
     }
     return lines.join("\n");

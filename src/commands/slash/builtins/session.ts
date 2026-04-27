@@ -17,6 +17,7 @@ export default defineCommand({
   category: "session",
   risk: "low",
   summary: "Show session id, message count, last assistant snippet.",
+  summaryZh: "显示 session id / 消息数 / 最近助手片段",
   handler(ctx) {
     if (!isHolder(ctx.queryEngine)) {
       return reply("session command unavailable: runtime missing buildSessionReply");

@@ -50,6 +50,7 @@ export default defineCommand({
   category: "permission",
   risk: "medium",
   summary: "Show or switch permission mode (default/plan/auto/acceptEdits/bypassPermissions/dontAsk).",
+  summaryZh: "查看或切换权限模式",
   helpDetail:
     "Usage:\n" +
     "  /mode                  show current mode\n" +

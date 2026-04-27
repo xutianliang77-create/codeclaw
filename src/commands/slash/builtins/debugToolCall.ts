@@ -17,6 +17,7 @@ export default defineCommand({
   category: "observability",
   risk: "low",
   summary: "Inspect the most recent tool invocation (input/output/error).",
+  summaryZh: "查看最近一次工具调用详情（输入 / 输出 / 错误）",
   helpDetail:
     "Usage:\n" +
     "  /debug-tool-call            show the latest tool call\n" +

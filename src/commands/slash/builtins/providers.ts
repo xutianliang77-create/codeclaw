@@ -17,6 +17,7 @@ export default defineCommand({
   category: "provider",
   risk: "low",
   summary: "Show current and fallback provider/model.",
+  summaryZh: "显示当前与备用 provider / model",
   handler(ctx) {
     if (!isHolder(ctx.queryEngine)) {
       return reply("providers command unavailable: runtime missing buildProvidersReply");

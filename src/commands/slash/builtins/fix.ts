@@ -20,6 +20,7 @@ export default defineCommand({
   category: "workflow",
   risk: "high",
   summary: "Plan + execute a bug fix attempt for a described issue.",
+  summaryZh: "规划并尝试修复给定 bug",
   helpDetail:
     "Runs orchestration with a 'fix' intent and (if registered) a 'fix' skill\n" +
     "to constrain which tools the agent uses. Risky steps go through pending\n" +

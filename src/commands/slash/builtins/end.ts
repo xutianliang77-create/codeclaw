@@ -22,6 +22,7 @@ export default defineCommand({
   category: "session",
   risk: "low",
   summary: "End session and persist a digest into L2 Memory.",
+  summaryZh: "结束会话并把摘要持久化到 L2 Memory",
   helpDetail:
     "Runs LLM summarization on the current conversation and stores the digest\n" +
     "into ~/.codeclaw/data.db. The next session for the same (channel, userId)\n" +

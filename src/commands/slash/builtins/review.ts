@@ -17,6 +17,7 @@ export default defineCommand({
   category: "workflow",
   risk: "medium",
   summary: "Run a review (read-only orchestration) on a goal.",
+  summaryZh: "对目标做 review（只读 orchestration）",
   helpDetail:
     "Usage:\n" +
     "  /review <goal>          plan + execute under the review skill, no edits\n" +

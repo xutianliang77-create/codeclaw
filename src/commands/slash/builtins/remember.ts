@@ -26,6 +26,7 @@ export default defineCommand({
   category: "memory",
   risk: "low",
   summary: "Save a fact / preference to long-term project memory.",
+  summaryZh: "把事实 / 偏好持久化到项目级 memory",
   helpDetail:
     "Saves the rest of the line as a user-type memory entry, persisted under\n" +
     "  ~/.codeclaw/projects/<hash>/memory/user_note_<ts>.md\n" +

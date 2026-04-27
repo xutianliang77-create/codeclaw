@@ -17,6 +17,7 @@ export default defineCommand({
   category: "integration",
   risk: "medium",
   summary: "WeChat iLink: login / status / send / config.",
+  summaryZh: "微信 iLink：登录 / 状态 / 发送 / 配置",
   helpDetail:
     "Usage:\n" +
     "  /wechat status            show current iLink token state\n" +

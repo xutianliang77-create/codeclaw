@@ -24,6 +24,7 @@ export default defineCommand({
   category: "memory",
   risk: "low",
   summary: "Index / search the workspace RAG store (BM25 keyword retrieval).",
+  summaryZh: "索引 / 搜索工作区 RAG 库（BM25 关键字召回）",
   helpDetail:
     "Usage:\n" +
     "  /rag                  show index status\n" +

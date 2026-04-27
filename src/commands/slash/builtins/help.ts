@@ -22,6 +22,7 @@ export default defineCommand({
   category: "help",
   risk: "low",
   summary: "List all available slash commands grouped by category.",
+  summaryZh: "列出所有 slash 命令（按类别分组）",
   handler(ctx) {
     if (!isHolder(ctx.queryEngine)) {
       return reply(

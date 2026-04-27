@@ -28,6 +28,7 @@ export default defineCommand({
   category: "session",
   risk: "low",
   summary: "Arm one-shot plan mode for a read-only Q&A turn (auto-injects inline question).",
+  summaryZh: "装弹一次性 plan 模式做只读问答（自动注入内联问题）",
   helpDetail:
     "Switches permission mode to `plan` for the next non-/ask turn. After that turn\n" +
     "completes, the previous mode is restored automatically.\n" +

@@ -17,6 +17,7 @@ export default defineCommand({
   category: "observability",
   risk: "low",
   summary: "Show turn count, message count, char count, estimated tokens.",
+  summaryZh: "显示对话轮数 / 消息数 / 字符数 / 估算 token",
   handler(ctx) {
     if (!isHolder(ctx.queryEngine)) {
       return reply("context command unavailable: runtime missing buildContextReply");

@@ -180,6 +180,32 @@ describe("SlashRegistry.generateHelp", () => {
     expect(help).not.toContain("[session]"); // no session commands
     expect(help).toContain("[help]");
   });
+
+  it("P6b: summaryZh 存在时拼成双语", () => {
+    const reg = new SlashRegistry();
+    reg.register(
+      defineCommand({
+        name: "/foo",
+        category: "help",
+        risk: "low",
+        summary: "Do foo.",
+        summaryZh: "做 foo",
+        handler: () => reply("x"),
+      })
+    );
+    const help = reg.generateHelp();
+    expect(help).toContain("Do foo.");
+    expect(help).toContain("做 foo");
+    expect(help).toContain("·"); // 中点分隔
+  });
+
+  it("P6b: 无 summaryZh 时只显英文（向后兼容）", () => {
+    const reg = new SlashRegistry();
+    reg.register(echoCommand("/legacy"));
+    const help = reg.generateHelp();
+    expect(help).toContain("echo /legacy");
+    expect(help).not.toContain(" · "); // 没双语并排
+  });
 });
 
 describe("SlashRegistry.suggestForUnknown (P4.5)", () => {
