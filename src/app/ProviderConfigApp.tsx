@@ -89,8 +89,8 @@ export function ProviderConfigApp({
   const [fieldValue, setFieldValue] = useState("");
   const [banner, setBanner] = useState(
     mode === "setup"
-      ? "Interactive setup ready. Configure providers and save."
-      : "Interactive provider config ready."
+      ? "Interactive setup ready. Configure providers and save.  ·  交互式 setup 就绪，请配置 provider 并保存。"
+      : "Interactive provider config ready.  ·  交互式 provider 配置就绪。"
   );
   const [webTokenInfo, setWebTokenInfo] = useState<{ token: string; path: string } | null>(
     () => {
@@ -109,30 +109,43 @@ export function ProviderConfigApp({
     }
     if (key.escape && screen !== "done") {
       setScreen("main");
-      setBanner("Returned to main menu.");
+      setBanner("Returned to main menu.  ·  已返回主菜单。");
     }
   });
 
   const mainItems = useMemo<MenuItem[]>(
     () => [
-      { label: `Set default provider (${config.provider.default})`, value: "default" },
-      { label: `Set fallback provider (${config.provider.fallback})`, value: "fallback" },
-      { label: "Edit provider settings", value: "provider" },
       {
-        label: `Web token (${webTokenInfo ? "✓ " + maskToken(webTokenInfo.token) : "未生成"})`,
+        label: `Set default provider · 默认 provider (${config.provider.default})`,
+        value: "default",
+      },
+      {
+        label: `Set fallback provider · 备用 provider (${config.provider.fallback})`,
+        value: "fallback",
+      },
+      { label: "Edit provider settings  ·  编辑 provider 字段", value: "provider" },
+      {
+        label: `Web token  ·  Web 鉴权令牌 (${
+          webTokenInfo ? "✓ " + maskToken(webTokenInfo.token) : "未生成 / not set"
+        })`,
         value: "web-token",
       },
-      { label: "Save and exit", value: "save" },
-      { label: "Exit without saving", value: "exit" }
+      { label: "Save and exit  ·  保存并退出", value: "save" },
+      { label: "Exit without saving  ·  不保存退出", value: "exit" }
     ],
     [config.provider.default, config.provider.fallback, webTokenInfo]
   );
 
   const webTokenMenuItems = useMemo<MenuItem[]>(
     () => [
-      { label: webTokenInfo ? "已生成；查看完整 token（在下方）" : "生成 token", value: "ensure" },
-      { label: "重新生成（覆盖旧 token）", value: "regenerate" },
-      { label: "Back", value: "back" },
+      {
+        label: webTokenInfo
+          ? "Show existing  ·  查看现有 token（路径见下）"
+          : "Generate now  ·  立即生成 token",
+        value: "ensure",
+      },
+      { label: "Regenerate (overwrite)  ·  重新生成（覆盖旧 token）", value: "regenerate" },
+      { label: "Back  ·  返回", value: "back" },
     ],
     [webTokenInfo]
   );
@@ -149,14 +162,20 @@ export function ProviderConfigApp({
   const providerMenuItems = useMemo<MenuItem[]>(() => {
     const current = normalizeEntry(providers[selectedProvider]);
     return [
-      { label: `enabled (${current.enabled ? "true" : "false"})`, value: "enabled" },
-      { label: `baseUrl (${current.baseUrl || "-"})`, value: "baseUrl" },
-      { label: `model (${current.model || "-"})`, value: "model" },
-      { label: `timeoutMs (${current.timeoutMs ?? "-"})`, value: "timeoutMs" },
-      { label: `maxTokens (${current.maxTokens ?? "-"})`, value: "maxTokens" },
-      { label: `contextWindow (${current.contextWindow ?? "-"})`, value: "contextWindow" },
-      { label: `apiKeyEnvVar (${current.apiKeyEnvVar || "-"})`, value: "apiKeyEnvVar" },
-      { label: "Back", value: "back" }
+      { label: `enabled · 启用 (${current.enabled ? "true" : "false"})`, value: "enabled" },
+      { label: `baseUrl · API 基址 (${current.baseUrl || "-"})`, value: "baseUrl" },
+      { label: `model · 模型 (${current.model || "-"})`, value: "model" },
+      { label: `timeoutMs · 超时(ms) (${current.timeoutMs ?? "-"})`, value: "timeoutMs" },
+      { label: `maxTokens · 单次最大 token (${current.maxTokens ?? "-"})`, value: "maxTokens" },
+      {
+        label: `contextWindow · 上下文窗口 token (${current.contextWindow ?? "-"})`,
+        value: "contextWindow",
+      },
+      {
+        label: `apiKeyEnvVar · API key env 变量 (${current.apiKeyEnvVar || "-"})`,
+        value: "apiKeyEnvVar",
+      },
+      { label: "Back  ·  返回", value: "back" }
     ];
   }, [providers, selectedProvider]);
 
@@ -177,7 +196,7 @@ export function ProviderConfigApp({
         ...current,
         enabled: !(current.enabled ?? true)
       }));
-      setBanner(`Updated ${selectedProvider}.enabled`);
+      setBanner(`Updated ${selectedProvider}.enabled  ·  已更新`);
       return;
     }
 
@@ -202,21 +221,25 @@ export function ProviderConfigApp({
           ...current,
           [selectedField]: undefined,
         }));
-        setBanner(`Cleared ${selectedProvider}.${selectedField}（恢复默认）`);
+        setBanner(
+          `Cleared ${selectedProvider}.${selectedField}  ·  已清空（恢复默认）`
+        );
         setScreen("provider-menu");
         return;
       }
       const n = Number.parseInt(trimmed, 10);
       if (!Number.isFinite(n) || Number.isNaN(n) || n <= 0 || String(n) !== trimmed) {
         // 非整数 / 0 / 负数 → reject，留在编辑屏让用户改
-        setBanner(`${selectedField} 需为正整数（输入 "${trimmed}" 不合法）`);
+        setBanner(
+          `${selectedField} must be a positive integer  ·  需为正整数（输入 "${trimmed}" 不合法）`
+        );
         return;
       }
       updateProvider(selectedProvider, (current) => ({
         ...current,
         [selectedField]: n,
       }));
-      setBanner(`Updated ${selectedProvider}.${selectedField} = ${n}`);
+      setBanner(`Updated ${selectedProvider}.${selectedField} = ${n}  ·  已更新`);
       setScreen("provider-menu");
       return;
     }
@@ -235,7 +258,7 @@ export function ProviderConfigApp({
       };
     });
 
-    setBanner(`Updated ${selectedProvider}.${selectedField}`);
+    setBanner(`Updated ${selectedProvider}.${selectedField}  ·  已更新`);
     setScreen("provider-menu");
   }
 
@@ -248,7 +271,9 @@ export function ProviderConfigApp({
       setWebTokenInfo({ token, path: webAuthFilePath() });
       setSavedTokenJustNow(generated);
     }
-    setBanner(`Saved ${paths.configFile} and ${paths.providersFile}`);
+    setBanner(
+      `Saved · 已保存 ${paths.configFile} + ${paths.providersFile}`
+    );
     setScreen("done");
   }
 
@@ -258,14 +283,18 @@ export function ProviderConfigApp({
       const { token, generated } = ensureWebToken(fp);
       setWebTokenInfo({ token, path: fp });
       setSavedTokenJustNow(generated);
-      setBanner(generated ? `已生成 web token，保存到 ${fp}` : `已读取现有 token: ${fp}`);
+      setBanner(
+        generated
+          ? `Generated · 已生成 web token，保存到 ${fp}`
+          : `Loaded · 已读取现有 token: ${fp}`
+      );
     } else {
       // regenerate：覆盖
       const fresh = generateWebToken();
       writeWebAuthFile(fresh, fp);
       setWebTokenInfo({ token: fresh.token, path: fp });
       setSavedTokenJustNow(true);
-      setBanner(`已重新生成 web token，保存到 ${fp}`);
+      setBanner(`Regenerated · 已重新生成 web token，保存到 ${fp}`);
     }
     setScreen("main");
   }
@@ -273,8 +302,10 @@ export function ProviderConfigApp({
   return (
     <Box flexDirection="column">
       <Box borderStyle="round" paddingX={1} flexDirection="column">
-        <Text>CodeClaw Provider Config</Text>
-        <Text color="gray">mode: {mode} | Esc back | Ctrl+C exit</Text>
+        <Text>CodeClaw Provider Config  ·  Provider 配置向导</Text>
+        <Text color="gray">
+          mode: {mode}  |  Esc 返回 / back  |  Ctrl+C 退出 / exit
+        </Text>
       </Box>
 
       <Box borderStyle="round" borderColor="yellow" paddingX={1} marginTop={1}>
@@ -294,7 +325,7 @@ export function ProviderConfigApp({
       <Box borderStyle="round" paddingX={1} flexDirection="column" marginTop={1}>
         {screen === "main" ? (
           <>
-            <Text>Main Menu</Text>
+            <Text>Main Menu  ·  主菜单</Text>
             <SelectInput
               items={mainItems}
               onSelect={(item) => {
@@ -331,11 +362,15 @@ export function ProviderConfigApp({
 
         {screen === "web-token" ? (
           <>
-            <Text>Web token · ~/.codeclaw/web-auth.json</Text>
+            <Text>Web token  ·  Web 鉴权令牌  ·  ~/.codeclaw/web-auth.json</Text>
             {webTokenInfo ? (
-              <Text color="gray">当前: {maskToken(webTokenInfo.token)}（路径: {webTokenInfo.path}）</Text>
+              <Text color="gray">
+                Current  ·  当前: {maskToken(webTokenInfo.token)}（path/路径: {webTokenInfo.path}）
+              </Text>
             ) : (
-              <Text color="gray">尚未生成；首次启动 codeclaw web 也会自动生成</Text>
+              <Text color="gray">
+                Not generated yet  ·  尚未生成；首次启动 codeclaw web 也会自动生成
+              </Text>
             )}
             <SelectInput
               items={webTokenMenuItems}
@@ -352,7 +387,7 @@ export function ProviderConfigApp({
 
         {screen === "default" ? (
           <>
-            <Text>Select default provider</Text>
+            <Text>Select default provider  ·  选择默认 provider</Text>
             <SelectInput
               items={providerItems}
               onSelect={(item) => {
@@ -363,7 +398,7 @@ export function ProviderConfigApp({
                     default: item.value as ProviderType
                   }
                 }));
-                setBanner(`Default provider set to ${item.value}`);
+                setBanner(`Default provider set to ${item.value}  ·  默认 provider 已设为 ${item.value}`);
                 setScreen("main");
               }}
             />
@@ -372,7 +407,7 @@ export function ProviderConfigApp({
 
         {screen === "fallback" ? (
           <>
-            <Text>Select fallback provider</Text>
+            <Text>Select fallback provider  ·  选择备用 provider</Text>
             <SelectInput
               items={providerItems}
               onSelect={(item) => {
@@ -383,7 +418,7 @@ export function ProviderConfigApp({
                     fallback: item.value as ProviderType
                   }
                 }));
-                setBanner(`Fallback provider set to ${item.value}`);
+                setBanner(`Fallback provider set to ${item.value}  ·  备用 provider 已设为 ${item.value}`);
                 setScreen("main");
               }}
             />
@@ -392,12 +427,12 @@ export function ProviderConfigApp({
 
         {screen === "pick-provider" ? (
           <>
-            <Text>Select provider to edit</Text>
+            <Text>Select provider to edit  ·  选择要编辑的 provider</Text>
             <SelectInput
               items={providerItems}
               onSelect={(item) => {
                 setSelectedProvider(item.value as ProviderType);
-                setBanner(`Editing ${item.value}`);
+                setBanner(`Editing ${item.value}  ·  正在编辑`);
                 setScreen("provider-menu");
               }}
             />
@@ -406,7 +441,7 @@ export function ProviderConfigApp({
 
         {screen === "provider-menu" ? (
           <>
-            <Text>Edit provider: {selectedProvider}</Text>
+            <Text>Edit provider  ·  编辑 provider: {selectedProvider}</Text>
             <SelectInput
               items={providerMenuItems}
               onSelect={(item) => {
@@ -424,17 +459,17 @@ export function ProviderConfigApp({
         {screen === "field-input" ? (
           <>
             <Text>
-              Edit {selectedProvider}.{selectedField}
+              Edit  ·  编辑 {selectedProvider}.{selectedField}
             </Text>
             <Text color="gray">
               {selectedField === "timeoutMs" ||
               selectedField === "maxTokens" ||
               selectedField === "contextWindow"
-                ? "Positive integer or blank to clear. Enter saves; ESC cancels; Ctrl+C exits."
-                : "Backspace/←→ edit. Ctrl+A=home Ctrl+E=end Ctrl+U=clear Ctrl+W=del-word. Enter saves; ESC cancels."}
+                ? "Positive integer or blank to clear · 正整数；留空清空。Enter=save · 保存; ESC=cancel · 取消; Ctrl+C=exit · 退出."
+                : "Backspace/←→ edit · 编辑. Ctrl+A=home Ctrl+E=end Ctrl+U=clear Ctrl+W=del-word. Enter=save · 保存; ESC=cancel · 取消."}
             </Text>
             <Text color="gray">
-              buffer length: {fieldValue.length}
+              buffer length  ·  缓冲长度: {fieldValue.length}
             </Text>
             <Box marginTop={1}>
               <Text color="cyan">{"> "}</Text>
@@ -445,7 +480,7 @@ export function ProviderConfigApp({
 
         {screen === "done" ? (
           <>
-            <Text color="green">Configuration saved.</Text>
+            <Text color="green">Configuration saved.  ·  配置已保存。</Text>
             {webTokenInfo ? (
               <>
                 <Text color="cyan">
@@ -453,12 +488,12 @@ export function ProviderConfigApp({
                 </Text>
                 <Text color="gray">
                   {savedTokenJustNow
-                    ? `已保存到 ${webTokenInfo.path}（mode 0600，请复制保存——登录浏览器时输入）`
-                    : `路径: ${webTokenInfo.path}`}
+                    ? `Saved to · 已保存到 ${webTokenInfo.path}（mode 0600，请复制保存——登录浏览器时输入 / copy & paste at browser login）`
+                    : `Path · 路径: ${webTokenInfo.path}`}
                 </Text>
               </>
             ) : null}
-            <Text>Press Ctrl+C to exit.</Text>
+            <Text>Press Ctrl+C to exit.  ·  按 Ctrl+C 退出。</Text>
           </>
         ) : null}
       </Box>
