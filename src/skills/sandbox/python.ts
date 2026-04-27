@@ -35,7 +35,7 @@ export interface RunPythonOptions {
   abortSignal?: AbortSignal;
   /**
    * 进程虚拟内存上限（MB）；默认 256；设 0 关闭。
-   * 通过 bash wrapper + ulimit -v 实现（Linux/macOS）；Windows 自动忽略。
+   * 通过 bash wrapper + ulimit -v 实现（仅 Linux）；其他平台自动忽略。
    * code 模式：mem 限制时 code 走 stdin（user stdin 不可同时使用）。
    * scriptPath 模式：仅 mem 限制非 0 时也走 wrapper。
    */
@@ -76,7 +76,7 @@ export async function runPython(opts: RunPythonOptions): Promise<RunPythonResult
   const pythonBin = opts.pythonBin ?? resolvePythonBin(opts.env ?? process.env);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const memMb = opts.maxMemoryMb ?? DEFAULT_MAX_MEMORY_MB;
-  const useMemLimit = memMb > 0 && process.platform !== "win32";
+  const useMemLimit = memMb > 0 && process.platform === "linux";
 
   // mem 限制时走 bash + ulimit -v wrapper；code 模式把代码喂 stdin（避免 shell escape）
   // 注：useMemLimit + opts.stdin 同时存在 → stdin 被代码占用，user stdin 被忽略（warn）

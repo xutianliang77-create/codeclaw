@@ -80,7 +80,9 @@ describe("runPython", () => {
       expect(r.stdout.trim()).toBe("HELLO");
     });
 
-    it("内存限制：分配超 256MB → OOM 退出（非零）", async () => {
+    const oomCase = process.platform === "linux" ? it : it.skip;
+
+    oomCase("内存限制：分配超 256MB → OOM 退出（非零）", async () => {
       // 分配 ~400MB bytes 应触发 ulimit -v 限制
       const r = await runPython({
         code: "x = bytearray(400 * 1024 * 1024); print('did-not-oom')",
