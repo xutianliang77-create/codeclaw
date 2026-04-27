@@ -19,9 +19,9 @@ export default defineCommand({
   summary: "List available skills, or activate/deactivate a skill.",
   helpDetail:
     "Usage:\n" +
-    "  /skills                list all skills\n" +
-    "  /skills <name>         activate a skill\n" +
-    "  /skills off            deactivate the active skill",
+    "  /skills [list]         list all skills\n" +
+    "  /skills <name>         activate a skill (alias: /skills use <name>)\n" +
+    "  /skills off | clear    deactivate the active skill",
   handler(ctx) {
     if (!isHolder(ctx.queryEngine)) {
       return reply("skills command unavailable: runtime missing buildSkillsReply");

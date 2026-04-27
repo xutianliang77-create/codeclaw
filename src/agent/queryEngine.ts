@@ -2663,41 +2663,62 @@ class LocalQueryEngine implements QueryEngine {
   private buildSkillsReply(prompt: string): string {
     const suffix = prompt.slice("/skills".length).trim();
 
-    if (!suffix) {
+    // P4.3：list 别名（空 suffix 等价 /skills list）
+    if (!suffix || suffix === "list") {
       const skills = this.skillRegistry.list();
       return [
         `active-skill: ${this.activeSkill?.name ?? "none"}`,
         `discovered-skills: ${skills.length}`,
         ...skills.map((skill) => `- ${formatSkill(skill)}`),
-        "Use `/skills use <name>` to activate a skill or `/skills clear` to return to the default flow."
+        "Usage:",
+        "  /skills [list]              list all skills",
+        "  /skills <name>              activate（等价 /skills use <name>）",
+        "  /skills off | clear         deactivate"
       ].join("\n");
     }
 
-    if (suffix === "clear") {
+    // P4.3：clear / off 都接受
+    if (suffix === "clear" || suffix === "off") {
       this.activeSkill = null;
       return "Cleared active skill. Returning to the default flow.";
     }
 
+    // /skills use <name>
     if (suffix.startsWith("use ")) {
       const requestedSkill = suffix.slice("use ".length).trim();
       if (!requestedSkill) {
         return "Usage: /skills use <name>";
       }
-
-      const skill = this.skillRegistry.get(requestedSkill);
-      if (!skill) {
-        return `Unknown skill: ${requestedSkill}\nAvailable: ${this.skillRegistry.list().map((item) => item.name).join(", ")}`;
-      }
-
-      this.activeSkill = skill;
-      return [
-        `Activated skill: ${skill.name}`,
-        skill.description,
-        `allowed-tools: ${skill.allowedTools.join(", ")}`
-      ].join("\n");
+      return this.activateSkillByName(requestedSkill);
     }
 
-    return "Usage: /skills, /skills use <name>, /skills clear";
+    // P4.3：/skills <name> 直接激活（保留字 list/off/clear/use 已被前面分支拦下）
+    // 多 token 场景（如 "/skills foo bar"）按第一段 token 匹配
+    const firstToken = suffix.split(/\s+/)[0]?.trim();
+    if (firstToken && firstToken !== "use") {
+      return this.activateSkillByName(firstToken);
+    }
+
+    return [
+      "Usage:",
+      "  /skills [list]              list all skills",
+      "  /skills <name>              activate",
+      "  /skills off | clear         deactivate"
+    ].join("\n");
+  }
+
+  /** 按名字激活 skill；找不到时返回错误信息 */
+  private activateSkillByName(name: string): string {
+    const skill = this.skillRegistry.get(name);
+    if (!skill) {
+      return `Unknown skill: ${name}\nAvailable: ${this.skillRegistry.list().map((item) => item.name).join(", ")}`;
+    }
+    this.activeSkill = skill;
+    return [
+      `Activated skill: ${skill.name}`,
+      skill.description,
+      `allowed-tools: ${skill.allowedTools.join(", ")}`
+    ].join("\n");
   }
 
   private buildHooksReply(): string {

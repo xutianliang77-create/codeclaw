@@ -729,6 +729,25 @@ describe("query engine", () => {
     await collect(engine.submitMessage("/skills"));
     expect(engine.getMessages().at(-1)?.text).toContain("active-skill: review");
 
+    // P4.3: list 别名
+    await collect(engine.submitMessage("/skills list"));
+    expect(engine.getMessages().at(-1)?.text).toContain("discovered-skills: 4");
+
+    // P4.3: off 等价 clear
+    await collect(engine.submitMessage("/skills off"));
+    expect(engine.getMessages().at(-1)?.text).toContain("Cleared active skill");
+
+    // P4.3: 直接传 name 等价 use <name>
+    await collect(engine.submitMessage("/skills explain"));
+    expect(engine.getMessages().at(-1)?.text).toContain("Activated skill: explain");
+
+    // P4.3: 未知 name 给候选
+    await collect(engine.submitMessage("/skills nonexistent"));
+    expect(engine.getMessages().at(-1)?.text).toContain("Unknown skill: nonexistent");
+
+    // 还原
+    await collect(engine.submitMessage("/skills clear"));
+
     await collect(engine.submitMessage("/hooks"));
     // M3-04：/hooks 重写后输出每事件状态；空配置时含示例引导
     expect(engine.getMessages().at(-1)?.text).toContain("Hooks (lifecycle event integrations)");
