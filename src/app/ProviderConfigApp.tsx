@@ -4,6 +4,13 @@ import SelectInput from "ink-select-input";
 import { SafeTextInput } from "./SafeTextInput";
 import type { CodeClawConfig, ConfigPaths, ProviderFileEntry, ProviderType, ProvidersFileConfig } from "../lib/config";
 import { writeConfig, writeProvidersFile } from "../lib/config";
+import {
+  ensureWebToken,
+  generateWebToken,
+  readWebAuthFile,
+  webAuthFilePath,
+  writeWebAuthFile,
+} from "../channels/web/auth";
 
 type Screen =
   | "main"
@@ -12,7 +19,14 @@ type Screen =
   | "pick-provider"
   | "provider-menu"
   | "field-input"
+  | "web-token"
   | "done";
+
+/** token 显示掩码：前 4 + ... + 后 4 字符；过短直接 *** */
+function maskToken(t: string): string {
+  if (!t || t.length < 12) return "***";
+  return `${t.slice(0, 4)}...${t.slice(-4)}`;
+}
 
 type MenuItem = {
   label: string;
@@ -78,6 +92,14 @@ export function ProviderConfigApp({
       ? "Interactive setup ready. Configure providers and save."
       : "Interactive provider config ready."
   );
+  const [webTokenInfo, setWebTokenInfo] = useState<{ token: string; path: string } | null>(
+    () => {
+      const fp = webAuthFilePath();
+      const f = readWebAuthFile(fp);
+      return f ? { token: f.token, path: fp } : null;
+    }
+  );
+  const [savedTokenJustNow, setSavedTokenJustNow] = useState(false);
 
   // Ctrl+C 全退；ESC 回主菜单（编辑屏也生效，因为 SafeTextInput 不再吞 ESC）
   useInput((input, key) => {
@@ -96,10 +118,23 @@ export function ProviderConfigApp({
       { label: `Set default provider (${config.provider.default})`, value: "default" },
       { label: `Set fallback provider (${config.provider.fallback})`, value: "fallback" },
       { label: "Edit provider settings", value: "provider" },
+      {
+        label: `Web token (${webTokenInfo ? "✓ " + maskToken(webTokenInfo.token) : "未生成"})`,
+        value: "web-token",
+      },
       { label: "Save and exit", value: "save" },
       { label: "Exit without saving", value: "exit" }
     ],
-    [config.provider.default, config.provider.fallback]
+    [config.provider.default, config.provider.fallback, webTokenInfo]
+  );
+
+  const webTokenMenuItems = useMemo<MenuItem[]>(
+    () => [
+      { label: webTokenInfo ? "已生成；查看完整 token（在下方）" : "生成 token", value: "ensure" },
+      { label: "重新生成（覆盖旧 token）", value: "regenerate" },
+      { label: "Back", value: "back" },
+    ],
+    [webTokenInfo]
   );
 
   const providerItems = useMemo<MenuItem[]>(
@@ -207,8 +242,32 @@ export function ProviderConfigApp({
   async function save(): Promise<void> {
     await writeConfig(config, paths);
     await writeProvidersFile(providers, paths);
+    // P2.3：保存配置时顺手 ensure web token；已存在不覆盖
+    const { token, generated } = ensureWebToken();
+    if (generated || !webTokenInfo) {
+      setWebTokenInfo({ token, path: webAuthFilePath() });
+      setSavedTokenJustNow(generated);
+    }
     setBanner(`Saved ${paths.configFile} and ${paths.providersFile}`);
     setScreen("done");
+  }
+
+  function handleWebTokenAction(action: "ensure" | "regenerate"): void {
+    const fp = webAuthFilePath();
+    if (action === "ensure") {
+      const { token, generated } = ensureWebToken(fp);
+      setWebTokenInfo({ token, path: fp });
+      setSavedTokenJustNow(generated);
+      setBanner(generated ? `已生成 web token，保存到 ${fp}` : `已读取现有 token: ${fp}`);
+    } else {
+      // regenerate：覆盖
+      const fresh = generateWebToken();
+      writeWebAuthFile(fresh, fp);
+      setWebTokenInfo({ token: fresh.token, path: fp });
+      setSavedTokenJustNow(true);
+      setBanner(`已重新生成 web token，保存到 ${fp}`);
+    }
+    setScreen("main");
   }
 
   return (
@@ -254,12 +313,38 @@ export function ProviderConfigApp({
                   return;
                 }
 
+                if (item.value === "web-token") {
+                  setScreen("web-token");
+                  return;
+                }
+
                 if (item.value === "save") {
                   void save();
                   return;
                 }
 
                 exit();
+              }}
+            />
+          </>
+        ) : null}
+
+        {screen === "web-token" ? (
+          <>
+            <Text>Web token · ~/.codeclaw/web-auth.json</Text>
+            {webTokenInfo ? (
+              <Text color="gray">当前: {maskToken(webTokenInfo.token)}（路径: {webTokenInfo.path}）</Text>
+            ) : (
+              <Text color="gray">尚未生成；首次启动 codeclaw web 也会自动生成</Text>
+            )}
+            <SelectInput
+              items={webTokenMenuItems}
+              onSelect={(item) => {
+                if (item.value === "back") {
+                  setScreen("main");
+                  return;
+                }
+                handleWebTokenAction(item.value as "ensure" | "regenerate");
               }}
             />
           </>
@@ -361,6 +446,18 @@ export function ProviderConfigApp({
         {screen === "done" ? (
           <>
             <Text color="green">Configuration saved.</Text>
+            {webTokenInfo ? (
+              <>
+                <Text color="cyan">
+                  Web token: {savedTokenJustNow ? webTokenInfo.token : maskToken(webTokenInfo.token)}
+                </Text>
+                <Text color="gray">
+                  {savedTokenJustNow
+                    ? `已保存到 ${webTokenInfo.path}（mode 0600，请复制保存——登录浏览器时输入）`
+                    : `路径: ${webTokenInfo.path}`}
+                </Text>
+              </>
+            ) : null}
             <Text>Press Ctrl+C to exit.</Text>
           </>
         ) : null}
