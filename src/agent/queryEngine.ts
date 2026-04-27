@@ -668,7 +668,7 @@ class LocalQueryEngine implements QueryEngine {
   // #86：成本预算配置（构造时从 options.budget ?? env 决定）
   private readonly budgetConfig: BudgetConfig;
   private readonly slashRegistry = new SlashRegistry();
-  // M1-B/B.2：native tool_use 注册表；env CODECLAW_NATIVE_TOOLS=true 时构造时注册 9 个 builtin
+  // M1-B/B.2：native tool_use 注册表；v0.7.0 起默认注册 9 个 builtin（env CODECLAW_NATIVE_TOOLS=false 显式关）
   private readonly toolRegistry: ToolRegistry = createToolRegistry();
   private readonly fsm = new EngineFsm();
   private readonly auditLog: AuditLog | null;
@@ -796,8 +796,8 @@ class LocalQueryEngine implements QueryEngine {
     // session A 的 save 不会删 B 的 pending。这是对"覆盖"风险与"recovery 可见性"的折中。
     this.pendingApprovals = loadPendingApprovals(options.approvalsDir);
     loadBuiltins(this.slashRegistry);
-    // M1-B/B.2：native tool_use opt-in 通过 env 启用；不设默认开启避免影响现有 baseline
-    if (process.env.CODECLAW_NATIVE_TOOLS === "true") {
+    // M1-B/B.2：native tool_use 默认开启（v0.7.0 起）；env CODECLAW_NATIVE_TOOLS=false 可显式关闭
+    if (process.env.CODECLAW_NATIVE_TOOLS !== "false") {
       registerBuiltinTools(this.toolRegistry);
       // M2-02：跨会话 memory tools；env CODECLAW_PROJECT_MEMORY=false 显式关
       if (process.env.CODECLAW_PROJECT_MEMORY !== "false") {

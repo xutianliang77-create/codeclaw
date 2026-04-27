@@ -151,7 +151,7 @@ describe("queryEngine native tool_use multi-turn", () => {
     expect(all.at(-1)?.text).toContain("secret-content-42");
   });
 
-  it("env 关闭时（默认）不发 tools schema、走单回合（向后兼容）", async () => {
+  it("env=false 显式关闭时不发 tools schema、走单回合（向后兼容）", async () => {
     process.env.CODECLAW_NATIVE_TOOLS = "false";
     const requests: Array<{ tools?: unknown }> = [];
     const fetchImpl = (async (_url: string, init?: RequestInit) => {
@@ -176,6 +176,35 @@ describe("queryEngine native tool_use multi-turn", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0].tools).toBeUndefined();
     expect(engine.getMessages().at(-1)?.text).toBe("plain answer");
+  });
+
+  it("v0.7.0: env 未设时默认启用 native tools（注册 builtin tools）", async () => {
+    delete process.env.CODECLAW_NATIVE_TOOLS;
+    const requests: Array<{ tools?: Array<{ function: { name: string } }> }> = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      requests.push(
+        JSON.parse(String(init?.body)) as { tools?: Array<{ function: { name: string } }> }
+      );
+      return sseResponse(
+        sseFrames([{ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }])
+      );
+    }) as unknown as typeof fetch;
+
+    const engine = createQueryEngine({
+      currentProvider: provider(),
+      fallbackProvider: null,
+      permissionMode: "default",
+      workspace,
+      fetchImpl,
+    });
+
+    await collect(engine.submitMessage("hi"));
+
+    expect(Array.isArray(requests[0].tools)).toBe(true);
+    const names = (requests[0].tools as Array<{ function: { name: string } }>).map(
+      (t) => t.function.name
+    );
+    expect(names).toContain("read");
   });
 
   it("M2-03：plan mode → LLM 调 ExitPlanMode → engine 切 default mode + 后续轮次拿全工具", async () => {

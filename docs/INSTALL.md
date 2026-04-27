@@ -277,7 +277,7 @@ codeclaw skill remove <name>
 | 变量 | 用途 |
 |---|---|
 | `CODECLAW_OPENAI_API_KEY` 等 | provider apiKeyEnvVar 引用值 |
-| `CODECLAW_NATIVE_TOOLS=true` | 开启 native tool_use（让 LLM 直接调 read/bash/rag_search 等）|
+| `CODECLAW_NATIVE_TOOLS=false` | 关闭 native tool_use（v0.7.0 起默认开启；设 false 走纯文本回复路径）|
 | `CODECLAW_PROJECT_MEMORY=false` | 关闭跨会话项目级 memory |
 | `CODECLAW_PLAN_MODE_STRICT=false` | 关闭 ExitPlanMode tool 注册 |
 | `CODECLAW_SUBAGENT=false` | 关闭 Task subagent tool |

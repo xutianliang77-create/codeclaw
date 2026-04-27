@@ -382,7 +382,7 @@
 
 ---
 
-## Native Tool 总览（`CODECLAW_NATIVE_TOOLS=true` 时 LLM 可调）
+## Native Tool 总览（v0.7.0 起默认开启；`CODECLAW_NATIVE_TOOLS=false` 关闭）
 
 | tool | 来源 | env 关闭 |
 |---|---|---|
@@ -407,7 +407,7 @@
   - `rewrite` — 用命令翻译出的新 prompt 走 LLM（如 `/ask <q>`）
 - **risk 用途**: CLI/Web `/help` 渲染 + audit log 标记 + 个别 mode（如 `auto`）的 gate
 - **跨入口一致**: CLI/Web/WeChat 共用同一个 registry；新增命令仅需 `builtins/<name>.ts` + `loader.ts` BUILTINS 数组
-- **`CODECLAW_NATIVE_TOOLS=true` 模式下**: tools schema 进 system prompt，`/ask` `/plan` 等命令仍走原 slash 路径，不被 LLM 工具调用替代
+- **native tools 模式（v0.7.0 默认）**: tools schema 进 system prompt，`/ask` `/plan` 等命令仍走原 slash 路径，不被 LLM 工具调用替代；`CODECLAW_NATIVE_TOOLS=false` 可关回纯文本路径
 - **存储位置一览**:
   - `~/.codeclaw/data.db` — 全局 audit / sessions / memory_digest（跨 workspace）
   - `~/.codeclaw/projects/<sha256(realpath(workspace)):16>/`
