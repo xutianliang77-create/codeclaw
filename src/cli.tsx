@@ -62,7 +62,8 @@ function printHelp(): void {
   console.log(`CodeClaw ${VERSION}
 
 Usage:
-  codeclaw                 Start the scaffolded CLI
+  codeclaw                 Start CLI (also starts Web on 7180; pass --no-web to skip)
+  codeclaw --no-web        Start CLI only (no auto Web)
   codeclaw --plain         Start the plain-text REPL (IME-safe fallback)
   codeclaw --version       Print version
   codeclaw --help          Print help
@@ -98,7 +99,9 @@ function installCrashLogging(logsDir: string): void {
 async function main(): Promise<void> {
   const rawArgs = process.argv.slice(2);
   const usePlainRepl = rawArgs.includes("--plain");
-  const filteredArgs = rawArgs.filter((arg) => arg !== "--plain");
+  // P3.1：CLI 默认同步起 Web；--no-web 退路（headless / 容器场景）
+  const noWeb = rawArgs.includes("--no-web");
+  const filteredArgs = rawArgs.filter((arg) => arg !== "--plain" && arg !== "--no-web");
   const [command, ...restArgs] = filteredArgs;
 
   if (command === "--version" || command === "-v") {
@@ -560,6 +563,108 @@ async function main(): Promise<void> {
   }
 
   const capabilities = detectProviderCapabilities(runtime.selection?.current ?? null);
+
+  // P3.1：CLI 默认同步起 Web。--no-web 退路；token / 端口冲突 graceful skip。
+  // 复用 CLI 的 queryEngine.cronManager（不再单独造 cronHost；避免双 scheduler）。
+  let webAutoHandle: { close(): Promise<void> | void } | null = null;
+  if (!noWeb && command !== "doctor" && command !== "setup" && command !== "config") {
+    try {
+      const { startWebServer } = await import("./channels/web/server");
+      const {
+        readWebAuthConfig,
+        ensureWebToken,
+        webAuthFilePath,
+      } = await import("./channels/web/auth");
+      let wAuth = readWebAuthConfig();
+      if (!wAuth.bearerToken) {
+        const { token, generated } = ensureWebToken();
+        const fp = webAuthFilePath();
+        if (generated) {
+          console.log(`[web] 生成新 token: ${token}（保存到 ${fp} mode 0600）`);
+        }
+        wAuth = { bearerToken: token, source: "file", filePath: fp };
+      }
+      const webPort = Number.parseInt(process.env.CODECLAW_WEB_PORT ?? "7180", 10);
+      const webHost = process.env.CODECLAW_WEB_HOST ?? "127.0.0.1";
+      const queryEngineWithMgr = queryEngine as unknown as {
+        getCronManager?: () => import("./cron/manager").CronManager | null | undefined;
+        setCronNotifyAdapters?: (a: {
+          wechat?: (...args: unknown[]) => void;
+          web?: (task: unknown, run: unknown) => void;
+        }) => void;
+      };
+      const handle = await startWebServer({
+        port: webPort,
+        host: webHost,
+        auth: wAuth,
+        mcpManager,
+        cronManagerRef: () => queryEngineWithMgr.getCronManager?.(),
+        hooksConfigRef: () => settings?.hooks,
+        engineDefaults: {
+          currentProvider: runtime.selection?.current ?? null,
+          fallbackProvider: runtime.selection?.fallback ?? null,
+          permissionMode: runtime.config?.defaults.permissionMode ?? "plan",
+          workspace,
+          approvalsDir: paths.approvalsDir,
+          ...(runtime.config?.memory.l1AutoCompactThreshold !== undefined
+            ? { autoCompactThreshold: runtime.config.memory.l1AutoCompactThreshold }
+            : {}),
+          mcpManager,
+          settings,
+        },
+      });
+      // 把 cron 完成结果广播到 web SSE（CLI 现有的 wechat notify 不动）
+      const prevAdapters = (queryEngine as unknown as {
+        cronWechatNotify?: unknown;
+      }).cronWechatNotify;
+      queryEngineWithMgr.setCronNotifyAdapters?.({
+        // 保留已注入的 wechat adapter（cli.tsx 上方已设过）
+        ...(prevAdapters ? { wechat: prevAdapters as never } : {}),
+        web: (task, run) => {
+          handle.store.broadcastEvent({
+            type: "cron-result",
+            task,
+            run,
+          });
+        },
+      });
+      webAutoHandle = handle;
+      console.log(
+        `CodeClaw Web · http://${handle.host}:${handle.port}/   (use --no-web to skip)`
+      );
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      if (code === "EADDRINUSE") {
+        console.warn(
+          "[web] port already in use; skipping auto Web (CLI continues normally)"
+        );
+      } else {
+        console.warn(
+          `[web] failed to auto-start: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+  }
+
+  // CLI 退出时优雅关闭 web
+  if (webAutoHandle) {
+    const closeWeb = async (): Promise<void> => {
+      try {
+        await webAutoHandle?.close();
+      } catch {
+        /* ignore */
+      }
+    };
+    process.once("exit", () => {
+      void closeWeb();
+    });
+    process.once("SIGINT", () => {
+      void closeWeb();
+    });
+    process.once("SIGTERM", () => {
+      void closeWeb();
+    });
+  }
 
   if (usePlainRepl || command === "plain") {
     await runPlainRepl({
