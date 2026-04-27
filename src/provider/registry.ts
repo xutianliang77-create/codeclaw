@@ -39,7 +39,8 @@ function mergeProviderConfig(
     apiKeyEnvVar: apiKeyFromEnv.envVar,
     envVars,
     fileConfig: configEntry,
-    maxTokens: configEntry.maxTokens
+    maxTokens: configEntry.maxTokens,
+    contextWindow: configEntry.contextWindow,
   };
 }
 

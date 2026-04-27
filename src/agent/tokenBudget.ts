@@ -31,15 +31,15 @@ const DEFAULT_CONTEXT_WINDOW: Array<[string, number]> = [
   ["claude-opus-4", 200_000],
   ["claude-haiku-4", 200_000],
   ["claude-3", 200_000],
-  ["qwen3", 32_768],
-  ["qwen2", 32_768],
-  ["qwen", 32_768],
+  ["qwen3", 200_000],
+  ["qwen2", 200_000],
+  ["qwen", 200_000],
   ["deepseek", 65_536],
   ["llama-3", 128_000],
   ["llama-2", 4096],
   ["mistral", 32_768],
 ];
-const FALLBACK_CONTEXT_WINDOW = 32_768;
+const FALLBACK_CONTEXT_WINDOW = 200_000;
 export const DEFAULT_WARN_RATIO = 0.7;
 export const DEFAULT_HARD_CUT_RATIO = 0.95;
 
@@ -109,8 +109,10 @@ export function estimateToolsSchemaTokens(
 }
 
 export function inferContextWindow(provider: ProviderStatus): number {
-  const explicit = (provider as { contextWindow?: unknown }).contextWindow;
-  if (typeof explicit === "number" && explicit > 0) return explicit;
+  // 优先用 providers.json 显式声明的 contextWindow（M1+：字段已下放到 ResolvedProviderConfig）
+  if (typeof provider.contextWindow === "number" && provider.contextWindow > 0) {
+    return provider.contextWindow;
+  }
   const model = (provider.model ?? "").toLowerCase();
   for (const [key, val] of DEFAULT_CONTEXT_WINDOW) {
     if (model.includes(key)) return val;

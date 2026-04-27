@@ -106,12 +106,12 @@ describe("inferContextWindow", () => {
     expect(inferContextWindow(provider("claude-3-5-sonnet-20241022"))).toBe(200_000);
   });
 
-  it("qwen3 → 32k", () => {
-    expect(inferContextWindow(provider("qwen/qwen3.6-35b-a3b"))).toBe(32_768);
+  it("qwen3 → 200k", () => {
+    expect(inferContextWindow(provider("qwen/qwen3.6-35b-a3b"))).toBe(200_000);
   });
 
-  it("未知模型 → fallback 32k", () => {
-    expect(inferContextWindow(provider("unknown-llm-7b"))).toBe(32_768);
+  it("未知模型 → fallback 200k", () => {
+    expect(inferContextWindow(provider("unknown-llm-7b"))).toBe(200_000);
   });
 });
 

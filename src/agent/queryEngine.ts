@@ -1494,6 +1494,11 @@ class LocalQueryEngine implements QueryEngine {
       // M1-B.2 multi-turn：每个 turn 一次 LLM streaming + 可选 tool 派发；MAX_TURNS 防无限循环
       const MAX_TOOL_TURNS = 25;
       let toolTurns = 0;
+      // Bug A：reasoning model（Qwen3-Think 等）整 turn 答案在 reasoning_content 而 content 空时，
+      // 先注入 reminder 重试一次让 LLM「请把答案写进 content」，仍空再把 reasoning 顶上去
+      let contentRetried = false;
+      // Bug B：hit MAX_TOOL_TURNS 时不直接 break，强制再跑一轮 no-tools 让 LLM 给 final answer
+      let finalAnswerForced = false;
       const hasNativeTools = this.toolRegistry.list().length > 0;
       let lastError: Error | null = null;
       let allowFallback = true;
@@ -1507,7 +1512,9 @@ class LocalQueryEngine implements QueryEngine {
         lastError = null;
         allowFallback = true;
         // M2-03：每 turn 重新构造 toolSchemas，让 ExitPlanMode 切 mode 后下一 turn 拿全工具
-        const toolSchemas = hasNativeTools ? this.buildStreamToolSchemas() : undefined;
+        // Bug B：finalAnswerForced 时强制不传 tools schema，逼 LLM 给 final answer
+        const toolSchemas =
+          hasNativeTools && !finalAnswerForced ? this.buildStreamToolSchemas() : undefined;
 
         // M1-D：Token 预算检查（warn-only）+ M2-01：超阈值时真压缩旧 turn
         if (this.currentProvider) {
@@ -1716,18 +1723,81 @@ class LocalQueryEngine implements QueryEngine {
             };
           }
         } else if (!this.interrupted && !contentBuf && collectedToolCalls.length === 0) {
-          // M1-F 修：判 contentBuf 而非 output —— output 在 LLM 全 reasoning 没 content 时
-          // 也会非空（generator yield 的 backward-compat 合并流含 reasoning fallback chunk），
-          // 用 !output 会漏掉"纯 reasoning 无实质答案"的边界 case，导致下面的 finalText
-          // 退化逻辑把 reasoning 蒙混当 answer。
-          output = "Provider returned an empty response.";
-          assistantMessageSource = "local";
-          contentBuf = output;
-          yield {
-            type: "message-delta",
-            messageId,
-            delta: output
-          };
+          // Bug A：reasoning model（Qwen3-Think 等）整 turn 答案在 reasoning_content 而 content 空。
+          // 三段式处理：先注入 reminder 重试一次「请把答案写进 content」；仍空再把 reasoning 顶上去；
+          // 最后才 fallback 到 empty-response 兜底字符串。
+          if (reasoningBuf.trim() && !contentRetried) {
+            contentRetried = true;
+            this.messages.push({
+              id: createId("msg"),
+              role: "user",
+              text:
+                "请把最终答案写在 message.content 字段里输出，而不是 reasoning_content / thinking 字段。" +
+                "直接给出答案，不要再思考。",
+              // 必须 "user" source，否则 getProviderMessages filter 把它丢掉，LLM 收不到 reminder
+              source: "user",
+            });
+            this.notifyListeners();
+            this.audit({
+              actor: "agent",
+              action: "engine.content-retry",
+              decision: "allow",
+              reason: "reasoning-only turn; injected content-channel reminder",
+            });
+            continue multiTurn;
+          }
+          if (reasoningBuf.trim()) {
+            // 重试后仍空 → 把 reasoning 当 content 顶上去（保住答案不丢）
+            contentBuf = reasoningBuf;
+            yield {
+              type: "message-delta",
+              messageId,
+              delta: reasoningBuf,
+            };
+          } else {
+            // M1-F 修：判 contentBuf 而非 output —— output 在 LLM 全 reasoning 没 content 时
+            // 也会非空（generator yield 的 backward-compat 合并流含 reasoning fallback chunk），
+            // 用 !output 会漏掉"纯 reasoning 无实质答案"的边界 case，导致下面的 finalText
+            // 退化逻辑把 reasoning 蒙混当 answer。
+            output = "Provider returned an empty response.";
+            assistantMessageSource = "local";
+            contentBuf = output;
+            yield {
+              type: "message-delta",
+              messageId,
+              delta: output,
+            };
+          }
+        }
+
+        // Bug B：hit MAX_TOOL_TURNS 但 LLM 仍在调工具时，不直接 break。
+        // 注入 reminder 让下一轮 toolSchemas=undefined 强制 LLM 给 final answer。
+        // 当前轮 collectedToolCalls 被丢弃（不 invoke），audit 记一笔。
+        if (
+          !this.interrupted &&
+          !lastError &&
+          collectedToolCalls.length > 0 &&
+          toolTurns >= MAX_TOOL_TURNS &&
+          !finalAnswerForced
+        ) {
+          finalAnswerForced = true;
+          this.messages.push({
+            id: createId("msg"),
+            role: "user",
+            text:
+              `已达到工具调用上限（${MAX_TOOL_TURNS} 轮）。` +
+              `停止调用工具，直接根据已有信息给出最终答案。`,
+            // 必须 "user" source，否则 getProviderMessages filter 把它丢掉，LLM 收不到 reminder
+            source: "user",
+          });
+          this.notifyListeners();
+          this.audit({
+            actor: "agent",
+            action: "engine.max-tool-turns",
+            decision: "allow",
+            reason: `injecting final-answer reminder; ${collectedToolCalls.length} pending toolCalls discarded`,
+          });
+          continue multiTurn;
         }
 
         // M1-B.2：multi-turn 出口判定 — 没工具 / 已中断 / 已超 turn 上限 / 有错 → 跳出

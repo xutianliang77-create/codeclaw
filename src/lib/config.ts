@@ -59,8 +59,12 @@ export interface ProviderFileEntry {
   model?: string;
   timeoutMs?: number;
   apiKeyEnvVar?: string;
-  /** 单次请求 max_tokens 上限；不传走 client 默认（OpenAI compat 4096 / Anthropic 1024） */
+  /** 单次请求 max_tokens 上限；不传走 client 默认 32_768 */
   maxTokens?: number;
+  /** 模型 context window；不传时按 model 名字查表 fallback。LM Studio / vLLM 等
+   *  可调 ctx 的本地 backend 必须显式声明，否则 token budget / autoCompact 按默认估，
+   *  会比真 ctx 早触发压缩 */
+  contextWindow?: number;
 }
 
 export type ProvidersFileConfig = Partial<Record<ProviderType, ProviderFileEntry>>;

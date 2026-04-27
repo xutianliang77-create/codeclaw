@@ -445,7 +445,7 @@ async function* streamOpenAiCompatible(
         stream_options: { include_usage: true },
         // 默认 4096 token 对常规答案够用；reasoning 模型需更大（reasoning + content 总和），
         // 用户可在 ~/.codeclaw/providers.json 用 maxTokens 字段覆盖（如 16384）。
-        max_tokens: provider.maxTokens ?? 4096,
+        max_tokens: provider.maxTokens ?? 32_768,
         messages: await toOpenAiMessages(messages),
         ...(tools && tools.length > 0
           ? {
@@ -567,7 +567,7 @@ async function* streamAnthropic(
       },
       body: JSON.stringify({
         model: provider.model,
-        max_tokens: provider.maxTokens ?? 1024,
+        max_tokens: provider.maxTokens ?? 32_768,
         stream: true,
         ...(extractAnthropicSystem(messages) ? { system: extractAnthropicSystem(messages) } : {}),
         messages: await toAnthropicMessages(messages),

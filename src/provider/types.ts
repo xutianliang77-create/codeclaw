@@ -26,8 +26,10 @@ export interface ResolvedProviderConfig {
   apiKeyEnvVar?: string;
   envVars: string[];
   fileConfig: ProviderFileEntry;
-  /** 用户在 providers.json 配置的 max_tokens；client 找不到时走默认（OpenAI compat 4096 / Anthropic 1024） */
+  /** 用户在 providers.json 配置的 max_tokens；client 找不到时走默认 32_768 */
   maxTokens?: number;
+  /** 用户在 providers.json 配置的 context window；token budget 优先用这里，次按模型名查表 */
+  contextWindow?: number;
 }
 
 export interface ProviderStatus extends ResolvedProviderConfig {
