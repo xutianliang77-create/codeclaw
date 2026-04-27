@@ -72,7 +72,7 @@ Usage:
   codeclaw gateway         Start the local HTTP gateway
   codeclaw wechat          Start the local WeChat adapter webhook
   codeclaw wechat --worker Start the iLink WeChat polling worker
-  codeclaw web             Start the Web SPA server (env CODECLAW_WEB_TOKEN required)
+  codeclaw web             Start the Web SPA server (auto-generates token to ~/.codeclaw/web-auth.json on first run)
                            Optional: --port=7180 --host=127.0.0.1
 `);
 }
@@ -127,15 +127,26 @@ async function main(): Promise<void> {
 
   // web 子命令需要 mcpManager / settings / runtime selection（A2 修补）；
   // 真正的 dispatch 在下方 settings 加载之后；这里只做 token 早期检查。
+  // P1.5：env 未设时自动从 ~/.codeclaw/web-auth.json 读；都没有则生成并落盘
   if (command === "web") {
-    const { readWebAuthConfig } = await import("./channels/web/auth");
+    const { readWebAuthConfig, ensureWebToken, webAuthFilePath } = await import(
+      "./channels/web/auth"
+    );
     const auth = readWebAuthConfig();
     if (!auth.bearerToken) {
-      console.error(
-        "[web] CODECLAW_WEB_TOKEN is not set. Set the env var to a strong\n" +
-          "       token and re-run. The Web channel REQUIRES auth to start."
-      );
-      process.exit(2);
+      const { token, generated } = ensureWebToken();
+      const fp = webAuthFilePath();
+      if (generated) {
+        console.log("[web] 生成新的 Web token，保存到 " + fp + " (mode 0600)");
+        console.log("[web] Token: " + token);
+        console.log("[web] 请妥善保存（登录浏览器时输入）；后续启动可不再 export。");
+      } else {
+        console.log("[web] 使用已保存的 token: " + fp);
+      }
+    } else if (auth.source === "env") {
+      console.log("[web] 使用 env CODECLAW_WEB_TOKEN");
+    } else if (auth.source === "file") {
+      console.log("[web] 使用已保存的 token: " + (auth.filePath ?? webAuthFilePath()));
     }
   }
 
@@ -306,8 +317,10 @@ async function main(): Promise<void> {
         settings,
       },
     });
-    console.log(`CodeClaw Web listening on http://${handle.host}:${handle.port}`);
-    console.log("Open it in your browser. Set the same CODECLAW_WEB_TOKEN value in the auth bar.");
+    console.log(`CodeClaw Web listening on http://${handle.host}:${handle.port}/next/`);
+    console.log(
+      "在浏览器打开上面的地址，登录时粘贴 token（`cat ~/.codeclaw/web-auth.json` 可查）。"
+    );
 
     // 阶段 🅑：在 web 子命令也跑 cron。每个 user engine 的 channel="http" 会禁用 cron（避免重复触发）；
     // 这里独建 host engine（channel undefined → 走 cli 路径启 scheduler）专跑 cron + 广播 web SSE。

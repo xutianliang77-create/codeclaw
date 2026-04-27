@@ -10,22 +10,32 @@ import {
 } from "../../../../src/channels/web/auth";
 
 describe("readWebAuthConfig", () => {
-  it("env 未设 → bearerToken=null", () => {
-    expect(readWebAuthConfig({})).toEqual({ bearerToken: null });
+  it("env 未设 → bearerToken=null（可能从默认文件路径读到 file，也接受）", () => {
+    const cfg = readWebAuthConfig({});
+    // env 没有时：bearerToken 要么 null（无文件），要么从 ~/.codeclaw/web-auth.json 读到（source=file）
+    if (cfg.bearerToken === null) {
+      expect(cfg.source ?? null).toBeNull();
+    } else {
+      expect(cfg.source).toBe("file");
+    }
   });
 
-  it("env 空字符串 → null", () => {
-    expect(readWebAuthConfig({ CODECLAW_WEB_TOKEN: "" })).toEqual({ bearerToken: null });
-    expect(readWebAuthConfig({ CODECLAW_WEB_TOKEN: "   " })).toEqual({ bearerToken: null });
+  it("env 空字符串 → fallback 到文件 / null", () => {
+    const cfg1 = readWebAuthConfig({ CODECLAW_WEB_TOKEN: "" });
+    const cfg2 = readWebAuthConfig({ CODECLAW_WEB_TOKEN: "   " });
+    // env 空白等同于未设；走 file fallback；任一来源即可
+    expect(cfg1.source === "env").toBe(false);
+    expect(cfg2.source === "env").toBe(false);
   });
 
-  it("env 有值 → bearerToken 透传（trim）", () => {
-    expect(readWebAuthConfig({ CODECLAW_WEB_TOKEN: "secret123" })).toEqual({
-      bearerToken: "secret123",
-    });
-    expect(readWebAuthConfig({ CODECLAW_WEB_TOKEN: "  pad  " })).toEqual({
-      bearerToken: "pad",
-    });
+  it("env 有值 → bearerToken 透传（trim），source=env", () => {
+    const cfg1 = readWebAuthConfig({ CODECLAW_WEB_TOKEN: "secret123" });
+    expect(cfg1.bearerToken).toBe("secret123");
+    expect(cfg1.source).toBe("env");
+
+    const cfg2 = readWebAuthConfig({ CODECLAW_WEB_TOKEN: "  pad  " });
+    expect(cfg2.bearerToken).toBe("pad");
+    expect(cfg2.source).toBe("env");
   });
 });
 
