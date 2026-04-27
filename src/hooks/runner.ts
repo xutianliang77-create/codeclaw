@@ -186,11 +186,14 @@ function runSingleHook(cmd: HookCommand, event: HookEventPayload): Promise<HookE
     child.stderr?.on("data", (chunk: Buffer) => {
       if (stderr.length < MAX_HOOK_OUTPUT_BYTES) stderr += chunk.toString("utf8");
     });
+    child.stdin?.on("error", (err: Error) => {
+      stderr += `\n[hook stdin error] ${err.message}`;
+    });
     child.on("error", (err) => {
       stderr += `\n[hook spawn error] ${err.message}`;
       finish(false, null, null);
     });
-    child.on("exit", (code, signal) => {
+    child.on("close", (code, signal) => {
       finish(code === 0, code, signal);
     });
 
