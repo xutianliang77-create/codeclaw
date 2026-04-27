@@ -11,6 +11,7 @@ import {
   webAuthFilePath,
   writeWebAuthFile,
 } from "../channels/web/auth";
+import { detectAllProviders, type DetectedProvider } from "../provider/detect";
 
 type Screen =
   | "main"
@@ -20,6 +21,7 @@ type Screen =
   | "provider-menu"
   | "field-input"
   | "web-token"
+  | "detecting"
   | "done";
 
 /** token 显示掩码：前 4 + ... + 后 4 字符；过短直接 *** */
@@ -100,6 +102,7 @@ export function ProviderConfigApp({
     }
   );
   const [savedTokenJustNow, setSavedTokenJustNow] = useState(false);
+  const [detectResults, setDetectResults] = useState<DetectedProvider[]>([]);
 
   // Ctrl+C 全退；ESC 回主菜单（编辑屏也生效，因为 SafeTextInput 不再吞 ESC）
   useInput((input, key) => {
@@ -124,6 +127,7 @@ export function ProviderConfigApp({
         value: "fallback",
       },
       { label: "Edit provider settings  ·  编辑 provider 字段", value: "provider" },
+      { label: "Auto-detect providers  ·  自动探测可用 provider", value: "detect" },
       {
         label: `Web token  ·  Web 鉴权令牌 (${
           webTokenInfo ? "✓ " + maskToken(webTokenInfo.token) : "未生成 / not set"
@@ -277,6 +281,48 @@ export function ProviderConfigApp({
     setScreen("done");
   }
 
+  async function runDetect(): Promise<void> {
+    setScreen("detecting");
+    setBanner("Detecting providers (~500ms)...  ·  正在探测可用 provider...");
+    try {
+      const found = await detectAllProviders({ timeoutMs: 500 });
+      setDetectResults(found);
+      let appliedCount = 0;
+      if (found.length > 0) {
+        setProviders((current) => {
+          const next = cloneProviders(current);
+          for (const d of found) {
+            const cur = normalizeEntry(next[d.type]);
+            const updated: ProviderFileEntry = { ...cur };
+            // 只填空字段：尊重用户已配置的值
+            if (!cur.baseUrl) updated.baseUrl = d.baseUrl;
+            if (!cur.model && d.model) updated.model = d.model;
+            if (d.envVar && !cur.apiKeyEnvVar) updated.apiKeyEnvVar = d.envVar;
+            // 至少有一处变更才计数
+            if (
+              updated.baseUrl !== cur.baseUrl ||
+              updated.model !== cur.model ||
+              updated.apiKeyEnvVar !== cur.apiKeyEnvVar
+            ) {
+              next[d.type] = updated;
+              appliedCount += 1;
+            }
+          }
+          return next;
+        });
+      }
+      const types = found.map((f) => `${f.type}(${f.source})`).join(", ") || "none";
+      setBanner(
+        `Detected: ${types}  ·  applied=${appliedCount}/${found.length}（仅填空字段，未覆盖用户值）`
+      );
+    } catch (err) {
+      setBanner(
+        `Detect failed  ·  探测失败：${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+    setScreen("main");
+  }
+
   function handleWebTokenAction(action: "ensure" | "regenerate"): void {
     const fp = webAuthFilePath();
     if (action === "ensure") {
@@ -349,6 +395,11 @@ export function ProviderConfigApp({
                   return;
                 }
 
+                if (item.value === "detect") {
+                  void runDetect();
+                  return;
+                }
+
                 if (item.value === "save") {
                   void save();
                   return;
@@ -383,6 +434,29 @@ export function ProviderConfigApp({
               }}
             />
           </>
+        ) : null}
+
+        {screen === "detecting" ? (
+          <Box flexDirection="column">
+            <Text color="cyan">Detecting providers...  ·  正在探测可用 provider...</Text>
+            <Text color="gray">
+              probing localhost:1234 / localhost:11434 + scanning env keys (~500ms)
+            </Text>
+            {detectResults.length > 0 ? (
+              <Box marginTop={1} flexDirection="column">
+                <Text color="green">
+                  Last results  ·  上次探测结果 ({detectResults.length}):
+                </Text>
+                {detectResults.map((d, i) => (
+                  <Text key={i} color="gray">
+                    · {d.type} ({d.source}) baseUrl={d.baseUrl}
+                    {d.model ? ` model=${d.model}` : ""}
+                    {d.envVar ? ` env=${d.envVar}` : ""}
+                  </Text>
+                ))}
+              </Box>
+            ) : null}
+          </Box>
         ) : null}
 
         {screen === "default" ? (
