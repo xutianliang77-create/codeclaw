@@ -98,6 +98,49 @@ describe("parseCronArgs - add", () => {
   });
 });
 
+describe("parseCronArgs - add（P4.4 flag 形式）", () => {
+  it("纯 flag 形式 + payload 含空格", () => {
+    const r = parseCronArgs(
+      'add --name=hi "--schedule=*/5 * * * *" --kind=prompt "--payload=say hi"'
+    );
+    expect(r).toEqual({
+      kind: "add",
+      name: "hi",
+      schedule: "*/5 * * * *",
+      taskKind: "prompt",
+      payload: "say hi",
+      notify: [],
+    });
+  });
+
+  it("flag 形式带 --notify / --timeout", () => {
+    const r = parseCronArgs(
+      'add --name=daily --schedule=@daily --kind=shell --payload=date --notify=cli --timeout=30s'
+    );
+    if (r.kind !== "add") throw new Error("expect add");
+    expect(r.notify).toEqual(["cli"]);
+    expect(r.timeoutMs).toBe(30_000);
+  });
+
+  it("混合位置 + flag 应 reject", () => {
+    expect(() =>
+      parseCronArgs('add hi --schedule=@daily --kind=prompt --payload=hi')
+    ).toThrow(/positional|混用/);
+  });
+
+  it("flag 形式缺 --name 抛错", () => {
+    expect(() =>
+      parseCronArgs('add --schedule=@daily --kind=prompt --payload=hi')
+    ).toThrow(/--name/);
+  });
+
+  it("flag 形式 kind 非法", () => {
+    expect(() =>
+      parseCronArgs('add --name=x --schedule=@daily --kind=foo --payload=bar')
+    ).toThrow(/slash\|prompt\|shell/);
+  });
+});
+
 describe("parseCronArgs - remove/enable/disable/run-now", () => {
   it("remove <id>", () => {
     expect(parseCronArgs("remove abc")).toEqual({ kind: "remove", target: "abc" });

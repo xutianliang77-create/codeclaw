@@ -121,6 +121,16 @@ function parseLogs(tokens: string[]): CronCliCommand {
  *   - 多 --notify 累加；--timeout 单次
  */
 function parseAdd(tokens: string[]): CronCliCommand {
+  // P4.4：检测 flag 形式（--name= / --schedule= / --kind= / --payload=）
+  // flag 形式与位置参数互斥，混用 reject。
+  const coreFieldFlags = ["--name=", "--schedule=", "--kind=", "--payload="];
+  const hasCoreFlag = tokens.some((t) =>
+    coreFieldFlags.some((prefix) => t.startsWith(prefix))
+  );
+  if (hasCoreFlag) {
+    return parseAddFlagForm(tokens);
+  }
+
   const positional: string[] = [];
   const flags: string[] = [];
   for (const t of tokens) {
@@ -129,7 +139,8 @@ function parseAdd(tokens: string[]): CronCliCommand {
   }
   if (positional.length < 3) {
     throw new Error(
-      "/cron add requires: <name> <schedule> <kind>:<payload> [--notify=...] [--timeout=Nms]"
+      "/cron add requires: <name> <schedule> <kind>:<payload> [--notify=...] [--timeout=Nms]\n" +
+        "或使用 flag 形式：--name=... --schedule=... --kind=... --payload=... [--notify=...] [--timeout=...]"
     );
   }
   const name = positional[0];
@@ -146,6 +157,68 @@ function parseAdd(tokens: string[]): CronCliCommand {
   }
   if (!payload) throw new Error(`/cron add: payload is empty`);
 
+  const { notify, timeoutMs } = parseAddTrailingFlags(flags);
+
+  return {
+    kind: "add",
+    name,
+    schedule,
+    taskKind: kindStr as CronTaskKind,
+    payload,
+    notify,
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+  };
+}
+
+/** P4.4：flag 形式 /cron add --name=... --schedule=... --kind=... --payload=... [--notify=] [--timeout=] */
+function parseAddFlagForm(tokens: string[]): CronCliCommand {
+  let name: string | undefined;
+  let schedule: string | undefined;
+  let kindStr: string | undefined;
+  let payload: string | undefined;
+  const trailing: string[] = []; // --notify / --timeout 等
+
+  for (const t of tokens) {
+    if (!t.startsWith("--")) {
+      throw new Error(
+        `/cron add: flag form does not accept positional args (got '${t}'). 不要混用位置参数和 flag。`
+      );
+    }
+    if (t.startsWith("--name=")) name = t.slice("--name=".length);
+    else if (t.startsWith("--schedule=")) schedule = t.slice("--schedule=".length);
+    else if (t.startsWith("--kind=")) kindStr = t.slice("--kind=".length).toLowerCase();
+    else if (t.startsWith("--payload=")) payload = t.slice("--payload=".length);
+    else trailing.push(t);
+  }
+
+  if (!name) throw new Error("/cron add: --name=... is required");
+  if (!schedule) throw new Error("/cron add: --schedule=... is required");
+  if (!kindStr) throw new Error("/cron add: --kind=... is required");
+  if (payload === undefined) throw new Error("/cron add: --payload=... is required");
+
+  if (kindStr !== "slash" && kindStr !== "prompt" && kindStr !== "shell") {
+    throw new Error(`/cron add: kind must be slash|prompt|shell, got '${kindStr}'`);
+  }
+  if (!payload.trim()) throw new Error("/cron add: payload is empty");
+
+  const { notify, timeoutMs } = parseAddTrailingFlags(trailing);
+
+  return {
+    kind: "add",
+    name,
+    schedule,
+    taskKind: kindStr as CronTaskKind,
+    payload,
+    notify,
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+  };
+}
+
+/** 解析 --notify / --timeout 这类 trailing flags（位置和 flag 形式共用） */
+function parseAddTrailingFlags(flags: string[]): {
+  notify: CronNotifyChannel[];
+  timeoutMs?: number;
+} {
   const notify: CronNotifyChannel[] = [];
   let timeoutMs: number | undefined;
   for (const f of flags) {
@@ -168,16 +241,7 @@ function parseAdd(tokens: string[]): CronCliCommand {
       throw new Error(`/cron add: unknown flag ${f}`);
     }
   }
-
-  return {
-    kind: "add",
-    name,
-    schedule,
-    taskKind: kindStr as CronTaskKind,
-    payload,
-    notify,
-    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-  };
+  return timeoutMs !== undefined ? { notify, timeoutMs } : { notify };
 }
 
 function parseDurationToMs(raw: string): number | null {
