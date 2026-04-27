@@ -22,7 +22,11 @@
     "setup:lsp": "bash ./scripts/setup-lsp.sh",
     "setup:hooks": "git config core.hooksPath scripts/git-hooks && echo 'pre-push gate enabled (scripts/git-hooks/pre-push)'",
     "nightly": "node scripts/nightly.mjs",
-    "build": "bun run scripts/build.mjs",
+    "build:web": "cd web-react && npm run build",
+    "build": "node scripts/build.mjs",
+    "build:all": "npm run build:web && npm run build",
+    "install:web": "cd web-react && npm install",
+    "postinstall": "node scripts/post-install.mjs",
     "start": "node dist/cli.js"
   },
   "dependencies": {
