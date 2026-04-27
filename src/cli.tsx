@@ -445,6 +445,8 @@ async function main(): Promise<void> {
       })
     : undefined;
 
+  // P4.2：CLI engine 需显式传 channel + userId，否则 /end 无法写 memory_digest
+  // （runEndCommand 检查 options.channel + options.userId 都缺时直接 return "Memory requires..."）
   const queryEngine = createQueryEngine({
     currentProvider: runtime.selection?.current ?? null,
     fallbackProvider: runtime.selection?.fallback ?? null,
@@ -452,6 +454,8 @@ async function main(): Promise<void> {
     workspace,
     autoCompactThreshold: runtime.config?.memory.l1AutoCompactThreshold,
     approvalsDir: paths.approvalsDir,
+    channel: "cli",
+    userId: process.env.USER || process.env.USERNAME || "local-user",
     mcpManager,
     settings,
     wechat: {
