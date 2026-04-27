@@ -11,6 +11,9 @@ import { useSubagentsStore, type SubagentRow } from "@/store/subagents";
 
 type SubagentNode = SubagentRow & { children?: SubagentNode[] };
 
+// P5.1：模块级单例，selector ?? EMPTY 避免每次 render 返回新数组触发 React #185 死循环
+const EMPTY_SUBAGENTS: SubagentRow[] = [];
+
 const STATUS_COLORS: Record<string, string> = {
   running: "border-accent",
   completed: "border-ok",
@@ -25,7 +28,7 @@ interface Props {
 export default function SubagentTree({ sessionId }: Props) {
   // 主源：SSE 推送写入的 store；polling 兜底（首次拉历史 + SSE 断线自愈）
   const items = useSubagentsStore((s) =>
-    sessionId ? s.bySession.get(sessionId) ?? [] : []
+    sessionId ? s.bySession.get(sessionId) ?? EMPTY_SUBAGENTS : EMPTY_SUBAGENTS
   );
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
