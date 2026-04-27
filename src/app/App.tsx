@@ -37,11 +37,12 @@ function Header({
   return (
     <Box borderStyle="round" paddingX={1} flexDirection="column">
       <Text>
-        CodeClaw  session: {sessionId}  model: {bootInfo.modelLabel}  mode: {bootInfo.permissionMode}  cwd:{" "}
-        {bootInfo.workspace}
+        CodeClaw · 会话 session: {sessionId} · 模型 model: {bootInfo.modelLabel} · 模式 mode:{" "}
+        {bootInfo.permissionMode} · 工作区 cwd: {bootInfo.workspace}
       </Text>
       <Text color="gray">
-        provider: {bootInfo.providerLabel}  vision: {bootInfo.visionSupport}  token-budget: {feature("TOKEN_BUDGET") ? "enabled" : "disabled"}
+        provider: {bootInfo.providerLabel}  vision · 视觉: {bootInfo.visionSupport}  token-budget · 预算:{" "}
+        {feature("TOKEN_BUDGET") ? "enabled · 启用" : "disabled · 关闭"}
       </Text>
     </Box>
   );
@@ -71,8 +72,8 @@ function StatusBar({
 }): React.JSX.Element {
   return (
     <Box borderStyle="round" paddingX={1} marginTop={1} flexDirection="column">
-      <Text>phase: {phase}</Text>
-      {toolStatus ? <Text color="gray">tool: {toolStatus}</Text> : null}
+      <Text>phase · 阶段: {phase}</Text>
+      {toolStatus ? <Text color="gray">tool · 工具: {toolStatus}</Text> : null}
     </Box>
   );
 }
@@ -85,13 +86,15 @@ function ApprovalPanel({ pendingApproval }: { pendingApproval: PendingApprovalSt
   return (
     <Box borderStyle="round" borderColor="yellow" paddingX={1} marginTop={1} flexDirection="column">
       <Text color="yellow">
-        Approval Pending {pendingApproval.totalPending > 1 ? `(${pendingApproval.queuePosition}/${pendingApproval.totalPending})` : ""}
+        Approval Pending · 等待审批 {pendingApproval.totalPending > 1 ? `(${pendingApproval.queuePosition}/${pendingApproval.totalPending})` : ""}
       </Text>
-      <Text>id: {pendingApproval.id}</Text>
-      <Text>tool: {pendingApproval.toolName}</Text>
-      <Text>detail: {sanitizeForDisplay(pendingApproval.detail)}</Text>
-      <Text>reason: {sanitizeForDisplay(pendingApproval.reason)}</Text>
-      <Text color="gray">Use `/approve`, `/deny`, or target a specific item with `/approve &lt;id&gt;`.</Text>
+      <Text>id · 编号: {pendingApproval.id}</Text>
+      <Text>tool · 工具: {pendingApproval.toolName}</Text>
+      <Text>detail · 详情: {sanitizeForDisplay(pendingApproval.detail)}</Text>
+      <Text>reason · 原因: {sanitizeForDisplay(pendingApproval.reason)}</Text>
+      <Text color="gray">
+        Use `/approve` / `/deny` · 用 /approve 同意 / /deny 拒绝；或针对单个用 `/approve &lt;id&gt;`。
+      </Text>
     </Box>
   );
 }
@@ -99,7 +102,9 @@ function ApprovalPanel({ pendingApproval }: { pendingApproval: PendingApprovalSt
 function FooterHints(): React.JSX.Element {
   return (
     <Box borderStyle="round" paddingX={1} marginTop={1}>
-      <Text color="gray">Enter send  Ctrl+C interrupt  Esc clear banner  Try: /help  /status  /approvals  /mode auto  /glob src/**/*.ts  /approve  /approve &lt;id&gt;  /exit</Text>
+      <Text color="gray">
+        Enter 发送 send · Ctrl+C 中断 interrupt · Esc 清 banner · 试试: /help /status /approvals /mode auto /exit
+      </Text>
     </Box>
   );
 }
@@ -195,7 +200,7 @@ export function App({
     if (key.ctrl && value === "c") {
       if (isRunning) {
         ingressGateway.handleInterrupt(queryEngine.getSessionId());
-        setBanner("Interrupt requested. Waiting for current turn to stop.");
+        setBanner("Interrupt requested · 已请求中断；等待当前轮次停止。");
         return;
       }
 
@@ -245,7 +250,7 @@ export function App({
         if (event.type === "phase") {
           setPhase(event.phase);
           if (event.phase === "halted") {
-            setBanner("Turn halted by interrupt.");
+            setBanner("Turn halted by interrupt · 当前轮次已被中断。");
           }
           continue;
         }
@@ -262,8 +267,8 @@ export function App({
           setToolStatus(`${event.toolName} pending approval (${event.totalPending})`);
           setBanner(
             event.totalPending > 1
-              ? `${event.totalPending} approvals queued. Active: ${event.toolName}. Use /approve or /deny.`
-              : `Approval required for ${event.toolName}. Use /approve or /deny.`
+              ? `${event.totalPending} approvals queued · 待审批队列 ${event.totalPending} 项；当前 ${event.toolName}。/approve 或 /deny。`
+              : `Approval required for ${event.toolName} · 需要审批：${event.toolName}。/approve 或 /deny。`
           );
           continue;
         }
@@ -271,7 +276,11 @@ export function App({
         if (event.type === "approval-cleared") {
           const nextPendingApproval = queryEngine.getPendingApproval();
           setPendingApproval(nextPendingApproval);
-          setBanner(nextPendingApproval ? `${nextPendingApproval.totalPending} approvals still queued.` : null);
+          setBanner(
+            nextPendingApproval
+              ? `${nextPendingApproval.totalPending} approvals still queued · 仍有 ${nextPendingApproval.totalPending} 项待审批。`
+              : null
+          );
           continue;
         }
 
@@ -380,7 +389,7 @@ export function App({
           />
         </Box>
         <Text color="gray" dimColor>
-          buffer: {input.length} chars · Backspace/←→ Ctrl+A=home Ctrl+E=end Ctrl+U=clear Ctrl+W=del-word Enter=send
+          buffer · 缓冲: {input.length} chars · Backspace/←→ · Ctrl+A=home Ctrl+E=end Ctrl+U=clear Ctrl+W=del-word · Enter=send · 回车发送
         </Text>
       </Box>
       <StatusLine text={statusLineText} />
