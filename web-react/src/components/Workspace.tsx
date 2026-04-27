@@ -13,9 +13,10 @@ import RagPanel from "./panels/RagPanel";
 import GraphPanel from "./panels/GraphPanel";
 import McpPanel from "./panels/McpPanel";
 import HooksPanel from "./panels/HooksPanel";
+import CronPanel from "./panels/CronPanel";
 import { useSessionsStore } from "@/store/sessions";
 
-type TabId = "chat" | "rag" | "graph" | "mcp" | "hooks" | "subagents";
+type TabId = "chat" | "rag" | "graph" | "mcp" | "hooks" | "subagents" | "cron";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "chat", label: "Chat" },
@@ -24,6 +25,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "mcp", label: "MCP" },
   { id: "hooks", label: "Hooks" },
   { id: "subagents", label: "Subagents" },
+  { id: "cron", label: "Cron" },
 ];
 
 interface Props {
@@ -68,6 +70,7 @@ export default function Workspace({ onError }: Props) {
           {tab === "graph" && <GraphPanel onError={onError} />}
           {tab === "mcp" && <McpPanel onError={onError} />}
           {tab === "hooks" && <HooksPanel onError={onError} />}
+          {tab === "cron" && <CronPanel onError={onError} />}
           {tab === "subagents" && (
             <div className="p-4 overflow-y-auto">
               <SubagentTree sessionId={activeId} />

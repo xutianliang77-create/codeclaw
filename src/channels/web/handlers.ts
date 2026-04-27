@@ -60,6 +60,8 @@ export interface HandlerDeps {
   hooksConfigRef?: () => import("../../hooks/settings").HookSettings | undefined;
   /** A2：触发 hooks 配置热重载并广播给所有 session engine */
   reloadHooks?: () => import("../../hooks/settings").CodeclawSettings;
+  /** Cron #116：cronManager 取值器；deps 注入时是 web 子命令的 cronHost；未注入时 cron 端点返 503 */
+  cronManagerRef?: () => import("../../cron/manager").CronManager | null | undefined;
 }
 
 function jsonResponse(res: ServerResponse, status: number, body: unknown): void {
@@ -852,4 +854,241 @@ export async function handleSubagents(
         ? "no subagents invoked yet in this session"
         : undefined,
   });
+}
+
+// ─── #116 Cron HTTP API ───────────────────────────────────────────────────────
+// cronManager 由 web 子命令的 cronHost engine 提供；未注入返 503。
+
+function cronUnavailable(res: ServerResponse): void {
+  jsonResponse(res, 503, {
+    error: { code: "cron-unavailable", message: "cron manager not initialized in this server process" },
+  });
+}
+
+function requireCron(
+  res: ServerResponse,
+  deps: HandlerDeps
+): import("../../cron/manager").CronManager | null {
+  const cm = deps.cronManagerRef?.();
+  if (!cm) {
+    cronUnavailable(res);
+    return null;
+  }
+  return cm;
+}
+
+const VALID_NOTIFY_CHANNELS = new Set(["cli", "wechat", "web"]);
+const VALID_TASK_KINDS = new Set(["slash", "prompt", "shell"]);
+
+// GET /v1/web/cron/tasks
+export async function handleCronList(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  if (!authenticate(req, res, deps)) return;
+  const cm = requireCron(res, deps); if (!cm) return;
+  jsonResponse(res, 200, { tasks: cm.list() });
+}
+
+// POST /v1/web/cron/tasks  body: { name, schedule, kind, payload, notifyChannels?, timeoutMs?, enabled? }
+export async function handleCronAdd(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  if (!authenticate(req, res, deps)) return;
+  const cm = requireCron(res, deps); if (!cm) return;
+  let body: {
+    name?: string;
+    schedule?: string;
+    kind?: string;
+    payload?: string;
+    notifyChannels?: string[];
+    timeoutMs?: number;
+    enabled?: boolean;
+  };
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    return jsonResponse(res, 400, { error: { code: "bad-body", message: String(err) } });
+  }
+  if (!body.name || !body.schedule || !body.kind || !body.payload) {
+    return jsonResponse(res, 400, {
+      error: { code: "missing-field", message: "name / schedule / kind / payload are required" },
+    });
+  }
+  if (!VALID_TASK_KINDS.has(body.kind)) {
+    return jsonResponse(res, 400, {
+      error: { code: "bad-kind", message: `kind must be one of ${[...VALID_TASK_KINDS].join("|")}` },
+    });
+  }
+  if (body.notifyChannels) {
+    for (const c of body.notifyChannels) {
+      if (!VALID_NOTIFY_CHANNELS.has(c)) {
+        return jsonResponse(res, 400, {
+          error: { code: "bad-notify", message: `notify channel '${c}' invalid` },
+        });
+      }
+    }
+  }
+  try {
+    const task = cm.add({
+      name: body.name,
+      schedule: body.schedule,
+      kind: body.kind as "slash" | "prompt" | "shell",
+      payload: body.payload,
+      ...(body.notifyChannels?.length
+        ? { notifyChannels: body.notifyChannels as Array<"cli" | "wechat" | "web"> }
+        : {}),
+      ...(body.timeoutMs !== undefined ? { timeoutMs: body.timeoutMs } : {}),
+      ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
+    });
+    jsonResponse(res, 201, task);
+  } catch (err) {
+    jsonResponse(res, 400, {
+      error: { code: "cron-add-failed", message: err instanceof Error ? err.message : String(err) },
+    });
+  }
+}
+
+// DELETE /v1/web/cron/tasks/<idOrName>
+export async function handleCronRemove(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  idOrName: string
+): Promise<void> {
+  if (!authenticate(req, res, deps)) return;
+  const cm = requireCron(res, deps); if (!cm) return;
+  const removed = cm.remove(idOrName);
+  jsonResponse(res, removed ? 200 : 404, removed ? { ok: true, task: removed } : { ok: false });
+}
+
+// POST /v1/web/cron/tasks/<idOrName>/enable  body: { enabled: boolean }
+export async function handleCronSetEnabled(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  idOrName: string
+): Promise<void> {
+  if (!authenticate(req, res, deps)) return;
+  const cm = requireCron(res, deps); if (!cm) return;
+  let body: { enabled?: boolean };
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    return jsonResponse(res, 400, { error: { code: "bad-body", message: String(err) } });
+  }
+  if (typeof body.enabled !== "boolean") {
+    return jsonResponse(res, 400, {
+      error: { code: "missing-field", message: "enabled (boolean) required" },
+    });
+  }
+  const task = cm.setEnabled(idOrName, body.enabled);
+  jsonResponse(res, task ? 200 : 404, task ? { ok: true, task } : { ok: false });
+}
+
+// POST /v1/web/cron/tasks/<idOrName>/run-now
+export async function handleCronRunNow(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  idOrName: string
+): Promise<void> {
+  if (!authenticate(req, res, deps)) return;
+  const cm = requireCron(res, deps); if (!cm) return;
+  try {
+    const run = await cm.runNow(idOrName);
+    if (!run) return jsonResponse(res, 404, { error: { code: "not-found", message: idOrName } });
+    jsonResponse(res, 200, { run });
+  } catch (err) {
+    jsonResponse(res, 500, {
+      error: { code: "run-failed", message: err instanceof Error ? err.message : String(err) },
+    });
+  }
+}
+
+// GET /v1/web/cron/tasks/<idOrName>/runs?limit=20
+export async function handleCronRuns(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  idOrName: string
+): Promise<void> {
+  if (!authenticate(req, res, deps)) return;
+  const cm = requireCron(res, deps); if (!cm) return;
+  let limit = 20;
+  if (req.url) {
+    try {
+      const url = new URL(req.url, "http://internal");
+      const q = url.searchParams.get("limit");
+      const n = q ? Number(q) : NaN;
+      if (Number.isFinite(n) && n > 0 && n <= 200) limit = Math.floor(n);
+    } catch {
+      // ignore
+    }
+  }
+  const result = cm.readLogs(idOrName, limit);
+  if (!result) return jsonResponse(res, 404, { error: { code: "not-found", message: idOrName } });
+  jsonResponse(res, 200, result);
+}
+
+// GET /v1/web/cron/templates
+export async function handleCronTemplates(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  if (!authenticate(req, res, deps)) return;
+  const cm = requireCron(res, deps); if (!cm) return;
+  const { listTemplates } = await import("../../cron/templates");
+  jsonResponse(res, 200, { templates: listTemplates() });
+}
+
+// POST /v1/web/cron/templates/<key>/install  body: { name?: string, notifyChannels?: string[] }
+export async function handleCronInstallTemplate(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  templateKey: string
+): Promise<void> {
+  if (!authenticate(req, res, deps)) return;
+  const cm = requireCron(res, deps); if (!cm) return;
+  const { getTemplate } = await import("../../cron/templates");
+  const tpl = getTemplate(templateKey);
+  if (!tpl) {
+    return jsonResponse(res, 404, { error: { code: "template-not-found", message: templateKey } });
+  }
+  let body: { name?: string; notifyChannels?: string[] } = {};
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    body = {};
+  }
+  const notifyChannels = (body.notifyChannels && body.notifyChannels.length > 0
+    ? body.notifyChannels
+    : tpl.notifyChannels) as Array<"cli" | "wechat" | "web">;
+  for (const c of notifyChannels) {
+    if (!VALID_NOTIFY_CHANNELS.has(c)) {
+      return jsonResponse(res, 400, {
+        error: { code: "bad-notify", message: `notify channel '${c}' invalid` },
+      });
+    }
+  }
+  try {
+    const task = cm.add({
+      name: body.name ?? tpl.defaultName,
+      schedule: tpl.schedule,
+      kind: tpl.kind,
+      payload: tpl.payload,
+      notifyChannels,
+      ...(tpl.timeoutMs !== undefined ? { timeoutMs: tpl.timeoutMs } : {}),
+    });
+    jsonResponse(res, 201, task);
+  } catch (err) {
+    jsonResponse(res, 400, {
+      error: { code: "cron-install-failed", message: err instanceof Error ? err.message : String(err) },
+    });
+  }
 }

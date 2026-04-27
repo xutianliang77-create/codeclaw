@@ -49,6 +49,14 @@ import {
   handleGraphQuery,
   handleStatusLine,
   handleSubagents,
+  handleCronList,
+  handleCronAdd,
+  handleCronRemove,
+  handleCronSetEnabled,
+  handleCronRunNow,
+  handleCronRuns,
+  handleCronTemplates,
+  handleCronInstallTemplate,
   type HandlerDeps,
 } from "./handlers";
 import { SessionStore } from "./sessionStore";
@@ -80,6 +88,8 @@ export interface StartWebServerOptions {
    * 不传则 web 端 /v1/web/hooks 返当前 engineDefaults.settings 快照（无热更）。
    */
   hooksConfigRef?: () => HookSettings | undefined;
+  /** Cron #116：cronManager 取值器（async 拿 cronHost 引用方便 chicken-egg 顺序）；不传 cron 端点返 503 */
+  cronManagerRef?: () => import("../../cron/manager").CronManager | null | undefined;
 }
 
 const MIME_TYPES: Record<string, string> = {
@@ -269,6 +279,37 @@ async function dispatch(
     return handleSubagents(req, res, deps, decodeURIComponent(subMatch[1]));
   }
 
+  // ===== #116 Cron HTTP API =====
+  if (url.pathname === "/v1/web/cron/tasks" && method === "GET") {
+    return handleCronList(req, res, deps);
+  }
+  if (url.pathname === "/v1/web/cron/tasks" && method === "POST") {
+    return handleCronAdd(req, res, deps);
+  }
+  if (url.pathname === "/v1/web/cron/templates" && method === "GET") {
+    return handleCronTemplates(req, res, deps);
+  }
+  const cronInstallMatch = /^\/v1\/web\/cron\/templates\/([^/]+)\/install$/.exec(url.pathname);
+  if (cronInstallMatch && method === "POST") {
+    return handleCronInstallTemplate(req, res, deps, decodeURIComponent(cronInstallMatch[1]));
+  }
+  const cronEnableMatch = /^\/v1\/web\/cron\/tasks\/([^/]+)\/enable$/.exec(url.pathname);
+  if (cronEnableMatch && method === "POST") {
+    return handleCronSetEnabled(req, res, deps, decodeURIComponent(cronEnableMatch[1]));
+  }
+  const cronRunNowMatch = /^\/v1\/web\/cron\/tasks\/([^/]+)\/run-now$/.exec(url.pathname);
+  if (cronRunNowMatch && method === "POST") {
+    return handleCronRunNow(req, res, deps, decodeURIComponent(cronRunNowMatch[1]));
+  }
+  const cronRunsMatch = /^\/v1\/web\/cron\/tasks\/([^/]+)\/runs$/.exec(url.pathname);
+  if (cronRunsMatch && method === "GET") {
+    return handleCronRuns(req, res, deps, decodeURIComponent(cronRunsMatch[1]));
+  }
+  const cronTaskMatch = /^\/v1\/web\/cron\/tasks\/([^/]+)$/.exec(url.pathname);
+  if (cronTaskMatch && method === "DELETE") {
+    return handleCronRemove(req, res, deps, decodeURIComponent(cronTaskMatch[1]));
+  }
+
   // 静态文件
   if (method === "GET" && staticRoot) {
     if (url.pathname === "/" || url.pathname === "/legacy" || url.pathname === "/legacy/") {
@@ -346,6 +387,7 @@ export function startWebServer(opts: StartWebServerOptions): Promise<WebServerHa
     },
     workspace: opts.engineDefaults.workspace,
     ...(opts.mcpManager ? { mcpManager: opts.mcpManager } : {}),
+    ...(opts.cronManagerRef ? { cronManagerRef: opts.cronManagerRef } : {}),
     hooksConfigRef: () => opts.hooksConfigRef?.() ?? hooksFallback,
     reloadHooks: () => {
       const next = loadSettings(opts.engineDefaults.workspace);

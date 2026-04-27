@@ -218,11 +218,20 @@ async function main(): Promise<void> {
     const hostArg = restArgs.find((a) => a.startsWith("--host="))?.split("=")[1];
     const port = portArg ? Number(portArg) : 7180;
     const host = hostArg ?? "127.0.0.1";
+    // cronHost 创建在 startWebServer 之后（chicken-egg：cronHost 需要 handle.store 做 broadcast，
+    // server deps 又需要 cronManager）。用 lazy ref 解开循环：startWebServer 拿到 ref，
+    // cronHost 创建后填充 cronHostRef，handler 调时取最新。
+    let cronHostRef: ReturnType<typeof createQueryEngine> | null = null;
     const handle = await startWebServer({
       port,
       host,
       auth,
       mcpManager,
+      cronManagerRef: () =>
+        (cronHostRef as unknown as { getCronManager?: () => unknown })?.getCronManager?.() as
+          | import("./cron/manager").CronManager
+          | null
+          | undefined,
       hooksConfigRef: () => settings?.hooks,
       engineDefaults: {
         currentProvider: runtime.selection?.current ?? null,
@@ -242,7 +251,7 @@ async function main(): Promise<void> {
 
     // 阶段 🅑：在 web 子命令也跑 cron。每个 user engine 的 channel="http" 会禁用 cron（避免重复触发）；
     // 这里独建 host engine（channel undefined → 走 cli 路径启 scheduler）专跑 cron + 广播 web SSE。
-    const cronHost = createQueryEngine({
+    const cronHost = cronHostRef = createQueryEngine({
       currentProvider: runtime.selection?.current ?? null,
       fallbackProvider: runtime.selection?.fallback ?? null,
       permissionMode: runtime.config?.defaults.permissionMode ?? "plan",

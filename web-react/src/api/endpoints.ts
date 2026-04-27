@@ -144,3 +144,89 @@ export const graphQuery = (type: GraphQueryType, arg: string, arg2?: string) =>
 // ===== status line =====
 
 export const getStatusLine = () => api<StatusLine>("GET", "/v1/web/status-line");
+
+// ===== Cron #116 =====
+
+export type CronTaskKind = "slash" | "prompt" | "shell";
+export type CronNotifyChannel = "cli" | "wechat" | "web";
+
+export interface CronTask {
+  id: string;
+  name: string;
+  schedule: string;
+  kind: CronTaskKind;
+  payload: string;
+  enabled: boolean;
+  notifyChannels?: CronNotifyChannel[];
+  timeoutMs?: number;
+  workspace?: string;
+  createdAt: number;
+  lastRunAt?: number;
+  lastRunStatus?: "success" | "failure" | "timeout";
+  lastRunError?: string;
+}
+
+export interface CronRun {
+  taskId: string;
+  startedAt: number;
+  endedAt: number;
+  status: "success" | "failure" | "timeout";
+  output: string;
+  error?: string;
+}
+
+export interface CronTaskTemplate {
+  key: string;
+  description: string;
+  defaultName: string;
+  schedule: string;
+  kind: CronTaskKind;
+  payload: string;
+  notifyChannels: CronNotifyChannel[];
+  timeoutMs?: number;
+}
+
+export const listCronTasks = () =>
+  api<{ tasks: CronTask[] }>("GET", "/v1/web/cron/tasks");
+
+export const addCronTask = (input: {
+  name: string;
+  schedule: string;
+  kind: CronTaskKind;
+  payload: string;
+  notifyChannels?: CronNotifyChannel[];
+  timeoutMs?: number;
+  enabled?: boolean;
+}) => api<CronTask>("POST", "/v1/web/cron/tasks", input);
+
+export const removeCronTask = (idOrName: string) =>
+  api<{ ok: boolean; task?: CronTask }>("DELETE", `/v1/web/cron/tasks/${encodeURIComponent(idOrName)}`);
+
+export const setCronTaskEnabled = (idOrName: string, enabled: boolean) =>
+  api<{ ok: boolean; task?: CronTask }>(
+    "POST",
+    `/v1/web/cron/tasks/${encodeURIComponent(idOrName)}/enable`,
+    { enabled }
+  );
+
+export const runCronNow = (idOrName: string) =>
+  api<{ run: CronRun }>("POST", `/v1/web/cron/tasks/${encodeURIComponent(idOrName)}/run-now`);
+
+export const listCronRuns = (idOrName: string, limit = 20) =>
+  api<{ task: CronTask; runs: CronRun[] }>(
+    "GET",
+    `/v1/web/cron/tasks/${encodeURIComponent(idOrName)}/runs?limit=${limit}`
+  );
+
+export const listCronTemplates = () =>
+  api<{ templates: CronTaskTemplate[] }>("GET", "/v1/web/cron/templates");
+
+export const installCronTemplate = (
+  key: string,
+  body: { name?: string; notifyChannels?: CronNotifyChannel[] } = {}
+) =>
+  api<CronTask>(
+    "POST",
+    `/v1/web/cron/templates/${encodeURIComponent(key)}/install`,
+    body
+  );
