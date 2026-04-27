@@ -40,7 +40,9 @@ function normalizeEntry(entry: ProviderFileEntry | undefined): ProviderFileEntry
     baseUrl: entry?.baseUrl ?? "",
     model: entry?.model ?? "",
     timeoutMs: entry?.timeoutMs,
-    apiKeyEnvVar: entry?.apiKeyEnvVar
+    apiKeyEnvVar: entry?.apiKeyEnvVar,
+    maxTokens: entry?.maxTokens,
+    contextWindow: entry?.contextWindow
   };
 }
 
@@ -52,6 +54,8 @@ function summaryLine(type: ProviderType, entry: ProviderFileEntry | undefined): 
     `model=${normalized.model || "-"}`,
     `baseUrl=${normalized.baseUrl || "-"}`,
     `timeoutMs=${normalized.timeoutMs ?? "-"}`,
+    `maxTokens=${normalized.maxTokens ?? "-"}`,
+    `contextWindow=${normalized.contextWindow ?? "-"}`,
     `apiKeyEnvVar=${normalized.apiKeyEnvVar || "-"}`
   ].join(" | ");
 }
@@ -114,6 +118,8 @@ export function ProviderConfigApp({
       { label: `baseUrl (${current.baseUrl || "-"})`, value: "baseUrl" },
       { label: `model (${current.model || "-"})`, value: "model" },
       { label: `timeoutMs (${current.timeoutMs ?? "-"})`, value: "timeoutMs" },
+      { label: `maxTokens (${current.maxTokens ?? "-"})`, value: "maxTokens" },
+      { label: `contextWindow (${current.contextWindow ?? "-"})`, value: "contextWindow" },
       { label: `apiKeyEnvVar (${current.apiKeyEnvVar || "-"})`, value: "apiKeyEnvVar" },
       { label: "Back", value: "back" }
     ];
@@ -142,21 +148,45 @@ export function ProviderConfigApp({
 
     const current = normalizeEntry(providers[selectedProvider]);
     setSelectedField(field);
-    setFieldValue(field === "timeoutMs" ? String(current.timeoutMs ?? "") : String(current[field] ?? ""));
+    if (field === "timeoutMs" || field === "maxTokens" || field === "contextWindow") {
+      setFieldValue(String(current[field] ?? ""));
+    } else {
+      setFieldValue(String(current[field] ?? ""));
+    }
     setScreen("field-input");
   }
 
   function submitField(): void {
     const trimmed = fieldValue.trim();
+    const numericFields: EditableField[] = ["timeoutMs", "maxTokens", "contextWindow"];
+
+    if (numericFields.includes(selectedField)) {
+      // 留空清字段（撤销显式声明，回退到默认表）
+      if (trimmed === "") {
+        updateProvider(selectedProvider, (current) => ({
+          ...current,
+          [selectedField]: undefined,
+        }));
+        setBanner(`Cleared ${selectedProvider}.${selectedField}（恢复默认）`);
+        setScreen("provider-menu");
+        return;
+      }
+      const n = Number.parseInt(trimmed, 10);
+      if (!Number.isFinite(n) || Number.isNaN(n) || n <= 0 || String(n) !== trimmed) {
+        // 非整数 / 0 / 负数 → reject，留在编辑屏让用户改
+        setBanner(`${selectedField} 需为正整数（输入 "${trimmed}" 不合法）`);
+        return;
+      }
+      updateProvider(selectedProvider, (current) => ({
+        ...current,
+        [selectedField]: n,
+      }));
+      setBanner(`Updated ${selectedProvider}.${selectedField} = ${n}`);
+      setScreen("provider-menu");
+      return;
+    }
 
     updateProvider(selectedProvider, (current) => {
-      if (selectedField === "timeoutMs") {
-        return {
-          ...current,
-          timeoutMs: trimmed ? Number.parseInt(trimmed, 10) : undefined
-        };
-      }
-
       if (selectedField === "apiKeyEnvVar") {
         return {
           ...current,
@@ -312,8 +342,10 @@ export function ProviderConfigApp({
               Edit {selectedProvider}.{selectedField}
             </Text>
             <Text color="gray">
-              {selectedField === "timeoutMs"
-                ? "Number or blank. Enter saves; ESC cancels; Ctrl+C exits."
+              {selectedField === "timeoutMs" ||
+              selectedField === "maxTokens" ||
+              selectedField === "contextWindow"
+                ? "Positive integer or blank to clear. Enter saves; ESC cancels; Ctrl+C exits."
                 : "Backspace/←→ edit. Ctrl+A=home Ctrl+E=end Ctrl+U=clear Ctrl+W=del-word. Enter saves; ESC cancels."}
             </Text>
             <Text color="gray">
