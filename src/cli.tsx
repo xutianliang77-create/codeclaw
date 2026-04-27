@@ -289,20 +289,40 @@ async function main(): Promise<void> {
       }
     }
 
-    // cronHost 创建在 startWebServer 之后（chicken-egg：cronHost 需要 handle.store 做 broadcast，
-    // server deps 又需要 cronManager）。用 lazy ref 解开循环：startWebServer 拿到 ref，
-    // cronHost 创建后填充 cronHostRef，handler 调时取最新。
-    let cronHostRef: ReturnType<typeof createQueryEngine> | null = null;
+    // P3.3：cronHost 必须在 startWebServer 之前创建，否则 server 已 listen
+    // 但 cronManagerRef() 返回 null 期间，前端首屏切到 Cron tab 会拿到 503
+    // 闪现"Cron 不可用" banner（deep-reviewer S1 警告）。
+    //
+    // 阶段 🅑：每个 user engine 的 channel="http" 会禁用 cron（避免重复触发）；
+    // 这里独建 host engine（channel undefined → 走 cli 路径启 scheduler）专跑 cron。
+    // setCronNotifyAdapters 用到 handle.store，所以延后到 handle 拿到之后再注入。
+    const cronHost = createQueryEngine({
+      currentProvider: runtime.selection?.current ?? null,
+      fallbackProvider: runtime.selection?.fallback ?? null,
+      permissionMode: runtime.config?.defaults.permissionMode ?? "plan",
+      workspace,
+      auditDbPath: null,
+      dataDbPath: null,
+      ...(runtime.config?.memory.l1AutoCompactThreshold !== undefined
+        ? { autoCompactThreshold: runtime.config.memory.l1AutoCompactThreshold }
+        : {}),
+      mcpManager,
+      settings,
+    });
+    const cronHostWithMgr = cronHost as unknown as {
+      getCronManager?: () => import("./cron/manager").CronManager | null | undefined;
+      setCronNotifyAdapters?: (a: {
+        wechat?: (...args: unknown[]) => void;
+        web?: (task: unknown, run: unknown) => void;
+      }) => void;
+    };
     const handle = await startWebServer({
       port,
       host,
       auth,
       mcpManager,
-      cronManagerRef: () =>
-        (cronHostRef as unknown as { getCronManager?: () => unknown })?.getCronManager?.() as
-          | import("./cron/manager").CronManager
-          | null
-          | undefined,
+      // cronManager 此时已 ready；getter 仍用 closure 以便未来 hot-reload
+      cronManagerRef: () => cronHostWithMgr.getCronManager?.(),
       hooksConfigRef: () => settings?.hooks,
       engineDefaults: {
         currentProvider: runtime.selection?.current ?? null,
@@ -317,34 +337,8 @@ async function main(): Promise<void> {
         settings,
       },
     });
-    console.log(
-      `CodeClaw Web · http://${handle.host}:${handle.port}/   (legacy UI: /legacy/)`
-    );
-    console.log(
-      "在浏览器打开上面的地址，登录时粘贴 token（`cat ~/.codeclaw/web-auth.json` 可查）。"
-    );
-
-    // 阶段 🅑：在 web 子命令也跑 cron。每个 user engine 的 channel="http" 会禁用 cron（避免重复触发）；
-    // 这里独建 host engine（channel undefined → 走 cli 路径启 scheduler）专跑 cron + 广播 web SSE。
-    const cronHost = cronHostRef = createQueryEngine({
-      currentProvider: runtime.selection?.current ?? null,
-      fallbackProvider: runtime.selection?.fallback ?? null,
-      permissionMode: runtime.config?.defaults.permissionMode ?? "plan",
-      workspace,
-      auditDbPath: null,
-      dataDbPath: null,
-      ...(runtime.config?.memory.l1AutoCompactThreshold !== undefined
-        ? { autoCompactThreshold: runtime.config.memory.l1AutoCompactThreshold }
-        : {}),
-      mcpManager,
-      settings,
-    });
-    (cronHost as unknown as {
-      setCronNotifyAdapters?: (a: {
-        wechat?: (...args: unknown[]) => void;
-        web?: (task: unknown, run: unknown) => void;
-      }) => void;
-    }).setCronNotifyAdapters?.({
+    // 服务起来后才能拿到 handle.store；此时再注入 web SSE 通知
+    cronHostWithMgr.setCronNotifyAdapters?.({
       web: (task, run) => {
         handle.store.broadcastEvent({
           type: "cron-result",
@@ -353,6 +347,13 @@ async function main(): Promise<void> {
         });
       },
     });
+
+    console.log(
+      `CodeClaw Web · http://${handle.host}:${handle.port}/   (legacy UI: /legacy/)`
+    );
+    console.log(
+      "在浏览器打开上面的地址，登录时粘贴 token（`cat ~/.codeclaw/web-auth.json` 可查）。"
+    );
 
     // SIGHUP 同步 settings 到所有已有 web sessions
     process.on("SIGHUP", () => {
