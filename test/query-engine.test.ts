@@ -949,7 +949,7 @@ describe("query engine", () => {
     expect(engine.getMessages().at(-1)?.text).toContain("reflector-decision:");
 
     await collect(engine.submitMessage("/doctor"));
-    expect(engine.getMessages().at(-1)?.text).toContain("CodeClaw 0.6.0");
+    expect(engine.getMessages().at(-1)?.text).toContain("CodeClaw 0.7.0");
 
     await collect(engine.submitMessage("/wechat"));
     expect(engine.getMessages().at(-1)?.text).toContain("WeChat");

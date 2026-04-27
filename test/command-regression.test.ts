@@ -61,7 +61,7 @@ describe("command regression", () => {
 
     const output = await runDoctor();
 
-    expect(output).toContain("CodeClaw 0.6.0");
+    expect(output).toContain("CodeClaw 0.7.0");
     expect(output).toContain("default-provider:");
     expect(output).toContain("providers:");
     expect(output).toContain("openai (OpenAI)");
