@@ -9,7 +9,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useSessionsStore } from "@/store/sessions";
-import { useMessagesStore } from "@/store/messages";
+import { useMessagesStore, type ChatMessage } from "@/store/messages";
 import { useApprovalsStore } from "@/store/approvals";
 import { useSubagentsStore } from "@/store/subagents";
 import { useAuthStore } from "@/store/auth";
@@ -23,10 +23,13 @@ interface Props {
 
 const STICK_THRESHOLD_PX = 80;
 
+// 稳定的空数组单例：避免 selector 每次返回新 [] 触发 zustand ref-equality 误判 + re-render 死循环（React #185）
+const EMPTY_MSGS: ChatMessage[] = [];
+
 export default function ChatPane({ onError }: Props) {
   const { activeId } = useSessionsStore();
   const { token } = useAuthStore();
-  const msgs = useMessagesStore((s) => (activeId ? s.bySession.get(activeId) ?? [] : []));
+  const msgs = useMessagesStore((s) => (activeId ? s.bySession.get(activeId) ?? EMPTY_MSGS : EMPTY_MSGS));
   const approval = useApprovalsStore((s) => (activeId ? s.bySession.get(activeId) ?? null : null));
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -71,7 +74,10 @@ export default function ChatPane({ onError }: Props) {
     if (stickToBottomRef.current && msgs.length > 0) {
       rowVirtualizer.scrollToIndex(msgs.length - 1, { align: "end" });
     }
-  }, [msgs.length, rowVirtualizer]);
+    // rowVirtualizer 每次 render 都是新引用；放进 deps 会和 scrollToIndex 触发的内部
+    // setState 形成死循环（React #185 max update depth）。仅以 msgs.length 为依赖。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [msgs.length]);
 
   // SSE 订阅：activeId 变化时重连
   useEffect(() => {

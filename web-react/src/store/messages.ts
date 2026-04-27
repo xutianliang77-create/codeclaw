@@ -8,6 +8,15 @@
 
 import { create } from "zustand";
 
+// crypto.randomUUID 仅在 secure context（HTTPS / localhost）可用；Tailscale 私网 IP + HTTP
+// 不是 secure context（Chrome 视 100.* 为非本地非加密源），需 fallback 否则点发送即崩。
+function genId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export type MessageRole = "user" | "assistant" | "system" | "error" | "tool";
 
 export interface ChatMessage {
@@ -41,7 +50,7 @@ export const useMessagesStore = create<MessagesState>((set, get) => ({
     set((s) => {
       const next = new Map(s.bySession);
       const arr = [...(next.get(sessionId) ?? [])];
-      arr.push({ id: crypto.randomUUID(), sessionId, role: "user", text, ts: Date.now() });
+      arr.push({ id: genId(), sessionId, role: "user", text, ts: Date.now() });
       next.set(sessionId, arr);
       return { bySession: next };
     });
@@ -102,7 +111,7 @@ export const useMessagesStore = create<MessagesState>((set, get) => ({
       const next = new Map(s.bySession);
       const arr = [...(next.get(sessionId) ?? [])];
       arr.push({
-        id: crypto.randomUUID(),
+        id: genId(),
         sessionId,
         role: "tool",
         text: "",
@@ -117,7 +126,7 @@ export const useMessagesStore = create<MessagesState>((set, get) => ({
     set((s) => {
       const next = new Map(s.bySession);
       const arr = [...(next.get(sessionId) ?? [])];
-      arr.push({ id: crypto.randomUUID(), sessionId, role: "error", text, ts: Date.now() });
+      arr.push({ id: genId(), sessionId, role: "error", text, ts: Date.now() });
       next.set(sessionId, arr);
       return { bySession: next };
     });
@@ -126,7 +135,7 @@ export const useMessagesStore = create<MessagesState>((set, get) => ({
     set((s) => {
       const next = new Map(s.bySession);
       const arr = [...(next.get(sessionId) ?? [])];
-      arr.push({ id: crypto.randomUUID(), sessionId, role: "system", text, ts: Date.now() });
+      arr.push({ id: genId(), sessionId, role: "system", text, ts: Date.now() });
       next.set(sessionId, arr);
       return { bySession: next };
     });
