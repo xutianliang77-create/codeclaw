@@ -141,7 +141,7 @@ export default function McpPanel({ onError }: Props) {
         </div>
       )}
 
-      <h3 className="text-xs uppercase text-muted mt-4">Test call</h3>
+      <h3 className="text-xs uppercase text-muted mt-4">Test call · 测试调用</h3>
       <form onSubmit={runCall} className="space-y-2">
         <div className="grid grid-cols-2 gap-2">
           <input

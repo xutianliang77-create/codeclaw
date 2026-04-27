@@ -18,14 +18,15 @@ import { useSessionsStore } from "@/store/sessions";
 
 type TabId = "chat" | "rag" | "graph" | "mcp" | "hooks" | "subagents" | "cron";
 
-const TABS: { id: TabId; label: string }[] = [
-  { id: "chat", label: "Chat" },
-  { id: "rag", label: "RAG" },
-  { id: "graph", label: "Graph" },
-  { id: "mcp", label: "MCP" },
-  { id: "hooks", label: "Hooks" },
-  { id: "subagents", label: "Subagents" },
-  { id: "cron", label: "Cron" },
+// Tab labels：英文为主（短、对齐），中文 tooltip 通过 title 暴露
+const TABS: { id: TabId; label: string; titleZh: string }[] = [
+  { id: "chat", label: "Chat", titleZh: "对话" },
+  { id: "rag", label: "RAG", titleZh: "检索" },
+  { id: "graph", label: "Graph", titleZh: "代码图" },
+  { id: "mcp", label: "MCP", titleZh: "MCP 工具" },
+  { id: "hooks", label: "Hooks", titleZh: "钩子" },
+  { id: "subagents", label: "Subagents", titleZh: "子代理" },
+  { id: "cron", label: "Cron", titleZh: "定时任务" },
 ];
 
 interface Props {
@@ -51,6 +52,7 @@ export default function Workspace({ onError }: Props) {
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
+            title={`${t.label} · ${t.titleZh}`}
             className={
               "px-4 py-1.5 text-sm rounded-t border border-transparent border-b-0 -mb-px " +
               (tab === t.id

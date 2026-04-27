@@ -40,7 +40,9 @@ export default function ConnectScreen({ onError }: Props) {
     <div className="h-full flex items-center justify-center">
       <form onSubmit={submit} className="w-96 space-y-4 p-6 border border-border rounded-lg bg-bg">
         <h1 className="text-xl font-bold">CodeClaw · Web (React)</h1>
-        <p className="text-sm text-muted">输入 CODECLAW_WEB_TOKEN 与 codeclaw web 服务端对齐</p>
+        <p className="text-sm text-muted">
+          Enter CODECLAW_WEB_TOKEN · 输入 token 与 codeclaw web 服务端对齐
+        </p>
         <input
           type="password"
           value={draft}
@@ -54,10 +56,10 @@ export default function ConnectScreen({ onError }: Props) {
           disabled={busy}
           className="w-full px-4 py-2 bg-accent text-white rounded font-medium disabled:opacity-50"
         >
-          {busy ? "连接中..." : "连接"}
+          {busy ? "Connecting · 连接中..." : "Connect · 连接"}
         </button>
         <p className="text-xs text-muted text-center">
-          token 仅存浏览器 localStorage，不发到第三方
+          token stays in browser localStorage · token 仅存浏览器，不发第三方
         </p>
       </form>
     </div>
