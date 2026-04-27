@@ -21,6 +21,42 @@ import { VERSION } from "./version";
 import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 
+/**
+ * 启动前检测 better-sqlite3 native binding 是否能在当前平台加载
+ * （v0.7.0 P1.3）。跨平台拷贝 node_modules 时常见 mach-o / ELF mismatch
+ * 错误，原始堆栈 200+ 行不友好。这里给一个清晰指引并 exit。
+ */
+async function assertNativeDeps(): Promise<void> {
+  try {
+    // ESM 动态 import；触发 better-sqlite3 native bindings 实际加载（new Database 才走 bindings.js）
+    const mod = (await import("better-sqlite3")) as unknown as {
+      default: new (filename: string) => { close(): void };
+    };
+    const probe = new mod.default(":memory:");
+    probe.close();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isCrossPlatform =
+      /mach-o file|invalid ELF|wrong ELF class|Bad CPU type|incompatible architecture/i.test(msg);
+    if (isCrossPlatform) {
+      console.error(
+        [
+          "[startup] better-sqlite3 native module 平台不匹配（跨平台拷贝 node_modules 常见错误）。",
+          "[startup] 修复：cd " + process.cwd() + " && npm rebuild better-sqlite3",
+          "[startup] 或全部重装：rm -rf node_modules package-lock.json && npm install",
+          "",
+          "原始错误（前 1 行）: " + msg.split("\n")[0],
+        ].join("\n")
+      );
+    } else {
+      console.error(
+        "[startup] 加载 better-sqlite3 失败：" + msg + "\n[startup] 尝试 `npm rebuild better-sqlite3`"
+      );
+    }
+    process.exit(1);
+  }
+}
+
 function printHelp(): void {
   console.log(`CodeClaw ${VERSION}
 
@@ -73,6 +109,10 @@ async function main(): Promise<void> {
     printHelp();
     return;
   }
+
+  // P1.3: 跨平台 native 模块自检；--version / --help 之后执行
+  // （这两条短路命令不需要 DB，提前 return 不影响）
+  await assertNativeDeps();
 
   if (command === "doctor") {
     console.log(await runDoctor());
