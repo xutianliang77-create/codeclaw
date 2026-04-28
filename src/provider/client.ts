@@ -545,6 +545,55 @@ async function* streamOpenAiCompatible(
   }
 }
 
+/**
+ * v0.8.0 #1：构造 Anthropic /v1/messages 请求 body，含 prompt cache 标记。
+ *
+ * cache_control 策略：
+ *   - system 块（数组形式）尾部加 ephemeral 标记 → 5min 内同一 system 命中 cache
+ *   - tools 数组**最后一个**元素加 ephemeral 标记 → 等价整个 tools 块进 cache
+ *   - messages 不加（每轮变化大，不值得）
+ *
+ * 这两个 breakpoint 可以让 ~3-7k tokens（system + tools schema）在 cache 命中时
+ * 只算 ~10% 的成本，对长会话节省 50-70% input tokens。
+ *
+ * Anthropic API 接受 system 为 string 或 ContentBlock[]；
+ * 加 cache_control 必须用数组形式。
+ */
+async function buildAnthropicRequestBody(
+  provider: ProviderStatus,
+  messages: EngineMessage[],
+  tools: ToolSchemaSpec[] | undefined
+): Promise<Record<string, unknown>> {
+  const sys = extractAnthropicSystem(messages);
+  const toolsArr =
+    tools && tools.length > 0
+      ? tools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          input_schema: t.inputSchema,
+        }))
+      : [];
+  const body: Record<string, unknown> = {
+    model: provider.model,
+    max_tokens: provider.maxTokens ?? 32_768,
+    stream: true,
+    messages: await toAnthropicMessages(messages),
+  };
+  if (sys) {
+    body.system = [
+      { type: "text", text: sys, cache_control: { type: "ephemeral" } },
+    ];
+  }
+  if (toolsArr.length > 0) {
+    body.tools = toolsArr.map((t, i) =>
+      i === toolsArr.length - 1
+        ? { ...t, cache_control: { type: "ephemeral" } }
+        : t
+    );
+  }
+  return body;
+}
+
 async function* streamAnthropic(
   provider: ProviderStatus,
   messages: EngineMessage[],
@@ -565,22 +614,7 @@ async function* streamAnthropic(
         "anthropic-version": "2023-06-01",
         ...(provider.apiKey ? { "x-api-key": provider.apiKey } : {})
       },
-      body: JSON.stringify({
-        model: provider.model,
-        max_tokens: provider.maxTokens ?? 32_768,
-        stream: true,
-        ...(extractAnthropicSystem(messages) ? { system: extractAnthropicSystem(messages) } : {}),
-        messages: await toAnthropicMessages(messages),
-        ...(tools && tools.length > 0
-          ? {
-              tools: tools.map((t) => ({
-                name: t.name,
-                description: t.description,
-                input_schema: t.inputSchema,
-              })),
-            }
-          : {}),
-      })
+      body: JSON.stringify(await buildAnthropicRequestBody(provider, messages, tools))
     },
     getConnectTimeoutMs(provider),
     abortSignal

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -632,6 +633,11 @@ class LocalQueryEngine implements QueryEngine {
   private lastCompactedMessageCount = 0;
   private lastCompactSummary: string | null = null;
   private lastEstimatedTokens = 0;
+  // v0.8.0 #2：system prompt 缓存。同一会话内大多数轮次的 system 字符串完全相同
+  // （workspace/permissionMode/provider/skill 都不变），重 build 既费 CPU 也破坏
+  // Anthropic prompt cache 命中（cache 要求前缀 byte 完全一致）。这里按结构 hash
+  // 缓存 build 结果，hash 不变就直接复用上轮 buf。
+  private lastSystemPromptCache: { hash: string; text: string } | null = null;
   private readonly recentReadFiles = new Set<string>();
   private readonly changedFiles = new Set<string>();
   private readonly recentGapSignatures: string[] = [];
@@ -3836,16 +3842,9 @@ class LocalQueryEngine implements QueryEngine {
       );
     }
 
-    // M1-A 默认路径：在头部插 system message
-    const systemText = buildSystemPrompt({
-      workspace: this.options.workspace,
-      permissionMode: this.permissionMode,
-      provider: this.currentProvider,
-      slashRegistry: this.slashRegistry,
-      skillRegistry: this.skillRegistry,
-      activeSkill: this.activeSkill,
-      // toolRegistry 在 M1-B 接入；空缺不影响 prompt 构造
-    });
+    // M1-A 默认路径：在头部插 system message。
+    // v0.8.0 #2：按结构 hash 复用上轮 buf（详见 lastSystemPromptCache 注释）。
+    const systemText = this.buildOrReuseSystemPrompt();
     const systemMessage: EngineMessage = {
       id: createId("system"),
       role: "system",
@@ -3855,7 +3854,47 @@ class LocalQueryEngine implements QueryEngine {
     const base: EngineMessage[] = [systemMessage, ...providerMessages];
     // M3-03：active skill 时给最后一条 user message 加 banner，让 LLM 在长 multi-turn
     // 中持续意识到当前 skill 约束。banner 短，不重复 system prompt 里的完整 skill.prompt。
+    // 注：banner 在 user message 里，不在 cache 区（cache 边界画在 system 末），不破 cache。
     return this.activeSkill ? applySkillBanner(base, this.activeSkill) : base;
+  }
+
+  /**
+   * v0.8.0 #2：按结构 hash 缓存 buildSystemPrompt 结果。
+   *
+   * Hash 输入只取「能让 system prompt 内容变化」的字段：
+   *   - workspace / permissionMode / provider instanceId
+   *   - activeSkill 名（skill 切换需要重 build）
+   *   - slash / skill registry 大小（reload plugin 等场景）
+   *
+   * 不放进 hash：CODECLAW.md mtime、skill 文件 mtime — 用户改完通常重启 codeclaw；
+   * 想要更激进的 invalidate 可以后续补 fs.statSync 取 mtime。
+   *
+   * 命中后直接复用上轮 byte，让下游 Anthropic prompt cache 稳定命中（cache 要求前缀
+   * byte 完全一致；任何字符抖动都会 cache miss → 多花 25% cache_creation 钱）。
+   */
+  private buildOrReuseSystemPrompt(): string {
+    const hashInput = JSON.stringify({
+      workspace: this.options.workspace,
+      permissionMode: this.permissionMode,
+      providerKey: this.currentProvider?.instanceId ?? null,
+      activeSkill: this.activeSkill?.name ?? null,
+      slashSize: this.slashRegistry.list().length,
+      skillSize: this.skillRegistry.list().length,
+    });
+    const hash = createHash("sha1").update(hashInput).digest("hex");
+    if (this.lastSystemPromptCache?.hash === hash) {
+      return this.lastSystemPromptCache.text;
+    }
+    const text = buildSystemPrompt({
+      workspace: this.options.workspace,
+      permissionMode: this.permissionMode,
+      provider: this.currentProvider,
+      slashRegistry: this.slashRegistry,
+      skillRegistry: this.skillRegistry,
+      activeSkill: this.activeSkill,
+    });
+    this.lastSystemPromptCache = { hash, text };
+    return text;
   }
 
   private buildProviderFailureMessage(error: Error): string {
