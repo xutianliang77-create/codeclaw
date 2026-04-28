@@ -36,6 +36,7 @@ import reloadPluginsCommand from "./builtins/reloadPlugins";
 import debugToolCallCommand from "./builtins/debugToolCall";
 import mcpCommand from "./builtins/mcp";
 import wechatCommand from "./builtins/wechat";
+import webCommand from "./builtins/web";
 import helpCommand from "./builtins/help";
 import planCommand from "./builtins/plan";
 import reviewCommand from "./builtins/review";
@@ -82,6 +83,7 @@ const BUILTINS: Array<SlashCommand | SlashCommand[]> = [
   debugToolCallCommand,
   mcpCommand,
   wechatCommand,
+  webCommand,
   endCommand,
   forgetCommand,
   rememberCommand,

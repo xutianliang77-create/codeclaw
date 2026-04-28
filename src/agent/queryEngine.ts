@@ -3199,6 +3199,22 @@ class LocalQueryEngine implements QueryEngine {
         "Generated a fresh WeChat login QR code. Scan it soon, or run /wechat refresh again."
       ].join("\n");
     }
+    // v0.7.2：显式启动消息 worker（默认不再随登录确认自动起，避免 idle 期间长轮询噪音）
+    if (suffix === "worker" || suffix === "worker start") {
+      const startWorker = this.options.wechat?.startWorker;
+      if (!startWorker) {
+        return "WeChat worker starter not wired in this runtime (CLI only).";
+      }
+      const status = await loginManager.refreshStatus();
+      if (status.phase !== "confirmed") {
+        return [
+          "WeChat 未登录，先运行 `/wechat login` 完成扫码。",
+          formatWechatLoginState(status)
+        ].join("\n");
+      }
+      await startWorker();
+      return "WeChat worker started · 已启动消息接收（同进程 long-poll）";
+    }
 
     const current = await loginManager.refreshStatus();
     if (current.phase === "confirmed") {

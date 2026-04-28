@@ -62,8 +62,7 @@ function printHelp(): void {
   console.log(`CodeClaw ${VERSION}
 
 Usage:
-  codeclaw                 Start CLI (also starts Web on 7180; pass --no-web to skip)
-  codeclaw --no-web        Start CLI only (no auto Web)
+  codeclaw                 Start CLI only · 仅启动 CLI（不再自动起 Web/WeChat）
   codeclaw --plain         Start the plain-text REPL (IME-safe fallback)
   codeclaw --version       Print version
   codeclaw --help          Print help
@@ -75,6 +74,9 @@ Usage:
   codeclaw wechat --worker Start the iLink WeChat polling worker
   codeclaw web             Start the Web SPA server (auto-generates token to ~/.codeclaw/web-auth.json on first run)
                            Optional: --port=7180 --host=127.0.0.1
+
+Note: v0.7.2 起 CLI 默认不再后台起 Web/WeChat，按需用上面的子命令显式启动。
+      老 flag --no-web 仍可传入（已变成 no-op）。
 `);
 }
 
@@ -440,7 +442,11 @@ async function main(): Promise<void> {
         tokenFile: configuredWechatTokenFile,
         baseUrl: configuredWechatBaseUrl,
         onConfirmed: async () => {
-          await ensureAutoWechatWorkerStarted();
+          // v0.7.2：登录成功后不再自动启动 worker（多终端 idle 雪崩诊断中）。
+          // 用户显式跑 `/wechat worker` 或 `codeclaw wechat --worker` 接收消息。
+          console.log(
+            "[wechat] 登录成功 · 运行 `/wechat worker` 启动消息接收，或 `codeclaw wechat --worker`（独立进程，推荐）"
+          );
         }
       })
     : undefined;
@@ -464,7 +470,9 @@ async function main(): Promise<void> {
       attachCurrentSession: () => {
         wechatService.attachSharedRuntime(queryEngine);
       },
-      loginManager: wechatLoginManager
+      loginManager: wechatLoginManager,
+      // v0.7.2：暴露 worker 启动给 /wechat worker slash 命令显式触发
+      startWorker: ensureAutoWechatWorkerStarted,
     }
   });
   queryEngineForShutdown = queryEngine as unknown as { disposeCron?: () => void };
@@ -568,107 +576,12 @@ async function main(): Promise<void> {
 
   const capabilities = detectProviderCapabilities(runtime.selection?.current ?? null);
 
-  // P3.1：CLI 默认同步起 Web。--no-web 退路；token / 端口冲突 graceful skip。
-  // 复用 CLI 的 queryEngine.cronManager（不再单独造 cronHost；避免双 scheduler）。
-  let webAutoHandle: { close(): Promise<void> | void } | null = null;
-  if (!noWeb && command !== "doctor" && command !== "setup" && command !== "config") {
-    try {
-      const { startWebServer } = await import("./channels/web/server");
-      const {
-        readWebAuthConfig,
-        ensureWebToken,
-        webAuthFilePath,
-      } = await import("./channels/web/auth");
-      let wAuth = readWebAuthConfig();
-      if (!wAuth.bearerToken) {
-        const { token, generated } = ensureWebToken();
-        const fp = webAuthFilePath();
-        if (generated) {
-          console.log(`[web] 生成新 token: ${token}（保存到 ${fp} mode 0600）`);
-        }
-        wAuth = { bearerToken: token, source: "file", filePath: fp };
-      }
-      const webPort = Number.parseInt(process.env.CODECLAW_WEB_PORT ?? "7180", 10);
-      const webHost = process.env.CODECLAW_WEB_HOST ?? "127.0.0.1";
-      const queryEngineWithMgr = queryEngine as unknown as {
-        getCronManager?: () => import("./cron/manager").CronManager | null | undefined;
-        setCronNotifyAdapters?: (a: {
-          wechat?: (...args: unknown[]) => void;
-          web?: (task: unknown, run: unknown) => void;
-        }) => void;
-      };
-      const handle = await startWebServer({
-        port: webPort,
-        host: webHost,
-        auth: wAuth,
-        mcpManager,
-        cronManagerRef: () => queryEngineWithMgr.getCronManager?.(),
-        hooksConfigRef: () => settings?.hooks,
-        engineDefaults: {
-          currentProvider: runtime.selection?.current ?? null,
-          fallbackProvider: runtime.selection?.fallback ?? null,
-          permissionMode: runtime.config?.defaults.permissionMode ?? "plan",
-          workspace,
-          approvalsDir: paths.approvalsDir,
-          ...(runtime.config?.memory.l1AutoCompactThreshold !== undefined
-            ? { autoCompactThreshold: runtime.config.memory.l1AutoCompactThreshold }
-            : {}),
-          mcpManager,
-          settings,
-        },
-      });
-      // 把 cron 完成结果广播到 web SSE（CLI 现有的 wechat notify 不动）
-      const prevAdapters = (queryEngine as unknown as {
-        cronWechatNotify?: unknown;
-      }).cronWechatNotify;
-      queryEngineWithMgr.setCronNotifyAdapters?.({
-        // 保留已注入的 wechat adapter（cli.tsx 上方已设过）
-        ...(prevAdapters ? { wechat: prevAdapters as never } : {}),
-        web: (task, run) => {
-          handle.store.broadcastEvent({
-            type: "cron-result",
-            task,
-            run,
-          });
-        },
-      });
-      webAutoHandle = handle;
-      console.log(
-        `CodeClaw Web · http://${handle.host}:${handle.port}/   (use --no-web to skip)`
-      );
-    } catch (err) {
-      const code = (err as { code?: string })?.code;
-      if (code === "EADDRINUSE") {
-        console.warn(
-          "[web] port already in use; skipping auto Web (CLI continues normally)"
-        );
-      } else {
-        console.warn(
-          `[web] failed to auto-start: ${err instanceof Error ? err.message : String(err)}`
-        );
-      }
-    }
-  }
-
-  // CLI 退出时优雅关闭 web
-  if (webAutoHandle) {
-    const closeWeb = async (): Promise<void> => {
-      try {
-        await webAutoHandle?.close();
-      } catch {
-        /* ignore */
-      }
-    };
-    process.once("exit", () => {
-      void closeWeb();
-    });
-    process.once("SIGINT", () => {
-      void closeWeb();
-    });
-    process.once("SIGTERM", () => {
-      void closeWeb();
-    });
-  }
+  // v0.7.2：CLI 不再默认拉起 Web Server。
+  // 用户需要 Web UI 时显式跑 `codeclaw web`（独立进程，便于诊断 / 单独退出）。
+  // 移除原因：默认两个 listener / SSE / cron host / wechat worker 的并发面是
+  // idle 雪崩（终端死机）的潜在 trigger；并发面收敛后再观察。
+  // `--no-web` flag 仍然解析（line 103）但变成 no-op，不影响老脚本。
+  void noWeb;
 
   if (usePlainRepl || command === "plain") {
     await runPlainRepl({

@@ -22,6 +22,8 @@ export default defineCommand({
     "Usage:\n" +
     "  /wechat status            show current iLink token state\n" +
     "  /wechat login             start QR login flow\n" +
+    "  /wechat refresh           regenerate QR code\n" +
+    "  /wechat worker            start the long-poll message worker (v0.7.2 不再自动启动)\n" +
     "  /wechat send <to> <text>  send a message via iLink",
   async handler(ctx) {
     if (!isHolder(ctx.queryEngine)) {

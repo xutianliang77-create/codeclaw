@@ -138,6 +138,8 @@ export interface QueryEngineOptions {
       refreshStatus(): Promise<WechatLoginStateView>;
       getState(): WechatLoginStateView;
     };
+    /** v0.7.2：显式启动消息 worker（同进程 long-poll）。/wechat worker slash 用。 */
+    startWorker?: () => Promise<void>;
   };
 }
 
