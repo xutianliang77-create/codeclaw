@@ -43,6 +43,20 @@ What is still intentionally limited:
 - Bun `1.x` for builds
 - **optional**: Python `3.x` + `venv` **only if** you want the real `multilspy`-backed LSP lane. Without it, CodeClaw silently falls back to a regex-based index for `/symbol`, `/definition`, `/references` — all commands still work, cross-file semantic precision is reduced.
 
+### Recommended terminal · 推荐终端
+
+CodeClaw 的 ink TUI 在高频按键时事件量大。在 **macOS 26 beta** 上，Apple 自带的 **Terminal.app** 存在 `NSEventThread` libmalloc 内存破坏 bug（与 codeclaw 无关，会随机崩窗）——强烈建议换一个 GPU 加速的现代终端：
+
+```bash
+# Ghostty（极快，Apple GPU 加速，Mihail Konev 出品）
+brew install --cask ghostty
+
+# 或 iTerm2 / Warp / Alacritty 任选其一
+brew install --cask iterm2
+```
+
+如果只能用 Terminal.app，跑 `node dist/cli.js --plain` 走纯文本 REPL 也能规避大部分崩溃。
+
 ## Quick Start
 
 Install dependencies:

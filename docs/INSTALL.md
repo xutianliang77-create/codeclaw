@@ -331,6 +331,7 @@ codeclaw skill remove <name>
 | `/rag search` 想用 hybrid 但仍是 BM25 | 跑 `/rag embed` 补缺向量；确认 `CODECLAW_RAG_EMBED_MODEL` 模型在 provider 可用 |
 | `/graph query` 返 "graph is empty" | 先跑 `/graph build`（仅 TS/JS 文件被索引）|
 | 中文输入法字符撕裂 | 用 `codeclaw --plain`，ink TUI 对 IME 支持弱 |
+| macOS Terminal.app 崩窗 | macOS 26 beta `NSEventThread` libmalloc bug（非 codeclaw 问题）。换 Ghostty / iTerm2：`brew install --cask ghostty`，或退路用 `--plain` |
 | MCP server 反复重启 | `/mcp` 看 `restarts=` 与 `lastError`；超过 5 次后 status=failed 不再重启；改 mcp.json 后重启 codeclaw |
 | Hook 不执行 | `/hooks` 看是否被识别；`SIGHUP` 触发热重载；matcher regex 是否匹配 tool name |
 | LM Studio 模型 reasoning 干扰答案 | 见 docs/LSP_SETUP.md（已修复，但确认 `CODECLAW_AGENT_GRADE=true` 默认）|
