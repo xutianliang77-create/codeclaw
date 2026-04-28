@@ -476,29 +476,22 @@ function renderTerminalQr(content: string | null): string | null {
     return null;
   }
 
+  // 每像素 = 2 字符宽 × 1 字符高（█ + 空格）。
+  // 旧版用 ▀▄ 半高字符压双行，很多终端字体长宽比对不齐导致相机扫不出。
+  // 现在每模块用整字符方块，长宽比 ≈ 1:2 接近终端字符自身，扫描稳。
+  // EC=H + quietZone=4：再增鲁棒性。
   const qr = QRCode.create(content, {
-    errorCorrectionLevel: "M"
+    errorCorrectionLevel: "H"
   });
   const size = qr.modules.size;
   const data = qr.modules.data;
-  const quietZone = 2;
+  const quietZone = 4;
   const rows: string[] = [];
 
-  for (let y = -quietZone; y < size + quietZone; y += 2) {
+  for (let y = -quietZone; y < size + quietZone; y += 1) {
     let line = "";
     for (let x = -quietZone; x < size + quietZone; x += 1) {
-      const upper = isQrDark(data, size, x, y);
-      const lower = isQrDark(data, size, x, y + 1);
-
-      if (upper && lower) {
-        line += " ";
-      } else if (upper) {
-        line += "▀";
-      } else if (lower) {
-        line += "▄";
-      } else {
-        line += "█";
-      }
+      line += isQrDark(data, size, x, y) ? "██" : "  ";
     }
     rows.push(line);
   }
