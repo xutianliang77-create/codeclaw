@@ -143,9 +143,25 @@ function coerceTask(id: string, t: Record<string, unknown>): CronTask {
 
 export function saveCronStore(store: CronStoreShape, paths: CronPaths = defaultCronPaths()): void {
   ensureDir(path.dirname(paths.storeFile));
-  const tmp = `${paths.storeFile}.tmp`;
-  writeFileSync(tmp, JSON.stringify(store, null, 2), "utf8");
-  renameSync(tmp, paths.storeFile);
+  // 用 PID 后缀的 .tmp 避免多进程竞态：两个 cron host 同时启动时
+  // 旧实现都写同一个 cron.json.tmp，先到的 rename 后，后到的 rename 报 ENOENT。
+  const tmp = `${paths.storeFile}.tmp.${process.pid}`;
+  try {
+    writeFileSync(tmp, JSON.stringify(store, null, 2), "utf8");
+    renameSync(tmp, paths.storeFile);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      throw new Error(
+        `cron.json 写失败（ENOENT on rename ${tmp} → ${paths.storeFile}）。` +
+          `可能原因：(1) 另一个 codeclaw 进程同时在写 ~/.codeclaw/cron.json（v0.7.0 CLI 默认会拉起 web，` +
+          `若你又单独 \`codeclaw web\` 就有两个 cron host）；` +
+          `(2) ~/.codeclaw 目录权限或挂载点问题。` +
+          `建议：\`pkill -f codeclaw\` 后只留一个进程；或 \`ls -la ~/.codeclaw\` 检查权限。原始错误：${(err as Error).message}`
+      );
+    }
+    throw err;
+  }
 }
 
 export function appendRunLog(
