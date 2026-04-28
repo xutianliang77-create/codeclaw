@@ -11,6 +11,7 @@ import { SubagentRegistry } from "../../../../src/agent/subagents/registry";
 import type { ProviderStatus } from "../../../../src/provider/types";
 
 const MOCK_PROVIDER: ProviderStatus = {
+  instanceId: "openai:default",
   type: "openai",
   displayName: "openai",
   kind: "cloud",

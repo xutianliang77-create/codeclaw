@@ -21,6 +21,7 @@ import type { ProviderStatus } from "../../../src/provider/types";
 
 function provider(): ProviderStatus {
   return {
+    instanceId: "openai:default",
     type: "openai",
     displayName: "OpenAI",
     kind: "cloud",

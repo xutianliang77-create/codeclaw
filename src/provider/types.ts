@@ -14,7 +14,10 @@ export interface ProviderDefinition {
 }
 
 export interface ResolvedProviderConfig {
+  /** v0.7.1+ 多实例：providers.json 的 key（如 "lmstudio:default"） */
+  instanceId: string;
   type: ProviderType;
+  /** 来自 entry.displayName ?? definition.displayName + ":" + suffix */
   displayName: string;
   kind: ProviderKind;
   enabled: boolean;

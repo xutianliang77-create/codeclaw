@@ -385,6 +385,7 @@ describe("Web server · 路由 misc", () => {
       auth: { bearerToken: TOKEN },
       engineDefaults: {
         currentProvider: {
+          instanceId: "openai:default",
           type: "openai",
           displayName: "OpenAI",
           kind: "cloud",

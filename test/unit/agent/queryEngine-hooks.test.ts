@@ -124,6 +124,7 @@ describe("queryEngine PreToolUse hook (multi-turn)", () => {
   // mock provider 返一个 tool_call → invoke 前 PreToolUse 阻塞 → role:tool 反馈给 LLM
   // 简化：构造 OpenAI SSE，含 tool_calls 的 delta + 第二轮 [DONE] 收尾
   const MOCK_PROVIDER = {
+    instanceId: "openai:default",
     type: "openai" as const,
     displayName: "openai",
     kind: "cloud" as const,

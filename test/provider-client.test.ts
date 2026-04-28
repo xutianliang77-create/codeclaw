@@ -18,6 +18,7 @@ function createResponse(body: string): Response {
 }
 
 const baseProvider: ProviderStatus = {
+  instanceId: "openai:default",
   type: "openai",
   displayName: "OpenAI",
   kind: "cloud",
@@ -81,6 +82,7 @@ describe("provider client", () => {
     for await (const chunk of streamProviderResponse(
       {
         ...baseProvider,
+        instanceId: "ollama:default",
         type: "ollama",
         displayName: "Ollama",
         kind: "local",
@@ -118,6 +120,7 @@ describe("provider client", () => {
     for await (const chunk of streamProviderResponse(
       {
         ...baseProvider,
+        instanceId: "lmstudio:default",
         type: "lmstudio",
         displayName: "LM Studio",
         kind: "local",

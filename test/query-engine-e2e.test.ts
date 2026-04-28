@@ -16,6 +16,7 @@ afterEach(async () => {
 });
 
 const provider: ProviderStatus = {
+  instanceId: "openai:default",
   type: "openai",
   displayName: "OpenAI",
   kind: "cloud",

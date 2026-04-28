@@ -30,7 +30,7 @@ describe("command regression", () => {
     const state = await loadSetupCommandState();
 
     expect(state.config.defaults.permissionMode).toBe("plan");
-    expect(state.providers.openai?.enabled).toBe(true);
+    expect(state.providers["openai:default"]?.enabled).toBe(true);
     expect(state.paths.configFile).toContain(".codeclaw/config.yaml");
   });
 
@@ -38,10 +38,10 @@ describe("command regression", () => {
     const paths = resolveConfigPaths();
     const config = createDefaultConfig("/tmp/custom-workspace");
     config.defaults.permissionMode = "acceptEdits";
-    config.provider.default = "openai";
+    config.provider.default = "openai:default";
     const providers = createDefaultProvidersFile();
-    providers.openai = {
-      ...providers.openai,
+    providers["openai:default"] = {
+      ...providers["openai:default"],
       model: "gpt-4.1"
     };
     await writeConfig(config, paths);
@@ -50,8 +50,8 @@ describe("command regression", () => {
     const state = await loadConfigCommandState();
 
     expect(state.config.defaults.permissionMode).toBe("acceptEdits");
-    expect(state.config.provider.default).toBe("openai");
-    expect(state.providers.openai?.model).toBe("gpt-4.1");
+    expect(state.config.provider.default).toBe("openai:default");
+    expect(state.providers["openai:default"]?.model).toBe("gpt-4.1");
   });
 
   it("reports provider diagnostics through doctor", async () => {
@@ -64,6 +64,7 @@ describe("command regression", () => {
     expect(output).toContain("CodeClaw 0.7.0");
     expect(output).toContain("default-provider:");
     expect(output).toContain("providers:");
-    expect(output).toContain("openai (OpenAI)");
+    expect(output).toContain("openai:default");
+    expect(output).toContain("type=openai");
   });
 });

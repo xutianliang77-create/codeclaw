@@ -32,6 +32,7 @@ import {
   handleDeleteSession,
   handleListSessions,
   handleMessage,
+  handleDeleteProvider,
   handlePatchProvider,
   handleProviders,
   handleStream,
@@ -194,10 +195,14 @@ async function dispatch(
   if (url.pathname === "/v1/web/providers" && method === "GET") {
     return handleProviders(req, res, deps);
   }
-  // PATCH /v1/web/providers/<type>  #94
-  const providerMatch = /^\/v1\/web\/providers\/([a-z0-9-]+)$/i.exec(url.pathname);
+  // PATCH/DELETE /v1/web/providers/<instanceId>  #94 + v0.7.1 多实例
+  // instanceId 允许 a-zA-Z0-9 _ : . -（与 ProviderConfigApp 校验一致）
+  const providerMatch = /^\/v1\/web\/providers\/([a-zA-Z0-9_:.-]+)$/.exec(url.pathname);
   if (providerMatch && method === "PATCH") {
-    return handlePatchProvider(req, res, deps, providerMatch[1].toLowerCase());
+    return handlePatchProvider(req, res, deps, decodeURIComponent(providerMatch[1]));
+  }
+  if (providerMatch && method === "DELETE") {
+    return handleDeleteProvider(req, res, deps, decodeURIComponent(providerMatch[1]));
   }
   // GET /v1/web/cost?sessionId=<id>  #70-A
   if (url.pathname === "/v1/web/cost" && method === "GET") {

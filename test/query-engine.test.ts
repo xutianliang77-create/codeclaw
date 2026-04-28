@@ -27,6 +27,7 @@ async function collect(stream: AsyncGenerator<EngineEvent>): Promise<EngineEvent
 
 describe("query engine", () => {
   const provider: ProviderStatus = {
+    instanceId: "openai:default",
     type: "openai",
     displayName: "OpenAI",
     kind: "cloud",
@@ -45,6 +46,7 @@ describe("query engine", () => {
   };
   const fallbackProvider: ProviderStatus = {
     ...provider,
+    instanceId: "ollama:default",
     type: "ollama",
     displayName: "Ollama",
     kind: "local",
@@ -600,6 +602,7 @@ describe("query engine", () => {
     const engine = createQueryEngine({
       currentProvider: {
         ...provider,
+        instanceId: "lmstudio:default",
         type: "lmstudio",
         displayName: "LM Studio",
         kind: "local",

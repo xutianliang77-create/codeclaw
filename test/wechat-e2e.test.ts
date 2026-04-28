@@ -10,6 +10,7 @@ import type { ProviderStatus } from "../src/provider/types";
 const tempDirs: string[] = [];
 
 const provider: ProviderStatus = {
+  instanceId: "lmstudio:default",
   type: "lmstudio",
   displayName: "LM Studio",
   kind: "local",

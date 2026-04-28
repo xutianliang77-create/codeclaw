@@ -10,6 +10,7 @@ import { runSubagent } from "../../../../src/agent/subagents/runner";
 import type { ProviderStatus } from "../../../../src/provider/types";
 
 const MOCK_PROVIDER: ProviderStatus = {
+  instanceId: "openai:default",
   type: "openai",
   displayName: "openai",
   kind: "cloud",

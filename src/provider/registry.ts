@@ -1,4 +1,9 @@
-import type { CodeClawConfig, ConfigPaths, ProvidersFileConfig, ProviderType } from "../lib/config";
+import type {
+  CodeClawConfig,
+  ConfigPaths,
+  ProviderInstanceEntry,
+  ProvidersFileConfig
+} from "../lib/config";
 import { createDefaultProvidersFile, readConfig, readProvidersFile, resolveConfigPaths } from "../lib/config";
 import { BUILTIN_PROVIDER_DEFINITIONS } from "./builtins";
 import type { ProviderDefinition, ProviderSelection, ProviderStatus, ResolvedProviderConfig } from "./types";
@@ -16,31 +21,47 @@ function readEnvValue(envVars: string[]): { value?: string; envVar?: string } {
   return {};
 }
 
+function instanceDisplayName(
+  instanceId: string,
+  entry: ProviderInstanceEntry,
+  definition: ProviderDefinition
+): string {
+  if (entry.displayName && entry.displayName.trim()) return entry.displayName.trim();
+  // instanceId 形如 "lmstudio:default" → "LM Studio · default"
+  const idx = instanceId.indexOf(":");
+  if (idx > 0) {
+    const suffix = instanceId.slice(idx + 1);
+    return `${definition.displayName} · ${suffix}`;
+  }
+  return definition.displayName;
+}
+
 function mergeProviderConfig(
+  instanceId: string,
   definition: ProviderDefinition,
-  fileConfig: ProvidersFileConfig
+  entry: ProviderInstanceEntry
 ): ResolvedProviderConfig {
-  const configEntry = fileConfig[definition.type] ?? {};
   const envVars = Array.from(
-    new Set(configEntry.apiKeyEnvVar ? [configEntry.apiKeyEnvVar, ...definition.envVars] : definition.envVars)
+    new Set(entry.apiKeyEnvVar ? [entry.apiKeyEnvVar, ...definition.envVars] : definition.envVars)
   );
   const apiKeyFromEnv = readEnvValue(envVars);
 
   return {
+    instanceId,
     type: definition.type,
-    displayName: definition.displayName,
+    displayName: instanceDisplayName(instanceId, entry, definition),
     kind: definition.kind,
-    enabled: configEntry.enabled ?? true,
+    enabled: entry.enabled ?? true,
     requiresApiKey: definition.requiresApiKey,
-    baseUrl: configEntry.baseUrl ?? definition.defaultBaseUrl,
-    model: configEntry.model ?? definition.defaultModel,
-    timeoutMs: configEntry.timeoutMs ?? definition.defaultTimeoutMs,
+    baseUrl: entry.baseUrl ?? definition.defaultBaseUrl,
+    model: entry.model ?? definition.defaultModel,
+    timeoutMs: entry.timeoutMs ?? definition.defaultTimeoutMs,
     apiKey: apiKeyFromEnv.value,
     apiKeyEnvVar: apiKeyFromEnv.envVar,
     envVars,
-    fileConfig: configEntry,
-    maxTokens: configEntry.maxTokens,
-    contextWindow: configEntry.contextWindow,
+    fileConfig: entry,
+    maxTokens: entry.maxTokens,
+    contextWindow: entry.contextWindow,
   };
 }
 
@@ -99,6 +120,16 @@ async function buildProviderStatus(
     };
   }
 
+  // CODECLAW_SKIP_PROVIDER_PROBE=1 跳过 probe（fetch 假失败时退路）
+  if (process.env.CODECLAW_SKIP_PROVIDER_PROBE === "1") {
+    return {
+      ...config,
+      configured: true,
+      available: true,
+      reason: "probe skipped via CODECLAW_SKIP_PROVIDER_PROBE=1"
+    };
+  }
+
   const reachable = await probeLocalProvider(config, fetchImpl);
 
   return {
@@ -110,7 +141,7 @@ async function buildProviderStatus(
 }
 
 export class ProviderRegistry {
-  constructor(private readonly statuses: Map<ProviderType, ProviderStatus>) {}
+  constructor(private readonly statuses: Map<string /* instanceId */, ProviderStatus>) {}
 
   static async create(options?: {
     paths?: ConfigPaths;
@@ -119,51 +150,49 @@ export class ProviderRegistry {
   }): Promise<ProviderRegistry> {
     const fetchImpl = options?.fetchImpl ?? fetch;
     const providersFile = options?.providersFile ?? (await readProvidersFile(options?.paths)) ?? createDefaultProvidersFile();
+    const definitionsByType = new Map(BUILTIN_PROVIDER_DEFINITIONS.map((d) => [d.type, d]));
     const entries = await Promise.all(
-      BUILTIN_PROVIDER_DEFINITIONS.map(async (definition) => {
-        const resolvedConfig = mergeProviderConfig(definition, providersFile);
+      Object.entries(providersFile).map(async ([instanceId, entry]) => {
+        const definition = definitionsByType.get(entry.type);
+        if (!definition) return null;
+        const resolvedConfig = mergeProviderConfig(instanceId, definition, entry);
         const status = await buildProviderStatus(resolvedConfig, fetchImpl);
-        return [definition.type, status] as const;
+        return [instanceId, status] as const;
       })
     );
 
-    return new ProviderRegistry(new Map(entries));
+    const valid = entries.filter((e): e is readonly [string, ProviderStatus] => e !== null);
+    return new ProviderRegistry(new Map(valid));
   }
 
   list(): ProviderStatus[] {
-    return BUILTIN_PROVIDER_DEFINITIONS.map((definition) => {
-      const status = this.statuses.get(definition.type);
-      if (!status) {
-        throw new Error(`Provider status missing for ${definition.type}`);
-      }
-
-      return status;
-    });
+    return Array.from(this.statuses.values());
   }
 
-  get(type: ProviderType): ProviderStatus {
-    const status = this.statuses.get(type);
-    if (!status) {
-      throw new Error(`Unknown provider: ${type}`);
-    }
+  /** 按 instanceId 取；不存在返回 undefined（旧版按 ProviderType 抛错的行为已弃） */
+  get(instanceId: string): ProviderStatus | undefined {
+    return this.statuses.get(instanceId);
+  }
 
-    return status;
+  /** 取首个该 type 的实例（兼容旧调用，比如 doctor 里仍想"看 anthropic 状态"） */
+  firstByType(type: string): ProviderStatus | undefined {
+    return this.list().find((s) => s.type === type);
   }
 
   select(config: CodeClawConfig): ProviderSelection {
     const current = this.get(config.provider.default);
     const fallback = this.get(config.provider.fallback);
 
-    if (current.available) {
-      return { current, fallback };
+    if (current?.available) {
+      return { current, fallback: fallback ?? null };
     }
 
-    if (fallback.available) {
-      return { current: fallback, fallback: current };
+    if (fallback?.available) {
+      return { current: fallback, fallback: current ?? null };
     }
 
-    const firstAvailable = this.list().find((provider) => provider.available) ?? null;
-    return { current: firstAvailable, fallback: current };
+    const firstAvailable = this.list().find((p) => p.available) ?? null;
+    return { current: firstAvailable, fallback: current ?? null };
   }
 }
 
@@ -183,10 +212,12 @@ export async function loadRuntimeSelection(options?: {
   });
 
   if (!config) {
+    // 没 config.yaml 时仍允许跑：取 registry 里第一个 available 实例兜底
+    const firstAvailable = registry.list().find((p) => p.available) ?? null;
     return {
       config: null,
       registry,
-      selection: null
+      selection: firstAvailable ? { current: firstAvailable, fallback: null } : null
     };
   }
 

@@ -40,7 +40,7 @@ export async function runDoctor(): Promise<string> {
 
   for (const [idx, provider] of providers.entries()) {
     lines.push(
-      `- ${provider.type} (${provider.displayName})`,
+      `- ${provider.instanceId} (${provider.displayName}, type=${provider.type})`,
       `  configured: ${provider.configured}`,
       `  available: ${provider.available}`,
       `  model: ${provider.model}`,

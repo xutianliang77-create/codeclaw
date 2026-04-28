@@ -13,6 +13,13 @@ export type PermissionMode =
 
 export type ProviderType = "anthropic" | "openai" | "ollama" | "lmstudio";
 
+export const PROVIDER_TYPES: readonly ProviderType[] = [
+  "anthropic",
+  "openai",
+  "ollama",
+  "lmstudio"
+] as const;
+
 export interface CodeClawConfig {
   speech?: {
     asr?: {
@@ -39,8 +46,9 @@ export interface CodeClawConfig {
     };
   };
   provider: {
-    default: ProviderType;
-    fallback: ProviderType;
+    /** instance id（v0.7.1+），形如 "lmstudio:default"。旧 ProviderType 字符串读取时自动迁移 */
+    default: string;
+    fallback: string;
   };
   defaults: {
     language: "zh" | "en";
@@ -67,7 +75,15 @@ export interface ProviderFileEntry {
   contextWindow?: number;
 }
 
-export type ProvidersFileConfig = Partial<Record<ProviderType, ProviderFileEntry>>;
+/** v0.7.1+ 多实例 entry：在 ProviderFileEntry 基础上必带 type，可选 displayName */
+export interface ProviderInstanceEntry extends ProviderFileEntry {
+  type: ProviderType;
+  /** 用户自定义可读名，UI 用；未设走 instanceId */
+  displayName?: string;
+}
+
+/** 文件 schema：key=instanceId（如 "lmstudio:default" / "openai:gpt5"），value 必带 type */
+export type ProvidersFileConfig = Record<string, ProviderInstanceEntry>;
 
 export interface ConfigPaths {
   configDir: string;
@@ -115,8 +131,8 @@ export function createDefaultConfig(cwd = process.cwd()): CodeClawConfig {
       }
     },
     provider: {
-      default: "anthropic",
-      fallback: "openai"
+      default: "anthropic:default",
+      fallback: "openai:default"
     },
     defaults: {
       language: "zh",
@@ -132,32 +148,89 @@ export function createDefaultConfig(cwd = process.cwd()): CodeClawConfig {
 
 export function createDefaultProvidersFile(): ProvidersFileConfig {
   return {
-    anthropic: {
+    "anthropic:default": {
+      type: "anthropic",
       enabled: true,
       baseUrl: "https://api.anthropic.com",
       model: "claude-sonnet-4-6",
       timeoutMs: 30_000,
       apiKeyEnvVar: "CODECLAW_ANTHROPIC_API_KEY"
     },
-    openai: {
+    "openai:default": {
+      type: "openai",
       enabled: true,
       baseUrl: "https://api.openai.com/v1",
       model: "gpt-4.1-mini",
       timeoutMs: 30_000,
       apiKeyEnvVar: "CODECLAW_OPENAI_API_KEY"
     },
-    ollama: {
+    "ollama:default": {
+      type: "ollama",
       enabled: true,
       baseUrl: "http://127.0.0.1:11434",
       model: "llama3.1",
       timeoutMs: 60_000
     },
-    lmstudio: {
+    "lmstudio:default": {
+      type: "lmstudio",
       enabled: true,
       baseUrl: "http://127.0.0.1:1234/v1",
       model: "local-model",
       timeoutMs: 60_000
     }
+  };
+}
+
+/**
+ * 读到磁盘上的旧/新格式都归一化成新 schema：
+ *   - 旧：`{ lmstudio: { baseUrl, ... } }`（key 是 ProviderType，value 没 type）
+ *   - 新：`{ "lmstudio:default": { type: "lmstudio", baseUrl, ... } }`
+ * 旧 entry 自动重命名为 `<type>:default` 单实例。
+ */
+export function migrateProvidersFile(raw: unknown): ProvidersFileConfig {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: ProvidersFileConfig = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const v = value as Record<string, unknown>;
+    if (typeof v.type === "string" && (PROVIDER_TYPES as readonly string[]).includes(v.type)) {
+      out[key] = v as unknown as ProviderInstanceEntry;
+      continue;
+    }
+    if ((PROVIDER_TYPES as readonly string[]).includes(key)) {
+      out[`${key}:default`] = {
+        type: key as ProviderType,
+        ...(v as Omit<ProviderInstanceEntry, "type">)
+      };
+    }
+  }
+  return out;
+}
+
+/**
+ * config.yaml 的 provider.default/fallback 在旧文件里是裸 ProviderType
+ * （如 "lmstudio"），新 schema 要 instance id（"lmstudio:default"）。
+ * 若值是裸 type 且对应 `<type>:default` 实例存在，自动改写。
+ */
+export function migrateConfigSelection(
+  config: CodeClawConfig,
+  providers: ProvidersFileConfig
+): CodeClawConfig {
+  const map = (id: string): string => {
+    if (providers[id]) return id;
+    if ((PROVIDER_TYPES as readonly string[]).includes(id) && providers[`${id}:default`]) {
+      return `${id}:default`;
+    }
+    return id;
+  };
+  const nextDefault = map(config.provider.default);
+  const nextFallback = map(config.provider.fallback);
+  if (nextDefault === config.provider.default && nextFallback === config.provider.fallback) {
+    return config;
+  }
+  return {
+    ...config,
+    provider: { default: nextDefault, fallback: nextFallback }
   };
 }
 
@@ -207,7 +280,7 @@ export async function readProvidersFile(
 ): Promise<ProvidersFileConfig | null> {
   try {
     const raw = await readFile(paths.providersFile, "utf8");
-    return JSON.parse(raw) as ProvidersFileConfig;
+    return migrateProvidersFile(JSON.parse(raw));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return null;
@@ -223,8 +296,8 @@ export async function loadEditableConfig(
   config: CodeClawConfig;
   providers: ProvidersFileConfig;
 }> {
-  return {
-    config: (await readConfig(paths)) ?? createDefaultConfig(),
-    providers: (await readProvidersFile(paths)) ?? createDefaultProvidersFile()
-  };
+  const providers = (await readProvidersFile(paths)) ?? createDefaultProvidersFile();
+  const rawConfig = (await readConfig(paths)) ?? createDefaultConfig();
+  const config = migrateConfigSelection(rawConfig, providers);
+  return { config, providers };
 }

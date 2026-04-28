@@ -26,6 +26,7 @@ import type { ProviderStatus } from "../../../src/provider/types";
 
 const provider = (model: string, override?: number): ProviderStatus =>
   ({
+    instanceId: "openai:default",
     type: "openai",
     displayName: "x",
     kind: "cloud",

@@ -142,6 +142,7 @@ describe("buildSystemPrompt", () => {
 
   it("provider 信息注入到 Runtime Context", () => {
     const provider: Partial<ProviderStatus> = {
+      instanceId: "lmstudio:default",
       type: "lmstudio",
       model: "qwen/qwen3.6-35b-a3b",
     };

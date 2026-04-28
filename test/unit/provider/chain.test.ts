@@ -22,6 +22,7 @@ import type { ProviderStatus } from "../../../src/provider/types";
 
 function fakeProvider(type: string): ProviderStatus {
   return {
+    instanceId: `${type}:default`,
     type: type as ProviderStatus["type"],
     displayName: type,
     kind: "cloud",

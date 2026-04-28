@@ -259,6 +259,7 @@ export async function handleMessage(
 }
 
 // GET /v1/web/providers   #70-B 设置中心只读快照
+//   v0.7.1+：除了 current/fallback，附带所有 instance 列表
 export async function handleProviders(
   req: IncomingMessage,
   res: ServerResponse,
@@ -269,6 +270,7 @@ export async function handleProviders(
   const sanitize = (p: ProviderStatus | null): Record<string, unknown> | null =>
     p
       ? {
+          instanceId: p.instanceId,
           type: p.type,
           displayName: p.displayName,
           kind: p.kind,
@@ -276,30 +278,53 @@ export async function handleProviders(
           baseUrl: p.baseUrl,
           available: p.available,
           reason: p.reason,
-          // 故意不返 apiKey / envVars / fileConfig（避免泄露）
         }
       : null;
+
+  let instances: Array<Record<string, unknown>> = [];
+  try {
+    const { readProvidersFile, resolveConfigPaths } = await import("../../lib/config");
+    const paths = resolveConfigPaths();
+    const file = (await readProvidersFile(paths)) ?? {};
+    // 安全：列出 instance 字段时省略 apiKeyEnvVar / apiKey 类敏感字段
+    instances = Object.entries(file).map(([id, e]) => ({
+      instanceId: id,
+      type: e.type,
+      enabled: e.enabled ?? true,
+      baseUrl: e.baseUrl,
+      model: e.model,
+      timeoutMs: e.timeoutMs,
+      maxTokens: e.maxTokens,
+      contextWindow: e.contextWindow,
+      displayName: e.displayName,
+    }));
+  } catch {
+    instances = [];
+  }
+
   jsonResponse(res, 200, {
     current: sanitize(deps.providers?.current ?? null),
     fallback: sanitize(deps.providers?.fallback ?? null),
+    instances,
   });
 }
 
-// PATCH /v1/web/providers/<type>   #94 写操作
-//   body: { enabled?, baseUrl?, model?, timeoutMs?, apiKeyEnvVar? }
-//   apiKey 不通过 web 设（避免明文落盘 / 表单泄漏）；用户必须自设 env
+// PATCH /v1/web/providers/<instanceId>   #94 + v0.7.1 多实例
+//   body: { enabled?, baseUrl?, model?, timeoutMs?, apiKeyEnvVar?, maxTokens?, contextWindow?, displayName? }
+//   首次创建可带 type；apiKey 不通过 web 设
 export async function handlePatchProvider(
   req: IncomingMessage,
   res: ServerResponse,
   deps: HandlerDeps,
-  providerType: string
+  instanceId: string
 ): Promise<void> {
   const auth = authenticate(req, res, deps);
   if (!auth) return;
 
   const ALLOWED_TYPES = ["openai", "anthropic", "ollama", "lmstudio"];
-  if (!ALLOWED_TYPES.includes(providerType)) {
-    jsonResponse(res, 400, { error: `unknown provider type: ${providerType}` });
+
+  if (!/^[a-z0-9_:.-]+$/i.test(instanceId)) {
+    jsonResponse(res, 400, { error: `invalid instanceId: ${instanceId}` });
     return;
   }
 
@@ -320,6 +345,13 @@ export async function handlePatchProvider(
 
   // 类型校验 + 白名单字段
   const filtered: Record<string, unknown> = {};
+  if ("type" in body) {
+    if (typeof body.type !== "string" || !ALLOWED_TYPES.includes(body.type)) {
+      jsonResponse(res, 400, { error: `type must be one of ${ALLOWED_TYPES.join("|")}` });
+      return;
+    }
+    filtered.type = body.type;
+  }
   if ("enabled" in body) {
     if (typeof body.enabled !== "boolean") {
       jsonResponse(res, 400, { error: "enabled must be boolean" });
@@ -348,6 +380,20 @@ export async function handlePatchProvider(
     }
     filtered.timeoutMs = body.timeoutMs;
   }
+  if ("maxTokens" in body) {
+    if (typeof body.maxTokens !== "number" || body.maxTokens <= 0) {
+      jsonResponse(res, 400, { error: "maxTokens must be positive number" });
+      return;
+    }
+    filtered.maxTokens = body.maxTokens;
+  }
+  if ("contextWindow" in body) {
+    if (typeof body.contextWindow !== "number" || body.contextWindow <= 0) {
+      jsonResponse(res, 400, { error: "contextWindow must be positive number" });
+      return;
+    }
+    filtered.contextWindow = body.contextWindow;
+  }
   if ("apiKeyEnvVar" in body) {
     if (typeof body.apiKeyEnvVar !== "string" || !/^[A-Z][A-Z0-9_]*$/.test(body.apiKeyEnvVar)) {
       jsonResponse(res, 400, {
@@ -357,23 +403,35 @@ export async function handlePatchProvider(
     }
     filtered.apiKeyEnvVar = body.apiKeyEnvVar;
   }
+  if ("displayName" in body) {
+    if (typeof body.displayName !== "string") {
+      jsonResponse(res, 400, { error: "displayName must be string" });
+      return;
+    }
+    filtered.displayName = body.displayName;
+  }
 
   if (Object.keys(filtered).length === 0) {
     jsonResponse(res, 400, { error: "no valid fields to update" });
     return;
   }
 
-  // 复用 src/lib/config 的 read/write
   const { readProvidersFile, writeProvidersFile, resolveConfigPaths } = await import("../../lib/config");
   const paths = resolveConfigPaths();
-  const existing = (await readProvidersFile(paths)) ?? {};
-   
-  (existing as any)[providerType] = {
-    ...((existing as Record<string, unknown>)[providerType] ?? {}),
+  const existingRaw = (await readProvidersFile(paths)) ?? {};
+  const existing = existingRaw as unknown as Record<string, Record<string, unknown>>;
+
+  const isNew = !existing[instanceId];
+  if (isNew && !filtered.type) {
+    jsonResponse(res, 400, { error: "type is required when creating a new instance" });
+    return;
+  }
+  existing[instanceId] = {
+    ...(existing[instanceId] ?? {}),
     ...filtered,
   };
   try {
-    await writeProvidersFile(existing, paths);
+    await writeProvidersFile(existingRaw, paths);
   } catch (err) {
     jsonResponse(res, 500, { error: "write failed", detail: String(err) });
     return;
@@ -382,6 +440,43 @@ export async function handlePatchProvider(
   jsonResponse(res, 200, {
     ok: true,
     message: "Saved. Restart codeclaw web for changes to take effect.",
+    path: paths.providersFile,
+    created: isNew,
+  });
+}
+
+// DELETE /v1/web/providers/<instanceId>   v0.7.1 多实例
+export async function handleDeleteProvider(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  instanceId: string
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+
+  if (!/^[a-z0-9_:.-]+$/i.test(instanceId)) {
+    jsonResponse(res, 400, { error: `invalid instanceId: ${instanceId}` });
+    return;
+  }
+
+  const { readProvidersFile, writeProvidersFile, resolveConfigPaths } = await import("../../lib/config");
+  const paths = resolveConfigPaths();
+  const existing = (await readProvidersFile(paths)) ?? {};
+  if (!existing[instanceId]) {
+    jsonResponse(res, 404, { error: `instance not found: ${instanceId}` });
+    return;
+  }
+  delete existing[instanceId];
+  try {
+    await writeProvidersFile(existing, paths);
+  } catch (err) {
+    jsonResponse(res, 500, { error: "write failed", detail: String(err) });
+    return;
+  }
+  jsonResponse(res, 200, {
+    ok: true,
+    message: "Deleted. Restart codeclaw web for changes to take effect.",
     path: paths.providersFile,
   });
 }

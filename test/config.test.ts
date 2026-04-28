@@ -5,8 +5,8 @@ describe("config helpers", () => {
   it("creates a stable default config", () => {
     const config = createDefaultConfig("/tmp/codeclaw");
 
-    expect(config.provider.default).toBe("anthropic");
-    expect(config.provider.fallback).toBe("openai");
+    expect(config.provider.default).toBe("anthropic:default");
+    expect(config.provider.fallback).toBe("openai:default");
     expect(config.defaults.workspace).toBe("/tmp/codeclaw");
     expect(config.defaults.permissionMode).toBe("plan");
   });
