@@ -117,7 +117,25 @@ describe("buildSystemPrompt", () => {
       permissionMode: "default",
       gitSummaryProvider: () => ({ branch: "main", dirty: true }),
     });
-    expect(prompt).toContain("Git: branch=main, dirty=true");
+    expect(prompt).toContain("Git branch: main");
+    expect(prompt).toContain("Git dirty:");
+  });
+
+  // v0.8.2 #1：dirtyCount + recentCommit
+  it("git summary 注入 dirtyCount + 最近 commit", () => {
+    const prompt = buildSystemPrompt({
+      workspace: path.join(tmpRoot, "ws"),
+      permissionMode: "default",
+      gitSummaryProvider: () => ({
+        branch: "release/v0.8.2",
+        dirty: true,
+        dirtyCount: 5,
+        recentCommit: "abcd123 feat(ctx): v0.8.0",
+      }),
+    });
+    expect(prompt).toContain("Git branch: release/v0.8.2");
+    expect(prompt).toContain("Git dirty: 5 uncommitted changes");
+    expect(prompt).toContain("Latest commit: abcd123 feat(ctx): v0.8.0");
   });
 
   it("git provider 返 null 不抛错且不出现 Git 行", () => {
@@ -126,7 +144,17 @@ describe("buildSystemPrompt", () => {
       permissionMode: "default",
       gitSummaryProvider: () => null,
     });
-    expect(prompt).not.toContain("Git:");
+    expect(prompt).not.toContain("Git branch");
+  });
+
+  it("clean 工作区不显示 dirty 行", () => {
+    const prompt = buildSystemPrompt({
+      workspace: path.join(tmpRoot, "ws"),
+      permissionMode: "default",
+      gitSummaryProvider: () => ({ branch: "main", dirty: false }),
+    });
+    expect(prompt).toContain("Git branch: main");
+    expect(prompt).not.toContain("Git dirty");
   });
 
   it("agentRole 覆盖默认 codeclaw 角色（subagent）", () => {

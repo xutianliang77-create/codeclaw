@@ -25,6 +25,8 @@ export interface ProviderUsage {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  /** v0.8.2 #4：当 provider 没回 usage（如某些 LM Studio 版本），用本地 cl100k_base 估算填充，置 true 让 cost 记账区分真实 vs 估算。 */
+  estimated?: boolean;
 }
 
 export class ProviderRequestError extends Error {
@@ -475,6 +477,9 @@ async function* streamOpenAiCompatible(
   // index 稳定、id/name 第一帧给齐、arguments 是字符串分片，需累加；
   // finish_reason="tool_calls" 时 yield 全部累积事件
   const toolBuffers = new Map<number, { id: string; name: string; args: string }>();
+  // v0.8.2 #4：跟踪 provider 是否真返了 usage；流结束后没返用本地 tokenizer 估算 fallback。
+  let usageReported = false;
+  let outputCharsForEstimate = "";
 
   yield* streamSseLines(response, (payload) => {
     const parsed = JSON.parse(payload) as unknown;
@@ -488,6 +493,7 @@ async function* streamOpenAiCompatible(
           outputTokens: obj.usage.completion_tokens,
           totalTokens: obj.usage.total_tokens,
         });
+        usageReported = true;
       }
     }
     if (onToolCall) {
@@ -526,8 +532,31 @@ async function* streamOpenAiCompatible(
     const parts = extractOpenAiDeltaParts(parsed);
     if (onContent && parts.content) onContent(parts.content);
     if (onReasoning && parts.reasoning) onReasoning(parts.reasoning);
+    if (parts.content) outputCharsForEstimate += parts.content;
+    if (parts.reasoning) outputCharsForEstimate += parts.reasoning;
     return parts.content || parts.reasoning; // generator 仍 yield 合并流（向后兼容 CLI）
   });
+
+  // v0.8.2 #4：provider 没返 usage（部分 LM Studio 版本）→ 用 cl100k_base 估算 fallback。
+  // 不准但比 undefined 强；cost 记账区分 estimated:true。
+  if (!usageReported && onUsage) {
+    try {
+      const { encode } = await import("gpt-tokenizer");
+      const promptText = (await toOpenAiMessages(messages))
+        .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+        .join("\n");
+      onUsage({
+        provider: provider.type,
+        modelId: provider.model,
+        inputTokens: encode(promptText).length,
+        outputTokens: encode(outputCharsForEstimate).length,
+        totalTokens: encode(promptText).length + encode(outputCharsForEstimate).length,
+        estimated: true,
+      });
+    } catch {
+      // tokenizer 加载失败也不阻塞主流程
+    }
+  }
 
   // 流结束时如果还有未触发的 buffer（finish_reason 缺失），兜底 yield
   if (onToolCall && toolBuffers.size > 0) {

@@ -56,6 +56,10 @@ export interface SystemPromptInput {
 export interface GitSummary {
   branch: string;
   dirty: boolean;
+  /** v0.8.2 #1：dirty 文件数（>0 说明有未提交改动）；让 LLM 知道用户是否在「干净 main」上 */
+  dirtyCount?: number;
+  /** v0.8.2 #1：最近一次 commit 的 hash + subject（"311bc44 chore(version): bump"）；告诉 LLM 项目最近在做什么 */
+  recentCommit?: string;
 }
 
 const DEFAULT_ROLE = `你是 CodeClaw —— 一个本地优先的 CLI 编程助手。
@@ -120,7 +124,15 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   }
   const git = (input.gitSummaryProvider ?? tryGitSummary)(input.workspace);
   if (git) {
-    ctxLines.push(`- Git: branch=${git.branch}, dirty=${git.dirty}`);
+    ctxLines.push(`- Git branch: ${git.branch}`);
+    if (git.dirty) {
+      ctxLines.push(
+        `- Git dirty: ${git.dirtyCount ?? "yes"} uncommitted change${(git.dirtyCount ?? 2) === 1 ? "" : "s"}`
+      );
+    }
+    if (git.recentCommit) {
+      ctxLines.push(`- Latest commit: ${git.recentCommit}`);
+    }
   }
   addSection("Runtime Context", ctxLines.join("\n"));
 
@@ -165,13 +177,32 @@ export function tryGitSummary(cwd: string): GitSummary | null {
       timeout: 1000,
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-    const status = execSync("git status --porcelain", {
+    const statusRaw = execSync("git status --porcelain", {
       cwd,
       encoding: "utf8",
       timeout: 1000,
       stdio: ["ignore", "pipe", "ignore"],
     });
-    return { branch, dirty: status.trim().length > 0 };
+    const dirtyLines = statusRaw.split("\n").filter((l) => l.trim().length > 0);
+    // v0.8.2 #1：最近 commit hash + subject；失败也不破坏整段 git 信息
+    let recentCommit: string | undefined;
+    try {
+      recentCommit = execSync("git log -1 --pretty=format:%h\\ %s", {
+        cwd,
+        encoding: "utf8",
+        timeout: 1000,
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+      if (!recentCommit) recentCommit = undefined;
+    } catch {
+      recentCommit = undefined;
+    }
+    return {
+      branch,
+      dirty: dirtyLines.length > 0,
+      ...(dirtyLines.length > 0 ? { dirtyCount: dirtyLines.length } : {}),
+      ...(recentCommit ? { recentCommit } : {}),
+    };
   } catch {
     return null;
   }

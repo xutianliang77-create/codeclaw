@@ -3557,12 +3557,20 @@ class LocalQueryEngine implements QueryEngine {
   }
 
   private handleCompactCommand(prompt: string): string {
-    const rawKeepRecent = prompt.replace("/compact", "").trim();
-    const parsedKeepRecent = rawKeepRecent ? Number.parseInt(rawKeepRecent, 10) : Number.NaN;
+    // v0.8.2 #3：支持 "/compact focus on <X> [N]" 引导。
+    // focus 字符串注入到 summary 顶部，让下一轮 LLM 看到「用户关心什么」，
+    // attention 倾向保留方向；与 keepRecent 数字独立可组合。
+    const args = prompt.replace("/compact", "").trim();
+    const focusMatch = args.match(/focus on\s+(.+?)$/i);
+    const focus = focusMatch ? focusMatch[1].trim() : null;
+    const remaining = focusMatch
+      ? args.slice(0, focusMatch.index ?? 0).trim()
+      : args;
+    const parsedKeepRecent = remaining ? Number.parseInt(remaining, 10) : Number.NaN;
     const keepRecent = Number.isFinite(parsedKeepRecent) && parsedKeepRecent > 1
       ? parsedKeepRecent
       : DEFAULT_COMPACT_KEEP_RECENT_MESSAGES;
-    const compactResult = this.performCompact(keepRecent);
+    const compactResult = this.performCompact(keepRecent, focus);
 
     if (!compactResult) {
       return `Not enough context to compact yet. messages: ${this.messages.length}`;
@@ -3571,7 +3579,7 @@ class LocalQueryEngine implements QueryEngine {
     return [
       `Compacted ${compactResult.compactedMessageCount} messages into summary #${this.compactCount}.`,
       `Preserved recent messages: ${compactResult.preservedRecentCount}.`,
-      `Summary now tracks goals, key files, and open items.`
+      focus ? `Focus on: ${focus}.` : `Summary now tracks goals, key files, and open items.`,
     ].join("\n");
   }
 
@@ -3594,7 +3602,10 @@ class LocalQueryEngine implements QueryEngine {
     return compactResult;
   }
 
-  private performCompact(keepRecent: number):
+  private performCompact(
+    keepRecent: number,
+    focus?: string | null
+  ):
     | {
         compactedMessageCount: number;
         preservedRecentCount: number;
@@ -3609,7 +3620,7 @@ class LocalQueryEngine implements QueryEngine {
     }
 
     const preservedTail = this.messages.slice(compactUntilIndex);
-    const summaryBody = this.buildCompactSummary(compactCandidates);
+    const summaryBody = this.buildCompactSummary(compactCandidates, focus);
     const summaryMessage: EngineMessage = {
       id: createId("msg"),
       role: "assistant",
@@ -3635,7 +3646,7 @@ class LocalQueryEngine implements QueryEngine {
     };
   }
 
-  private buildCompactSummary(messages: EngineMessage[]): string {
+  private buildCompactSummary(messages: EngineMessage[], focus?: string | null): string {
     const nonCommandUserMessages = messages
       .filter((message) => message.role === "user")
       .map((message) => clipLine(message.text))
@@ -3658,6 +3669,8 @@ class LocalQueryEngine implements QueryEngine {
 
     return [
       "Summary generated from older transcript.",
+      // v0.8.2 #3：focus 放摘要顶部，让下轮 LLM 一开 ctx 就先看到用户关心方向
+      ...(focus ? [`User-requested focus: ${focus}`, ""] : []),
       `Compacted messages: ${messages.length}`,
       "Goals:",
       ...(goals.length > 0 ? goals.map((goal) => `- ${goal}`) : ["- No explicit goal captured"]),

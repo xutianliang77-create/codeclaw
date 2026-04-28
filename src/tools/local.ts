@@ -19,6 +19,10 @@ const execFileAsync = promisify(execFile);
 const MAX_READ_CHARS = 12_000;
 const MAX_COMMAND_OUTPUT_CHARS = 12_000;
 const MAX_GLOB_RESULTS = 200;
+// v0.8.2 #2：LSP 工具（symbol/definition/references）匹配项截断。
+// 之前完全无上限，巨型代码库高频符号会返回数千 item × ~200 字符 直接打爆 ctx；
+// 上层 wrapToolResult 兜底落 artifact，但工具层先做语义截断更准（保留前 N 条 + 提示总数）。
+const MAX_LSP_ITEMS = 50;
 const SKIPPED_WORKSPACE_DIRECTORIES = new Set([
   ".git",
   "node_modules",
@@ -372,17 +376,27 @@ async function runSymbolTool(query: string, workspace: string): Promise<string> 
     return [backendLine, `symbol: ${normalizedQuery}`, "", "[no matches]"].join("\n");
   }
 
-  return [
+  // v0.8.2 #2：截断巨型 LSP 结果集
+  const totalItems = result.items.length;
+  const truncated = totalItems > MAX_LSP_ITEMS;
+  const items = truncated ? result.items.slice(0, MAX_LSP_ITEMS) : result.items;
+  const lines = [
     backendLine,
     `real backend candidate: ${result.backendAssessment.realBackendCandidate.name} (${result.backendAssessment.realBackendCandidate.status})`,
     `symbol: ${normalizedQuery}`,
     `index: ${result.index.sourceFileCount} files / ${result.index.symbolCount} symbols`,
+    truncated ? `matches: ${items.length}/${totalItems} (truncated to first ${MAX_LSP_ITEMS})` : `matches: ${items.length}`,
     "",
-    ...result.items.map(
+    ...items.map(
       (item, index) =>
         `${index + 1}. ${item.kind} ${item.name}\n   ${item.file}:${item.line}:${item.column}\n   ${item.snippet}`
     )
-  ].join("\n");
+  ];
+  if (truncated) {
+    lines.push("");
+    lines.push(`... [TRUNCATED ${totalItems - items.length} more matches; refine query to narrow scope] ...`);
+  }
+  return lines.join("\n");
 }
 
 async function runDefinitionTool(query: string, workspace: string): Promise<string> {
@@ -422,17 +436,26 @@ async function runReferencesTool(query: string, workspace: string): Promise<stri
     return [backendLine, `references: ${normalizedQuery}`, "", "[no matches]"].join("\n");
   }
 
-  return [
+  // v0.8.2 #2：截断巨型 LSP 结果集
+  const totalItems = result.items.length;
+  const truncated = totalItems > MAX_LSP_ITEMS;
+  const items = truncated ? result.items.slice(0, MAX_LSP_ITEMS) : result.items;
+  const lines = [
     backendLine,
     `real backend candidate: ${result.backendAssessment.realBackendCandidate.name} (${result.backendAssessment.realBackendCandidate.status})`,
     `references: ${normalizedQuery}`,
     `index: ${result.index.sourceFileCount} files / ${result.index.symbolCount} symbols`,
-    `matches: ${result.items.length}`,
+    truncated ? `matches: ${items.length}/${totalItems} (truncated to first ${MAX_LSP_ITEMS})` : `matches: ${items.length}`,
     "",
-    ...result.items.map(
+    ...items.map(
       (item, index) => `${index + 1}. [${item.relation}] ${item.file}:${item.line}:${item.column}\n   ${item.snippet}`
     )
-  ].join("\n");
+  ];
+  if (truncated) {
+    lines.push("");
+    lines.push(`... [TRUNCATED ${totalItems - items.length} more matches; refine query to narrow scope] ...`);
+  }
+  return lines.join("\n");
 }
 
 async function runBashTool(command: string, workspace: string): Promise<string> {
