@@ -95,7 +95,16 @@ export class ToolRegistry {
     if (mode !== "plan") return this.list();
     const allowed =
       planModeAllowedTools ??
-      new Set(["read", "glob", "symbol", "definition", "references", "memory_write", "ExitPlanMode"]);
+      new Set([
+        "read",
+        "glob",
+        "symbol",
+        "definition",
+        "references",
+        "read_artifact",
+        "memory_write",
+        "ExitPlanMode",
+      ]);
     return this.list().filter((t) => allowed.has(t.name));
   }
 

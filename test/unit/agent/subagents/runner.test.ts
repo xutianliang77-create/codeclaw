@@ -195,6 +195,28 @@ describe("runSubagent · C2 abortSignal 父中断", () => {
   });
 });
 
+describe("runSubagent · v0.8.1 #4 isolation 回归保护", () => {
+  // 防止未来有人在 RunSubagentOutput 里加 transcript / events / messages 之类字段
+  // 把子 agent 的中间态（message-delta、tool-start args、cost 详情）泄漏给父；
+  // 那样会让父 ctx 被子探索过程污染，破坏 v0.7 之前已经做对的 isolation。
+  it("RunSubagentOutput 只暴露 final 字段（不含中间事件）", async () => {
+    const r = await runSubagent(
+      { role: "Explore", prompt: "lookup foo" },
+      {
+        currentProvider: MOCK_PROVIDER,
+        fallbackProvider: null,
+        workspace: process.cwd(),
+        fetchImpl: mockOpenAiResponse("found foo at line 42"),
+      }
+    );
+    const allowed = new Set(["ok", "finalText", "toolCallCount", "durationMs", "error"]);
+    const extra = Object.keys(r).filter((k) => !allowed.has(k));
+    expect(extra).toEqual([]);
+    // finalText 是完整 message-complete 内容，不是某个 delta 片段
+    expect(r.finalText).toBe("found foo at line 42");
+  });
+});
+
 describe("runSubagent · B2 readonly role 不能写父项目 memory", () => {
   it("Explore role 的 toolRegistry 不含 memory_write / memory_remove", async () => {
     // 用 import dynamic 拿 createQueryEngine 跑空壳验证（avoid 真 fetch）

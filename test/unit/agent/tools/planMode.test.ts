@@ -69,7 +69,7 @@ describe("ToolRegistry.listForMode", () => {
     expect(names).toContain("bash");
     expect(names).toContain("write");
     expect(names).toContain("ExitPlanMode");
-    expect(all.length).toBe(12); // 9 builtin + 2 memory + 1 plan
+    expect(all.length).toBe(13); // 10 builtin (含 read_artifact) + 2 memory + 1 plan
   });
 
   it("plan mode → 仅 read-only + memory_write + ExitPlanMode", () => {
@@ -85,6 +85,7 @@ describe("ToolRegistry.listForMode", () => {
       "glob",
       "memory_write",
       "read",
+      "read_artifact",
       "references",
       "symbol",
     ]);
@@ -108,7 +109,7 @@ describe("ToolRegistry.listForMode", () => {
     registerBuiltinTools(r);
     for (const mode of ["auto", "acceptEdits", "dontAsk", "bypassPermissions"]) {
       const tools = r.listForMode(mode);
-      expect(tools.length).toBe(9);
+      expect(tools.length).toBe(10);
     }
   });
 });

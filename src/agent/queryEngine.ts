@@ -67,6 +67,7 @@ import {
 import { ToolRegistry, createToolRegistry } from "./tools/registry";
 import type { ToolCallEvent } from "./tools/registry";
 import { registerBuiltinTools } from "./tools/builtins";
+import { wrapToolResult } from "./tools/artifact";
 import { registerMemoryTools } from "./tools/memoryTools";
 import { clearAllMemories, writeMemory, type MemoryType } from "../memory/projectMemory/store";
 import { EXIT_PLAN_SENTINEL, registerPlanModeTool } from "./tools/planMode";
@@ -1954,10 +1955,14 @@ class LocalQueryEngine implements QueryEngine {
               };
             }
           }
+          // v0.8.1 #3：超 4KB 的工具结果落 ~/.codeclaw/artifacts/，messages 只放
+          // 头 + 尾 摘要 + read_artifact hint。read/bash 自身已有 12k trimOutput，正常
+          // 不会触发；防御 subagent / MCP / 自定义工具吐巨量输出灌爆 ctx。
+          const envelope = wrapToolResult(invokeResult.content, this.sessionId, call.id);
           this.messages.push({
             id: createId("tool"),
             role: "tool",
-            text: invokeResult.content,
+            text: envelope.summary,
             source: "local",
             toolCallId: call.id,
             toolName: call.name,

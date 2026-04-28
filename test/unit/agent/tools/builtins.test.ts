@@ -34,12 +34,13 @@ const ctx = () => ({
 });
 
 describe("registerBuiltinTools", () => {
-  it("注册全 9 个 builtin", () => {
+  it("注册全 10 个 builtin（含 v0.8.1 read_artifact）", () => {
     const r = new ToolRegistry();
     registerBuiltinTools(r);
     const names = r.list().map((t) => t.name).sort();
     expect(names).toEqual([...BUILTIN_TOOL_NAMES].sort());
-    expect(names).toHaveLength(9);
+    expect(names).toHaveLength(10);
+    expect(names).toContain("read_artifact");
   });
 
   it("每个 tool 都有 inputSchema.type === object 与 required", () => {
@@ -55,8 +56,8 @@ describe("registerBuiltinTools", () => {
   it("openAiSchemas / anthropicSchemas 数量匹配", () => {
     const r = new ToolRegistry();
     registerBuiltinTools(r);
-    expect(r.openAiSchemas()).toHaveLength(9);
-    expect(r.anthropicSchemas()).toHaveLength(9);
+    expect(r.openAiSchemas()).toHaveLength(10);
+    expect(r.anthropicSchemas()).toHaveLength(10);
     const a = r.openAiSchemas()[0];
     expect(a.type).toBe("function");
   });

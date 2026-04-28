@@ -18,6 +18,7 @@
 
 import { runLocalTool } from "../../tools/local";
 import { isHandledToolExecutionOutcome } from "../../tools/types";
+import { readArtifact } from "./artifact";
 import type {
   ToolDefinition,
   ToolInputSchema,
@@ -97,7 +98,53 @@ export const BUILTIN_TOOL_NAMES = [
   "write",
   "append",
   "replace",
+  "read_artifact",
 ] as const;
+
+/** v0.8.1 #3：当工具结果超 4KB 落盘后，LLM 可调用本工具按 offset/limit 取段读全文。 */
+function defineReadArtifactTool(): ToolDefinition {
+  const inputSchema: ToolInputSchema = {
+    type: "object",
+    properties: {
+      path: {
+        type: "string",
+        description: "artifact path returned by a previous tool result hint",
+      },
+      offset: {
+        type: "number",
+        description: "byte offset to start reading (default 0)",
+      },
+      limit: {
+        type: "number",
+        description: "max chars to return (default 16384)",
+      },
+    },
+    required: ["path"],
+  };
+  return {
+    name: "read_artifact",
+    description:
+      "读取之前工具结果保存的全量 artifact（~/.codeclaw/artifacts/<session>/<callId>.txt 下）。" +
+      "用 offset+limit 取任意段；只能读 artifacts 目录内的文件。",
+    inputSchema,
+    async invoke(args) {
+      const obj = (args ?? {}) as Record<string, unknown>;
+      const p = asString(obj.path, "path");
+      const offset = typeof obj.offset === "number" ? obj.offset : undefined;
+      const limit = typeof obj.limit === "number" ? obj.limit : undefined;
+      try {
+        const content = readArtifact(p, {
+          ...(offset !== undefined ? { offset } : {}),
+          ...(limit !== undefined ? { limit } : {}),
+        });
+        return { ok: true, content };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { ok: false, content: `[read_artifact failed] ${msg}`, isError: true };
+      }
+    },
+  };
+}
 
 export function registerBuiltinTools(registry: ToolRegistry): void {
   registry.register(
@@ -176,4 +223,5 @@ export function registerBuiltinTools(registry: ToolRegistry): void {
       ],
     })
   );
+  registry.register(defineReadArtifactTool());
 }
