@@ -21,6 +21,9 @@
  */
 
 import { ChildProcess, spawn } from "node:child_process";
+import { appendFileSync, mkdirSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -67,6 +70,10 @@ const DEFAULT_REQUEST_TIMEOUT = 30_000;
 const SHUTDOWN_KILL_GRACE_MS = 1_000;
 const PROTOCOL_VERSION = "2024-11-05";
 const CLIENT_INFO = { name: "codeclaw", version: "0.5.0" };
+// 子进程 stderr 限速：1s 窗口最多放过 STDERR_CHUNKS_PER_SECOND 个 chunk；超出转日志文件。
+// 防止某些 MCP server 在 idle / 出错时持续吐 stderr，把 codeclaw 主进程 stderr 灌爆，
+// 进而让外层终端 ANSI parser 卡死（已观察到 idle ~15min 后 Terminal.app / Ghostty 死机）。
+const STDERR_CHUNKS_PER_SECOND = 100;
 
 type PendingEntry = {
   resolve: (value: unknown) => void;
@@ -83,6 +90,10 @@ export class McpClient {
   private initialized = false;
   private exitListeners: Array<(code: number | null, signal: NodeJS.Signals | null) => void> = [];
   private label = "mcp";
+  private stderrWindowStart = 0;
+  private stderrWindowChunks = 0;
+  private stderrSuppressedChunks = 0;
+  private stderrLogFile: string | null = null;
 
   async start(opts: McpClientOptions): Promise<void> {
     if (this.child) {
@@ -97,9 +108,7 @@ export class McpClient {
     this.child = child;
 
     child.stdout?.on("data", (chunk: Buffer) => this.handleStdoutChunk(chunk));
-    child.stderr?.on("data", (chunk: Buffer) => {
-      process.stderr.write(`[${this.label}] ${chunk.toString("utf8")}`);
-    });
+    child.stderr?.on("data", (chunk: Buffer) => this.handleStderrChunk(chunk));
     child.on("exit", (code, signal) => this.handleExit(code, signal));
     child.on("error", (err) => this.handleSpawnError(err));
 
@@ -237,6 +246,46 @@ export class McpClient {
       throw new Error("mcp child stdin closed");
     }
     this.child.stdin.write(JSON.stringify(msg) + "\n");
+  }
+
+  private handleStderrChunk(chunk: Buffer): void {
+    const now = Date.now();
+    if (now - this.stderrWindowStart >= 1_000) {
+      if (this.stderrSuppressedChunks > 0) {
+        const log = this.ensureStderrLogFile();
+        process.stderr.write(
+          `[${this.label}] suppressed ${this.stderrSuppressedChunks} stderr chunks (logged to ${log})\n`
+        );
+      }
+      this.stderrWindowStart = now;
+      this.stderrWindowChunks = 0;
+      this.stderrSuppressedChunks = 0;
+    }
+    if (this.stderrWindowChunks < STDERR_CHUNKS_PER_SECOND) {
+      process.stderr.write(`[${this.label}] ${chunk.toString("utf8")}`);
+      this.stderrWindowChunks += 1;
+    } else {
+      this.stderrSuppressedChunks += 1;
+      this.appendStderrLog(chunk);
+    }
+  }
+
+  private ensureStderrLogFile(): string {
+    if (!this.stderrLogFile) {
+      const safe = this.label.replace(/[^a-zA-Z0-9_:.-]/g, "_");
+      this.stderrLogFile = path.join(os.homedir(), ".codeclaw", "logs", `${safe}.log`);
+    }
+    return this.stderrLogFile;
+  }
+
+  private appendStderrLog(chunk: Buffer): void {
+    try {
+      const log = this.ensureStderrLogFile();
+      mkdirSync(path.dirname(log), { recursive: true });
+      appendFileSync(log, chunk, { encoding: "utf8" });
+    } catch {
+      // 写日志失败也吃；让 MCP 主流程继续，不能因日志失败再次冲击 stderr
+    }
   }
 
   private handleStdoutChunk(chunk: Buffer): void {

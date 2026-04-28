@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { appendFileSync, mkdirSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type Database from "better-sqlite3";
 import { WechatBotAdapter } from "./adapter";
@@ -15,6 +18,10 @@ const LONG_POLL_TIMEOUT_MS = 35_000;
 
 function joinUrl(baseUrl: string, pathname: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/${pathname.replace(/^\/+/, "")}`;
+}
+
+function defaultWechatLogFile(): string {
+  return path.join(os.homedir(), ".codeclaw", "logs", "wechat.log");
 }
 
 function createWechatUin(): string {
@@ -87,10 +94,19 @@ export interface IlinkWechatWorkerOptions {
   adapter: WechatBotAdapter;
   tokenFile: string;
   baseUrl?: string;
+  /** 空轮询（无新消息）后下一轮间隔，默认 1000ms。设过低会让 idle 时高频 fetch 把 stderr 灌爆。 */
   pollIntervalMs?: number;
   fetchImpl?: FetchLike;
   /** ingress dedup db；不传则不去重 */
   dedupDb?: Database.Database;
+  /** 连续失败的指数退避起始值（ms），默认 1000。每多一次失败 ×2，到 failureBackoffMaxMs 封顶。 */
+  failureBackoffBaseMs?: number;
+  /** 失败退避上限（ms），默认 60_000。 */
+  failureBackoffMaxMs?: number;
+  /** 失败连续超过该阈值后，停止往 stderr 写错误（改写日志文件）。默认 3。 */
+  stderrFailureThreshold?: number;
+  /** 失败日志路径；默认 ~/.codeclaw/logs/wechat.log。 */
+  failureLogFile?: string;
 }
 
 export class IlinkWechatWorker {
@@ -107,15 +123,54 @@ export class IlinkWechatWorker {
   }
 
   async run(): Promise<void> {
+    let consecutiveFailures = 0;
     while (!this.stopped) {
-      const receivedMessages = await this.pollOnce();
+      let receivedMessages = false;
+      try {
+        receivedMessages = await this.pollOnce();
+        consecutiveFailures = 0;
+      } catch (err) {
+        consecutiveFailures += 1;
+        this.reportFailure(err, consecutiveFailures);
+        if (this.stopped) return;
+        const base = this.options.failureBackoffBaseMs ?? 1_000;
+        const cap = this.options.failureBackoffMaxMs ?? 60_000;
+        const backoff = Math.min(base * 2 ** Math.min(consecutiveFailures - 1, 6), cap);
+        await sleep(backoff);
+        continue;
+      }
       if (this.stopped) {
         return;
       }
-
       if (!receivedMessages) {
-        await sleep(this.options.pollIntervalMs ?? 100);
+        await sleep(this.options.pollIntervalMs ?? 1_000);
       }
+    }
+  }
+
+  /**
+   * 失败上报：前 N 次（stderrFailureThreshold）正常打到 stderr 让用户感知；
+   * 超过阈值后只写日志文件，避免 idle 时 token 失效/网络断引发 stderr 雪崩
+   * （上游终端 ANSI parser 可能扛不住）。
+   */
+  private reportFailure(err: unknown, count: number): void {
+    const stack = err instanceof Error ? err.stack ?? err.message : String(err);
+    const line = `[${new Date().toISOString()}] wechat poll failed (#${count}): ${stack}\n`;
+    const threshold = this.options.stderrFailureThreshold ?? 3;
+    if (count <= threshold) {
+      process.stderr.write(line);
+      if (count === threshold) {
+        process.stderr.write(
+          `[wechat] further failures suppressed; see ${this.options.failureLogFile ?? defaultWechatLogFile()}\n`
+        );
+      }
+    }
+    try {
+      const logFile = this.options.failureLogFile ?? defaultWechatLogFile();
+      mkdirSync(path.dirname(logFile), { recursive: true });
+      appendFileSync(logFile, line, "utf8");
+    } catch {
+      // 写日志失败也吃掉；不能让日志失败再次拖垮 worker
     }
   }
 
