@@ -64,6 +64,7 @@ function printHelp(): void {
 Usage:
   codeclaw                 Start CLI only · 仅启动 CLI（不再自动起 Web/WeChat）
   codeclaw --plain         Start the plain-text REPL (IME-safe fallback)
+  codeclaw --show-thinking Show <think>...</think> blocks in LLM output (default: stripped) · 显示思考过程（默认剥掉）
   codeclaw --version       Print version
   codeclaw --help          Print help
   codeclaw doctor          Show environment diagnostics
@@ -124,7 +125,12 @@ async function main(): Promise<void> {
   const usePlainRepl = rawArgs.includes("--plain");
   // P3.1：CLI 默认同步起 Web；--no-web 退路（headless / 容器场景）
   const noWeb = rawArgs.includes("--no-web");
-  const filteredArgs = rawArgs.filter((arg) => arg !== "--plain" && arg !== "--no-web");
+  // v0.8.5：默认剥 LLM 输出里的 <think> 块；--show-thinking 或 CODECLAW_SHOW_THINKING=1 保留原文
+  const showThinking =
+    rawArgs.includes("--show-thinking") || process.env.CODECLAW_SHOW_THINKING === "1";
+  const filteredArgs = rawArgs.filter(
+    (arg) => arg !== "--plain" && arg !== "--no-web" && arg !== "--show-thinking"
+  );
   const [command, ...restArgs] = filteredArgs;
 
   if (command === "--version" || command === "-v") {
@@ -633,6 +639,7 @@ async function main(): Promise<void> {
       queryEngine={queryEngine}
       ingressGateway={ingressGateway}
       statusLine={settings?.statusLine}
+      showThinking={showThinking}
     />,
     {
       exitOnCtrlC: false

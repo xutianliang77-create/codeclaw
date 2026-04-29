@@ -1,6 +1,6 @@
 {
   "name": "codeclaw",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "description": "CLI-first personal autonomous agent platform scaffold",
   "type": "module",
   "private": true,

@@ -8,6 +8,7 @@ import { sanitizeForDisplay } from "../lib/displaySafe";
 import { feature } from "../lib/feature";
 import { buildDefaultStatusLine, startCustomStatusLine } from "../hooks/statusLine";
 import { frameScheduler } from "./frameScheduler";
+import { stripThinking } from "../lib/stripThinking";
 
 type AppBootInfo = {
   providerLabel: string;
@@ -118,17 +119,24 @@ function StatusLine({ text }: { text: string }): React.JSX.Element {
   );
 }
 
+// v0.8.5：默认 LLM 流式输出沉默（仅显示状态行，message-complete 才推完整 text）；
+// CODECLAW_STREAM_OUTPUT=1 退路保留 v0.8.4 newline-gated 流式行为给老用户。
+const STREAM_OUTPUT_ENABLED = process.env.CODECLAW_STREAM_OUTPUT === "1";
+
 export function App({
   bootInfo,
   queryEngine,
   ingressGateway,
-  statusLine
+  statusLine,
+  showThinking
 }: {
   bootInfo: AppBootInfo;
   queryEngine: QueryEngine;
   ingressGateway: IngressGateway;
   /** M3-04 step 5：来自 settings.json statusLine 配置；省略走默认数据源 */
   statusLine?: { command?: string; intervalMs?: number };
+  /** v0.8.5：--show-thinking flag / CODECLAW_SHOW_THINKING=1 → 保留 <think> 块原文 */
+  showThinking?: boolean;
 }): React.JSX.Element {
   const { exit } = useApp();
   const initialRuntimeState = queryEngine.getRuntimeState();
@@ -259,6 +267,10 @@ export function App({
           if (event.phase === "halted") {
             setBanner("Turn halted by interrupt · 当前轮次已被中断。");
           }
+          // v0.8.5：进入 planning/executing 阶段先打"思考中"占位（后续 tool-start / message-start 会接管）
+          if (!STREAM_OUTPUT_ENABLED && (event.phase === "planning" || event.phase === "executing")) {
+            setToolStatus("🤔 思考中... · thinking");
+          }
           continue;
         }
 
@@ -292,16 +304,27 @@ export function App({
         }
 
         if (event.type === "tool-start") {
-          setToolStatus(`${event.toolName} running`);
+          // v0.8.5：沉默模式下加 emoji 区分阶段
+          setToolStatus(STREAM_OUTPUT_ENABLED ? `${event.toolName} running` : `🔧 调用 ${event.toolName}...`);
           continue;
         }
 
         if (event.type === "tool-end") {
-          setToolStatus(`${event.toolName} ${event.status}`);
+          // v0.8.5：tool 结束后回到"思考中"占位（等下个 tool-start / message-complete）
+          if (!STREAM_OUTPUT_ENABLED) {
+            setToolStatus(`✓ ${event.toolName} ${event.status} · 🤔 思考中...`);
+          } else {
+            setToolStatus(`${event.toolName} ${event.status}`);
+          }
           continue;
         }
 
         if (event.type === "message-start") {
+          // v0.8.5：沉默模式不预先 push 空 message（避免空气泡污染历史）；message-complete 时一次性 push
+          if (!STREAM_OUTPUT_ENABLED) {
+            setToolStatus("✍️ 生成回答... · streaming");
+            continue;
+          }
           setMessages((current) => [
             ...current,
             {
@@ -314,9 +337,13 @@ export function App({
         }
 
         if (event.type === "message-delta") {
-          // v0.8.4 newline-gated commit：仅在 delta 含换行时 commit 已完整行到 messages.text；
-          // 不含换行的尾部进 partialBuf 不触发 setState（与 codex 行为对齐，避免每 token
-          // re-render 把 pty buffer 灌爆）。多次 commit 在 50ms 帧内合并到 pendingCommitBuf 一次推。
+          // v0.8.5 默认沉默：流式 token 不渲染到屏幕，仅靠 toolStatus 显示状态。
+          // 这是治根 — pty buffer 累积的根本原因是高频流式写入；message-complete 一次性 setState
+          // 把整 turn 的 ANSI 输出从 N 千次降到 1 次。
+          if (!STREAM_OUTPUT_ENABLED) {
+            continue;
+          }
+          // v0.8.4 老行为（CODECLAW_STREAM_OUTPUT=1 退路）：newline-gated commit
           const id = event.messageId;
           const partial = (partialBuf.current.get(id) ?? "") + event.delta;
           const lastNewline = partial.lastIndexOf("\n");
@@ -346,14 +373,30 @@ export function App({
         }
 
         if (event.type === "message-complete") {
-          // 流式结束：丢弃 partial / pendingCommit buffer，使用 event.text 作为最终内容
+          // v0.8.5：剥 <think> 块（除非 --show-thinking / CODECLAW_SHOW_THINKING=1）；
+          // 沉默模式下这是 turn 内首次 setState 显示 message 内容
+          const finalText = showThinking ? event.text : stripThinking(event.text);
           partialBuf.current.delete(event.messageId);
           pendingCommitBuf.current.delete(event.messageId);
-          setMessages((current) =>
-            current.map((message) =>
-              message.id === event.messageId ? { ...message, text: event.text } : message
-            )
-          );
+          if (!STREAM_OUTPUT_ENABLED) {
+            // 沉默模式：message-start 没 push，这里 push + 设 text
+            setMessages((current) => {
+              const exists = current.some((m) => m.id === event.messageId);
+              if (exists) {
+                return current.map((m) =>
+                  m.id === event.messageId ? { ...m, text: finalText } : m
+                );
+              }
+              return [...current, { id: event.messageId, role: "assistant", text: finalText }];
+            });
+            setToolStatus(null);
+          } else {
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === event.messageId ? { ...message, text: finalText } : message
+              )
+            );
+          }
           continue;
         }
         // subagent-start / subagent-end：ink CLI 暂不展示，留给 web channel

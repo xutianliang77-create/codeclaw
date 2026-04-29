@@ -6,6 +6,7 @@ import { clearPendingApprovals, loadPendingApprovals, savePendingApprovals } fro
 import type { StoredPendingApproval } from "../approvals/store";
 import type { PermissionMode } from "../lib/config";
 import { sanitizeForDisplay } from "../lib/displaySafe";
+import { waitForStdoutDrain } from "../lib/stdoutBackpressure";
 import { callMcpTool, listMcpResources, listMcpServers, listMcpTools, readMcpResource } from "../mcp/service";
 import { SlashRegistry, loadBuiltins } from "../commands/slash";
 import { EngineFsm } from "../fsm";
@@ -983,7 +984,32 @@ class LocalQueryEngine implements QueryEngine {
     ).catch(() => undefined);
   }
 
+  // v0.8.5 Phase 3：public submitMessage 包一层 stdout backpressure 检测，
+  // 反压时 await drain 才 yield 下一个 event。codex 用 Rust 同步 io 自动处理，
+  // codeclaw 用 Node 异步 stream 必须主动检测。
   async *submitMessage(prompt: string, options?: QuerySubmitOptions): AsyncGenerator<EngineEvent> {
+    for await (const event of this.submitMessageImpl(prompt, options)) {
+      const stdout = process.stdout as NodeJS.WriteStream & { writableNeedDrain?: boolean };
+      if (stdout.writableNeedDrain) {
+        await waitForStdoutDrain({
+          onAudit: (e) =>
+            this.audit({
+              actor: e.actor,
+              action: e.action,
+              decision: "allow",
+              reason: e.reason ?? `waited ${e.waitedMs}ms for stdout drain`,
+              details: { waitedMs: e.waitedMs },
+            }),
+        });
+      }
+      yield event;
+    }
+  }
+
+  private async *submitMessageImpl(
+    prompt: string,
+    options?: QuerySubmitOptions
+  ): AsyncGenerator<EngineEvent> {
     // /ask v2 可能在 dispatch 后改写 trimmed（rewrite SlashResult），故用 let
     let trimmed = prompt.trim();
     if (!trimmed) {
