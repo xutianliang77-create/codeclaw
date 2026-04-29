@@ -7,6 +7,7 @@ import type { IngressGateway } from "../ingress/gateway";
 import { sanitizeForDisplay } from "../lib/displaySafe";
 import { feature } from "../lib/feature";
 import { buildDefaultStatusLine, startCustomStatusLine } from "../hooks/statusLine";
+import { frameScheduler } from "./frameScheduler";
 
 type AppBootInfo = {
   providerLabel: string;
@@ -142,6 +143,12 @@ export function App({
   // useState 守卫是异步 schedule，所有 callback 看到 isRunning=false 全通过 → 双发。
   // useRef 同步 mark 防止：第二次进入 handleSubmit 立刻看到 true → return。
   const isRunningRef = useRef(false);
+  // v0.8.4 newline-gated commit：流式 message-delta 累积到 partial / pendingCommit buffer，
+  // 仅含换行的部分推到 messages.text，其余仅累积不触发 setState。参考 codex
+  // streaming/controller.rs:push_delta —— "delta 含 \n 才 commit"。partial 不显示给用户，
+  // 与 codex 行为对齐（避免每 token re-render 把 pty buffer 灌爆）。
+  const partialBuf = useRef(new Map<string, string>());
+  const pendingCommitBuf = useRef(new Map<string, string>());
   const [toolStatus, setToolStatus] = useState<string | null>(
     initialPendingApproval
       ? `${initialPendingApproval.toolName} pending approval (${initialPendingApproval.totalPending})`
@@ -307,15 +314,41 @@ export function App({
         }
 
         if (event.type === "message-delta") {
-          setMessages((current) =>
-            current.map((message) =>
-              message.id === event.messageId ? { ...message, text: message.text + event.delta } : message
-            )
-          );
+          // v0.8.4 newline-gated commit：仅在 delta 含换行时 commit 已完整行到 messages.text；
+          // 不含换行的尾部进 partialBuf 不触发 setState（与 codex 行为对齐，避免每 token
+          // re-render 把 pty buffer 灌爆）。多次 commit 在 50ms 帧内合并到 pendingCommitBuf 一次推。
+          const id = event.messageId;
+          const partial = (partialBuf.current.get(id) ?? "") + event.delta;
+          const lastNewline = partial.lastIndexOf("\n");
+
+          if (lastNewline === -1) {
+            partialBuf.current.set(id, partial);
+          } else {
+            const toCommit = partial.slice(0, lastNewline + 1);
+            const newPartial = partial.slice(lastNewline + 1);
+            partialBuf.current.set(id, newPartial);
+            pendingCommitBuf.current.set(
+              id,
+              (pendingCommitBuf.current.get(id) ?? "") + toCommit
+            );
+            frameScheduler.schedule(`commit-${id}`, () => {
+              const committed = pendingCommitBuf.current.get(id);
+              if (!committed) return;
+              pendingCommitBuf.current.delete(id);
+              setMessages((current) =>
+                current.map((message) =>
+                  message.id === id ? { ...message, text: message.text + committed } : message
+                )
+              );
+            });
+          }
           continue;
         }
 
         if (event.type === "message-complete") {
+          // 流式结束：丢弃 partial / pendingCommit buffer，使用 event.text 作为最终内容
+          partialBuf.current.delete(event.messageId);
+          pendingCommitBuf.current.delete(event.messageId);
           setMessages((current) =>
             current.map((message) =>
               message.id === event.messageId ? { ...message, text: event.text } : message
@@ -331,6 +364,9 @@ export function App({
       setPhase("halted");
       setToolStatus("failed");
     } finally {
+      // v0.8.4：清流式 buffer 防止下一轮 / interrupt / error 路径泄漏到下次 turn
+      partialBuf.current.clear();
+      pendingCommitBuf.current.clear();
       const nextPendingApproval = queryEngine.getPendingApproval();
       setPendingApproval(nextPendingApproval);
       setToolStatus(
