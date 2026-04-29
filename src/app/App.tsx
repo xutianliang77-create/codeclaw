@@ -9,6 +9,7 @@ import { feature } from "../lib/feature";
 import { buildDefaultStatusLine, startCustomStatusLine } from "../hooks/statusLine";
 import { frameScheduler } from "./frameScheduler";
 import { stripThinking } from "../lib/stripThinking";
+import { formatElapsed, formatTokenCount } from "../lib/formatStreaming";
 
 type AppBootInfo = {
   providerLabel: string;
@@ -67,15 +68,25 @@ function TranscriptPane({ messages }: { messages: EngineMessage[] }): React.JSX.
 
 function StatusBar({
   phase,
-  toolStatus
+  toolStatus,
+  streamElapsedMs,
+  streamTokenCount
 }: {
   phase: string;
   toolStatus: string | null;
+  streamElapsedMs: number;
+  streamTokenCount: number;
 }): React.JSX.Element {
+  // v0.8.6：sleep 模式下用户看不到 token 滚动；状态行加 elapsed + tokens 让用户判断
+  // 模型是否还活着（tokens 涨 = 活；停了 = 卡了）
+  const elapsedSuffix = streamElapsedMs > 0 ? ` · ${formatElapsed(streamElapsedMs)}` : "";
+  const tokensSuffix =
+    streamTokenCount > 0 ? ` · ${formatTokenCount(streamTokenCount)} tokens` : "";
+  const enrichedStatus = toolStatus ? `${toolStatus}${elapsedSuffix}${tokensSuffix}` : null;
   return (
     <Box borderStyle="round" paddingX={1} marginTop={1} flexDirection="column">
       <Text>phase · 阶段: {phase}</Text>
-      {toolStatus ? <Text color="gray">tool · 工具: {toolStatus}</Text> : null}
+      {enrichedStatus ? <Text color="gray">tool · 工具: {enrichedStatus}</Text> : null}
     </Box>
   );
 }
@@ -163,6 +174,26 @@ export function App({
       : null
   );
   const [pendingApproval, setPendingApproval] = useState<PendingApprovalState>(initialPendingApproval);
+
+  // v0.8.6：流式状态行 elapsed + token 计数。tokenCountRef 累积，1Hz interval 同步到 state
+  // 避免每个 chunk 一次 setState 让 ink 高频 redraw（沉默 UI 的初衷就是低频更新）
+  const tokenCountRef = useRef(0);
+  const [streamElapsedMs, setStreamElapsedMs] = useState(0);
+  const [streamTokenCount, setStreamTokenCount] = useState(0);
+  useEffect(() => {
+    if (phase !== "executing" && phase !== "planning") {
+      tokenCountRef.current = 0;
+      setStreamElapsedMs(0);
+      setStreamTokenCount(0);
+      return;
+    }
+    const startedAt = Date.now();
+    const interval = setInterval(() => {
+      setStreamElapsedMs(Date.now() - startedAt);
+      setStreamTokenCount(tokenCountRef.current);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [phase]);
 
   // M3-04 step 4+5：status line 显示文本；默认 buildDefaultStatusLine，配 custom command 时由 polling 覆盖
   const [statusLineText, setStatusLineText] = useState<string>(() =>
@@ -337,6 +368,8 @@ export function App({
         }
 
         if (event.type === "message-delta") {
+          // v0.8.6：每个 chunk 累 token count（不 setState，由 1Hz interval 同步）
+          tokenCountRef.current += 1;
           // v0.8.5 默认沉默：流式 token 不渲染到屏幕，仅靠 toolStatus 显示状态。
           // 这是治根 — pty buffer 累积的根本原因是高频流式写入；message-complete 一次性 setState
           // 把整 turn 的 ANSI 输出从 N 千次降到 1 次。
@@ -454,7 +487,12 @@ export function App({
         </Box>
       ) : null}
       <TranscriptPane messages={messages} />
-      <StatusBar phase={phase} toolStatus={toolStatus} />
+      <StatusBar
+        phase={phase}
+        toolStatus={toolStatus}
+        streamElapsedMs={streamElapsedMs}
+        streamTokenCount={streamTokenCount}
+      />
       <ApprovalPanel pendingApproval={pendingApproval} />
       <Box borderStyle="round" paddingX={1} marginTop={1} flexDirection="column">
         <Box>

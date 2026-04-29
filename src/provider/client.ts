@@ -18,6 +18,46 @@ type FetchLike = typeof fetch;
 // 32MB 远大于任何合理单帧 SSE event，远小于 4GB 默认堆，超过即视为协议异常 / 模型失控。
 const MAX_STREAM_BUFFER_BYTES = 32 * 1024 * 1024;
 
+// v0.8.6：流式 chunk idle watchdog。
+// 正常 LLM 流式 chunk 间隔 30-100ms（每个 token 一个）。如果 60 秒不来 chunk，几乎可以判定
+// LM Studio / 本地推理 backend hang 死了或者网络断了。比无限等待 + 用户手动 Ctrl+C 友好。
+// 60s 给慢启动模型留余量（27B 量化首 token 可能 5-10 秒）；CODECLAW_STREAM_IDLE_MS 覆盖。
+// 用 function 而非 const：每次调用读 env，便于测试且支持运行时改 env。
+function getStreamIdleTimeoutMs(): number {
+  return Number(process.env.CODECLAW_STREAM_IDLE_MS) || 60_000;
+}
+
+// v0.8.6 idle watchdog 工具：reader.read() vs setTimeout 竞速；超时 cancel reader 抛错。
+// 返回类型与 reader.read() 兼容（用内联 union 避开 ReadableStreamReadResult 的 lib 依赖）。
+type ReadResult<T> = { done: false; value: T } | { done: true; value?: T };
+
+export async function readWithIdleTimeout<T>(
+  reader: ReadableStreamDefaultReader<T>,
+  timeoutMs: number
+): Promise<ReadResult<T>> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const idle = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      try {
+        reader.cancel();
+      } catch {
+        // ignore
+      }
+      reject(
+        new Error(
+          `Stream idle timeout: no chunk received in ${timeoutMs}ms (provider may be stuck or hung). ` +
+            `Override via CODECLAW_STREAM_IDLE_MS env (default 60000).`
+        )
+      );
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([reader.read(), idle]);
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
+}
+
 function checkStreamBuffer(buffer: string, reader: ReadableStreamDefaultReader<Uint8Array>): void {
   if (buffer.length > MAX_STREAM_BUFFER_BYTES) {
     try {
@@ -350,10 +390,12 @@ async function* streamSseLines(
   let buffer = "";
 
   while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
+    // v0.8.6 idle watchdog：reader.read() vs idle timeout 竞速
+    const readResult = await readWithIdleTimeout(reader, getStreamIdleTimeoutMs());
+    if (readResult.done) {
       break;
     }
+    const value = readResult.value;
 
     buffer += decoder.decode(value, { stream: true });
     checkStreamBuffer(buffer, reader);
@@ -406,10 +448,12 @@ async function* streamNdjson(
   let buffer = "";
 
   while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
+    // v0.8.6 idle watchdog（同 streamSseLines）
+    const readResult = await readWithIdleTimeout(reader, getStreamIdleTimeoutMs());
+    if (readResult.done) {
       break;
     }
+    const value = readResult.value;
 
     buffer += decoder.decode(value, { stream: true });
     checkStreamBuffer(buffer, reader);
