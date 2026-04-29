@@ -123,6 +123,54 @@ describe("provider registry", () => {
     expect(migrated["lmstudio:default"].baseUrl).toBe("http://127.0.0.1:1234/v1");
   });
 
+  it("[v0.8.3] skips probe for remote baseUrl and trusts user config", async () => {
+    // 修 lmstudio 假失败 bug：远程 IP probe 在 macOS / IPv6 / 公网代理下假阳性高，
+    // 用户配了远程地址就该信，事前 probe 不该当 gate。
+    const mockFetch = vi.fn<typeof fetch>();
+    const registry = await ProviderRegistry.create({
+      providersFile: {
+        "lmstudio:remote": {
+          type: "lmstudio",
+          enabled: true,
+          baseUrl: "http://222.128.62.139:1234/v1",
+          model: "qwen-remote",
+          timeoutMs: 50
+        }
+      },
+      fetchImpl: mockFetch
+    });
+
+    const remote = registry.get("lmstudio:remote");
+    expect(remote).toBeDefined();
+    expect(remote!.available).toBe(true);
+    expect(remote!.reason).toContain("probe skipped");
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("[v0.8.3] reports probe failure reason for local baseUrl", async () => {
+    // 之前 catch 把异常吞了，doctor 看不到为什么 unreachable；现在 reason 带回错误信息。
+    const mockFetch = vi
+      .fn<typeof fetch>()
+      .mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:11434"));
+    const registry = await ProviderRegistry.create({
+      providersFile: {
+        "ollama:default": {
+          type: "ollama",
+          enabled: true,
+          baseUrl: "http://127.0.0.1:11434",
+          model: "llama3.1",
+          timeoutMs: 50
+        }
+      },
+      fetchImpl: mockFetch
+    });
+
+    const ollama = registry.get("ollama:default");
+    expect(ollama).toBeDefined();
+    expect(ollama!.available).toBe(false);
+    expect(ollama!.reason).toContain("ECONNREFUSED");
+  });
+
   it("migrates legacy config.yaml provider.default (bare type → instanceId)", () => {
     const legacyMigrated = migrateProvidersFile({
       lmstudio: { enabled: true, baseUrl: "http://x", model: "y" }

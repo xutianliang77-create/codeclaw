@@ -80,17 +80,38 @@ Note: v0.7.2 起 CLI 默认不再后台起 Web/WeChat，按需用上面的子命
 `);
 }
 
+// v0.8.3：当 stderr/stdout 写失败（EIO/EPIPE）后，ink 渲染循环会无限触发同一异常，
+// 每次都把堆栈再写一遍 crash.log，11MB 体积即由此而来（Mac 现场已确认）。
+// 通过模块级变量把 ink instance 暴露给 crash handler，便于 EIO 时 unmount 后退出。
+let inkInstance: { unmount: () => void } | null = null;
+
 function installCrashLogging(logsDir: string): void {
   const crashLogFile = path.join(logsDir, "crash.log");
   mkdirSync(logsDir, { recursive: true });
 
   const log = (label: string, error: unknown) => {
-    const body = error instanceof Error ? error.stack ?? error.message : String(error);
-    appendFileSync(crashLogFile, `[${new Date().toISOString()}] ${label}\n${body}\n\n`, "utf8");
+    try {
+      const body = error instanceof Error ? error.stack ?? error.message : String(error);
+      appendFileSync(crashLogFile, `[${new Date().toISOString()}] ${label}\n${body}\n\n`, "utf8");
+    } catch {
+      // 日志写不进就放弃（磁盘满 / fd 失效）；不能让记日志本身再触发 uncaughtException。
+    }
   };
 
   process.on("uncaughtException", (error) => {
     log("uncaughtException", error);
+    // EIO/EPIPE on stderr/stdout 说明 controlling tty 已断（终端崩 / 父进程 kill / pty 失效）；
+    // 继续 ink render 会在每帧重新触发同一异常 → 死循环把 crash.log 灌爆 → 堆压力累积 → OOM。
+    // 直接 unmount + exit 切断这条路径。
+    const code = (error as NodeJS.ErrnoException)?.code;
+    if (code === "EIO" || code === "EPIPE") {
+      try {
+        inkInstance?.unmount();
+      } catch {
+        // unmount 自身可能再触发同一异常，吞掉。
+      }
+      process.exit(1);
+    }
   });
 
   process.on("unhandledRejection", (error) => {
@@ -599,7 +620,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  render(
+  inkInstance = render(
     <App
       bootInfo={{
         providerLabel: runtime.selection?.current?.displayName ?? "not-configured",

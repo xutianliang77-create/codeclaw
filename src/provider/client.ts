@@ -12,6 +12,27 @@ export interface ToolSchemaSpec {
 
 type FetchLike = typeof fetch;
 
+// v0.8.3：流式解析 buffer 上限。
+// 触发原因：本地量化模型（27B 等）长上下文跑久了陷入重复输出循环时，会一直吐 token；
+// 如果某段输出不含换行，buffer 会单调累积。56 分钟跑出 4GB 堆爆 OOM 已现场复现。
+// 32MB 远大于任何合理单帧 SSE event，远小于 4GB 默认堆，超过即视为协议异常 / 模型失控。
+const MAX_STREAM_BUFFER_BYTES = 32 * 1024 * 1024;
+
+function checkStreamBuffer(buffer: string, reader: ReadableStreamDefaultReader<Uint8Array>): void {
+  if (buffer.length > MAX_STREAM_BUFFER_BYTES) {
+    try {
+      reader.cancel();
+    } catch {
+      // ignore
+    }
+    throw new Error(
+      `Stream buffer exceeded ${MAX_STREAM_BUFFER_BYTES} bytes without delimiter; ` +
+        `provider may be returning malformed payload or stuck in repeat loop. ` +
+        `Aborting to prevent OOM. head: ${JSON.stringify(buffer.slice(0, 200))}`
+    );
+  }
+}
+
 /**
  * Provider 真实 token 用量（W3-05）。三家提供商语义略有差异，统一抽象：
  *   - inputTokens：prompt / input
@@ -335,6 +356,7 @@ async function* streamSseLines(
     }
 
     buffer += decoder.decode(value, { stream: true });
+    checkStreamBuffer(buffer, reader);
     const lines = buffer.split(/\r?\n/);
     buffer = lines.pop() ?? "";
 
@@ -390,6 +412,7 @@ async function* streamNdjson(
     }
 
     buffer += decoder.decode(value, { stream: true });
+    checkStreamBuffer(buffer, reader);
     const lines = buffer.split(/\r?\n/);
     buffer = lines.pop() ?? "";
 

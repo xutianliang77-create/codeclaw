@@ -183,6 +183,22 @@ describe("provider client", () => {
     expect(requestBody).toContain("\"text\":\"请看这张图\"");
   });
 
+  // v0.8.3：防 OOM。模型陷入循环输出且不含换行时，buffer 单调累积；
+  // Mac 现场 56 分钟跑出 4GB 堆爆已确认，根因为 streamSseLines 的 buffer 无上限。
+  it("[v0.8.3] aborts SSE stream when buffer exceeds 32MB without delimiter", async () => {
+    // 33MB 不含换行的 payload → 必触发 buffer 上限保护（32MB）
+    const huge = "data: " + "x".repeat(33 * 1024 * 1024);
+    const fetchImpl = async () => createResponse(huge);
+
+    await expect(async () => {
+      for await (const _chunk of streamProviderResponse(baseProvider, messages, {
+        fetchImpl: fetchImpl as typeof fetch
+      })) {
+        // 仅消费，等抛错
+      }
+    }).rejects.toThrow(/Stream buffer exceeded/);
+  });
+
   // #68 修复：reasoning 模型（GPT-5 / DeepSeek R1 / Qwen3 reasoning / LM Studio MoE）
   // 把内容塞 delta.reasoning_content 而不是 delta.content。
   it("falls back to delta.reasoning_content when content is empty (reasoning models)", async () => {

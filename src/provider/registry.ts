@@ -65,12 +65,40 @@ function mergeProviderConfig(
   };
 }
 
-async function probeLocalProvider(config: ResolvedProviderConfig, fetchImpl: FetchLike): Promise<boolean> {
+function isLocalHostUrl(baseUrl: string): boolean {
+  try {
+    const host = new URL(baseUrl).hostname;
+    return host === "localhost" || host === "::1" || host === "0.0.0.0" || host.startsWith("127.");
+  } catch {
+    return false;
+  }
+}
+
+interface ProbeOutcome {
+  reachable: boolean;
+  reason: string;
+}
+
+async function probeLocalProvider(
+  config: ResolvedProviderConfig,
+  fetchImpl: FetchLike
+): Promise<ProbeOutcome> {
+  // 远程 baseUrl（非 localhost/127.*）：Node fetch 在公网 HTTP 上有 IPv6 优先 / undici socket 复用 /
+  // macOS 系统代理拦截等多种假阳性失败模式，curl 通而 fetch 判 unreachable 的现象已多次复现。
+  // 用户既然主动配置远程地址就是有意的，事前 probe 不该当成 gate；真正能否调用留给首次实际请求报错。
+  if (!isLocalHostUrl(config.baseUrl)) {
+    return {
+      reachable: true,
+      reason: `remote endpoint ${config.baseUrl} (probe skipped — trust user config)`
+    };
+  }
+
   const urlCandidates =
     config.type === "ollama"
       ? [`${config.baseUrl}/api/tags`, `${config.baseUrl}/v1/models`]
       : [`${config.baseUrl}/models`, `${config.baseUrl}/v1/models`];
 
+  let lastError: string | null = null;
   for (const url of urlCandidates) {
     try {
       const response = await fetchImpl(url, {
@@ -79,14 +107,18 @@ async function probeLocalProvider(config: ResolvedProviderConfig, fetchImpl: Fet
       });
 
       if (response.ok) {
-        return true;
+        return { reachable: true, reason: `local endpoint reachable (${url})` };
       }
-    } catch {
-      continue;
+      lastError = `${url} → HTTP ${response.status}`;
+    } catch (err) {
+      lastError = `${url} → ${err instanceof Error ? err.message : String(err)}`;
     }
   }
 
-  return false;
+  return {
+    reachable: false,
+    reason: `local endpoint unreachable: ${lastError ?? `no candidate matched ${config.baseUrl}`}`
+  };
 }
 
 async function buildProviderStatus(
@@ -130,13 +162,13 @@ async function buildProviderStatus(
     };
   }
 
-  const reachable = await probeLocalProvider(config, fetchImpl);
+  const probe = await probeLocalProvider(config, fetchImpl);
 
   return {
     ...config,
     configured: true,
-    available: reachable,
-    reason: reachable ? "local endpoint reachable" : `local endpoint unreachable (${config.baseUrl})`
+    available: probe.reachable,
+    reason: probe.reason
   };
 }
 
