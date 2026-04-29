@@ -1,0 +1,16 @@
+id: DRM-012
+version: 1
+layer: L2
+description: NL 让 LLM 查最近 jobs
+prompt: |
+  请用 dremio 工具，看看 sys.project.jobs_recent 表里最近 5 条 job 的 job_id 和 status。
+expected:
+  must_mention:
+    - job_id 或 jobid 或 job
+    - status 或 state
+  tool_calls:
+    must_invoke:
+      - RunSqlQuery
+  rubric: |
+    必须真调 RunSqlQuery 跑 LIMIT 5；answer 含字段名（具体 job_id 内容不验）。
+    若 dremio 没运行过 job → 表可能为空，answer 含 "no jobs" / "empty" 也接受 must_mention 字段名匹配。

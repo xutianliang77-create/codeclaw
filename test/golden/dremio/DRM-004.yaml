@@ -1,0 +1,17 @@
+id: DRM-004
+version: 1
+layer: L1
+description: 直接调 RunSqlQuery 用 VALUES 构造内联表
+prompt: ""
+mcp:
+  server: dremio
+  tool: RunSqlQuery
+  args:
+    query: SELECT * FROM (VALUES (1, 'alice'), (2, 'bob'), (3, 'carol')) AS t(id, name)
+expected:
+  must_mention:
+    - alice
+    - bob
+    - carol
+  rubric: |
+    VALUES 子查询不依赖任何 source。应返回 3 行含三个名字。

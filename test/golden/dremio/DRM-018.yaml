@@ -1,0 +1,17 @@
+id: DRM-018
+version: 1
+layer: E
+description: 边界 - 故意错的 SQL 列名
+prompt: ""
+mcp:
+  server: dremio
+  tool: RunSqlQuery
+  args:
+    query: SELECT not_a_column FROM INFORMATION_SCHEMA."TABLES"
+  expectError: true
+expected:
+  must_mention:
+    - column 或 not found 或 invalid 或 error 或 unresolved
+  rubric: |
+    Dremio 应识别字段不存在并返回错误（PARSE / VALIDATION error）。
+    isError=true 是预期路径；通过条件 = answer 含错误关键词且 codeclaw 进程不崩。

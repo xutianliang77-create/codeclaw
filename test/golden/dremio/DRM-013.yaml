@@ -1,0 +1,16 @@
+id: DRM-013
+version: 1
+layer: L2
+description: NL 让 LLM 列 dremio 所有 schema
+prompt: |
+  Dremio 里都有哪些 schema？请用 MCP 工具查一下并列出来。
+expected:
+  must_mention:
+    - INFORMATION_SCHEMA
+    - sys 或 schema
+  tool_calls:
+    must_invoke:
+      - RunSqlQuery 或 GetUsefulSystemTableNames
+  rubric: |
+    最自然：SELECT * FROM INFORMATION_SCHEMA.SCHEMATA / SHOW SCHEMAS。
+    应至少列出 INFORMATION_SCHEMA 与 sys 两个。

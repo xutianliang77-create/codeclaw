@@ -1,0 +1,16 @@
+id: DRM-007
+version: 1
+layer: L1
+description: 直接调 GetDescriptionOfTableOrSchema 看 INFORMATION_SCHEMA 描述
+prompt: ""
+mcp:
+  server: dremio
+  tool: GetDescriptionOfTableOrSchema
+  args:
+    name: INFORMATION_SCHEMA
+expected:
+  must_mention:
+    - INFORMATION_SCHEMA 或 information_schema 或 schema
+  rubric: |
+    OSS 标准 schema 描述。answer 至少应原样含 INFORMATION_SCHEMA 名称。
+    args 字段名不准时（部分版本是 schema_name / table_name），可手动调整。

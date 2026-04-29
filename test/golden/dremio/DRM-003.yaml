@@ -1,0 +1,15 @@
+id: DRM-003
+version: 1
+layer: L1
+description: 直接调 RunSqlQuery 算 1+1
+prompt: ""
+mcp:
+  server: dremio
+  tool: RunSqlQuery
+  args:
+    query: SELECT 1 + 1 AS x
+expected:
+  must_mention:
+    - "2"
+  rubric: |
+    最简表达式查询。返回应含数字 2（可能在 JSON 字段 "x":2 形式中）。

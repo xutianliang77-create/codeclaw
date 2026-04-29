@@ -1,0 +1,17 @@
+id: DRM-009
+version: 1
+layer: L2
+description: NL 看 INFORMATION_SCHEMA.TABLES 的字段
+prompt: |
+  请通过 dremio MCP 工具，看一下 INFORMATION_SCHEMA.TABLES 这张表有哪些字段。
+expected:
+  must_mention:
+    - TABLE_CATALOG 或 table_catalog
+    - TABLE_SCHEMA 或 table_schema
+    - TABLE_NAME 或 table_name
+  tool_calls:
+    must_invoke:
+      - GetSchemaOfTable 或 RunSqlQuery
+  rubric: |
+    最直接路径是 GetSchemaOfTable；查 INFORMATION_SCHEMA.COLUMNS 也接受。
+    answer 至少 3/4 个核心字段。

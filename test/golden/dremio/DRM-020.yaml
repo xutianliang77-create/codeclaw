@@ -1,0 +1,18 @@
+id: DRM-020
+version: 1
+layer: E
+description: 边界 - 大结果集（artifact 兜底）
+prompt: ""
+mcp:
+  server: dremio
+  tool: RunSqlQuery
+  args:
+    query: SELECT * FROM INFORMATION_SCHEMA."COLUMNS"
+expected:
+  must_mention:
+    - COLUMN_NAME 或 column_name 或 data_type
+  rubric: |
+    INFORMATION_SCHEMA.COLUMNS 通常返回数百行 → MCP content 可能很长。
+    通过条件：answer 至少含字段名（runner 不崩、不 OOM、不挂超时）。
+    artifact 兜底由 codeclaw bridgeMcpTools 在 toolRegistry 路径生效；direct callTool 路径不走 wrap，
+    本题主要验 manager.callTool 返大结果不挂。

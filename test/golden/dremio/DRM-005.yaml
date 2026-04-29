@@ -1,0 +1,16 @@
+id: DRM-005
+version: 1
+layer: L1
+description: 直接调 RunSqlQuery 数 INFORMATION_SCHEMA.TABLES 行数
+prompt: ""
+mcp:
+  server: dremio
+  tool: RunSqlQuery
+  args:
+    query: SELECT COUNT(*) AS n FROM INFORMATION_SCHEMA."TABLES"
+expected:
+  must_mention:
+    - 'n 或 N'
+  rubric: |
+    OSS 默认 INFORMATION_SCHEMA + sys 系统表通常 ≥ 几百行。
+    must_mention 只验字段名 n / N（数字本身不可预测）；rubric 主要看 isError=false。

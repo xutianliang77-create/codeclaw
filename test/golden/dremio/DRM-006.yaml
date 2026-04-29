@@ -1,0 +1,16 @@
+id: DRM-006
+version: 1
+layer: L1
+description: 直接调 RunSqlQuery 查 sys.options 里 cache 相关选项
+prompt: ""
+mcp:
+  server: dremio
+  tool: RunSqlQuery
+  args:
+    query: SELECT name FROM sys.options WHERE name LIKE '%cache%' LIMIT 5
+expected:
+  must_mention:
+    - cache
+  rubric: |
+    sys.options 是 OSS 自带选项表。cache 关键词的选项必有（dremio.exec.cache 等）。
+    若 dremio 安装版本不暴露 sys.options，预计返回 isError；遇到该情况下版改用 sys.tables_recent。

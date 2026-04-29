@@ -1,0 +1,15 @@
+id: DRM-011
+version: 1
+layer: L2
+description: NL 让 LLM 用 dremio 算简单加法
+prompt: |
+  请用 dremio MCP 工具跑一个 SQL，算一下 100 + 250.5 等于多少。
+expected:
+  must_mention:
+    - "350.5"
+  tool_calls:
+    must_invoke:
+      - RunSqlQuery
+  rubric: |
+    最直接：SELECT 100 + 250.5。answer 必含 350.5。
+    LLM 心算给答案不算 pass（必须实际调 RunSqlQuery）。

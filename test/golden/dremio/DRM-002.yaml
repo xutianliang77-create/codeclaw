@@ -1,0 +1,19 @@
+id: DRM-002
+version: 1
+layer: L1
+description: 直接调 GetSchemaOfTable 看 INFORMATION_SCHEMA.TABLES 字段
+prompt: ""
+mcp:
+  server: dremio
+  tool: GetSchemaOfTable
+  args:
+    table_name: INFORMATION_SCHEMA.TABLES
+expected:
+  must_mention:
+    - TABLE_CATALOG 或 table_catalog
+    - TABLE_SCHEMA 或 table_schema
+    - TABLE_NAME 或 table_name
+    - TABLE_TYPE 或 table_type
+  rubric: |
+    INFORMATION_SCHEMA.TABLES 是 SQL 标准元表，应有 4 个核心字段。
+    若工具实际参数名不是 table_name（部分 dremio-mcp 版本用 name），可改 args 字段。

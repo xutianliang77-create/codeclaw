@@ -1,0 +1,16 @@
+id: DRM-019
+version: 1
+layer: E
+description: 边界 - 调用不存在的 tool 名
+prompt: ""
+mcp:
+  server: dremio
+  tool: NonExistentToolXyz
+  args: {}
+  expectError: true
+expected:
+  must_mention:
+    - unknown 或 not found 或 invalid 或 error 或 method
+  rubric: |
+    dremio-mcp-server 应返回 JSON-RPC error（method not found / tool unknown）。
+    runner 应干净捕获并继续跑后续题，不让主进程崩。

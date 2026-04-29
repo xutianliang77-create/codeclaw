@@ -1,0 +1,17 @@
+id: DRM-001
+version: 1
+layer: L1
+description: 直接调 GetUsefulSystemTableNames 列出 dremio OSS 系统表
+prompt: ""
+mcp:
+  server: dremio
+  tool: GetUsefulSystemTableNames
+  args: {}
+expected:
+  must_mention:
+    - INFORMATION_SCHEMA
+    - sys.project 或 sys.jobs 或 jobs_recent
+  must_not_mention: []
+  rubric: |
+    direct callTool 应返回 OSS 内置系统表清单（≥3 张）。
+    至少应含 INFORMATION_SCHEMA.* 与 sys.project.* 两类前缀。

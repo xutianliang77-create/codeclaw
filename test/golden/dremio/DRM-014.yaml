@@ -1,0 +1,15 @@
+id: DRM-014
+version: 1
+layer: L2
+description: NL 用前缀过滤查表
+prompt: |
+  在 INFORMATION_SCHEMA 这个 schema 里，所有名字以 ROUTINE 开头的表都有哪些？请用 dremio 工具查。
+expected:
+  must_mention:
+    - ROUTINE
+  tool_calls:
+    must_invoke:
+      - RunSqlQuery
+  rubric: |
+    必须用 RunSqlQuery + WHERE TABLE_NAME LIKE 'ROUTINE%'。
+    OSS 一定含 ROUTINES 表（SQL 标准）；可能还有 ROUTINE_PARAMETERS 等。

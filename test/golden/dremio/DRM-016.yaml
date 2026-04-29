@@ -1,0 +1,16 @@
+id: DRM-016
+version: 1
+layer: L2
+description: NL 用 LIMIT 拿前几行
+prompt: |
+  用 SQL 通过 dremio 工具查 INFORMATION_SCHEMA.TABLES 的前 5 张表名。
+expected:
+  must_mention:
+    - LIMIT 或 limit 或 top
+    - TABLE_NAME 或 table_name 或 table
+  tool_calls:
+    must_invoke:
+      - RunSqlQuery
+  rubric: |
+    必须用 RunSqlQuery + LIMIT 5（或显示 5 个表名）。
+    answer 应含 "LIMIT 5" 关键词或 5 个具体表名。

@@ -1,0 +1,23 @@
+id: DRM-XXX
+version: 1
+layer: L1            # L1=直接 MCP 调用 / L2=自然语言走 LLM / E=边界
+description: 一句话说明这题验什么
+prompt: |
+  L2/E 题：用户对 LLM 说的话；L1 题留空字符串
+mcp:                 # L1 必填；L2 可选；E 看具体题
+  server: dremio
+  tool: ToolNameHere
+  args:
+    key: value
+  # expectError: true   # 故意错的 SQL / 不存在的 tool 等场景，捕获 isError 也算 pass
+expected:
+  must_mention:
+    - 关键词 1
+    - 关键词 2 或 备选 2
+  must_not_mention: []
+  tool_calls:        # L2 题用，验 LLM 实际调了哪些工具
+    must_invoke:
+      - RunSqlQuery 或 GetSchemaOfTable
+    must_not_invoke: []
+  rubric: |
+    多行说明这题怎么算 pass，遇到夹角案例怎么办。

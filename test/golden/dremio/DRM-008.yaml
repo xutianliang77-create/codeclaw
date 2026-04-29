@@ -1,0 +1,16 @@
+id: DRM-008
+version: 1
+layer: L2
+description: NL 让 LLM 列出 dremio 系统表
+prompt: |
+  Dremio 里有哪些系统表可以查？请用 dremio MCP 工具拉取并列出至少 3 张。
+expected:
+  must_mention:
+    - INFORMATION_SCHEMA
+    - sys 或 jobs
+  tool_calls:
+    must_invoke:
+      - GetUsefulSystemTableNames 或 RunSqlQuery
+  rubric: |
+    LLM 应主动调用 GetUsefulSystemTableNames（最自然）；用 RunSqlQuery 查 INFORMATION_SCHEMA 也可。
+    必须列出 ≥3 张系统表。

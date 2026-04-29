@@ -1,0 +1,15 @@
+id: DRM-010
+version: 1
+layer: L2
+description: NL 数 INFORMATION_SCHEMA.TABLES 行数
+prompt: |
+  用 dremio 工具查 INFORMATION_SCHEMA.TABLES 一共多少行？给我数字。
+expected:
+  must_mention:
+    - '行 或 rows 或 count'
+  tool_calls:
+    must_invoke:
+      - RunSqlQuery
+  rubric: |
+    必须用 RunSqlQuery 跑 COUNT(*)；answer 应含 "X 行" / "X rows" / "count: N" 等。
+    具体数字不验（依赖 dremio 版本与 source 数）。

@@ -1,0 +1,15 @@
+id: DRM-017
+version: 1
+layer: L2
+description: NL 用 LIKE 过滤选项
+prompt: |
+  请用 dremio 工具查 sys.options 里所有名字含 "cache" 的选项，返回选项名即可。
+expected:
+  must_mention:
+    - cache
+  tool_calls:
+    must_invoke:
+      - RunSqlQuery
+  rubric: |
+    必须用 WHERE name LIKE '%cache%' 过滤。OSS 通常含若干 cache 相关选项（exec.cache.* 等）。
+    answer 至少含 1 个 cache 字样。

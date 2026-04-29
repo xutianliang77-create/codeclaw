@@ -263,6 +263,21 @@ LLM 应该自动调 `mcp__dremio__GetSchemaOfTable`。如果 LLM 没认出工具
 
 ---
 
+## 黄金测试
+
+跑通后想做端到端回归 — codeclaw 提供 dremio 专用 golden suite（20 题 / 3 层）：
+
+```bash
+npm run golden:dremio                 # 全量
+npm run golden:dremio -- --layer L1   # 仅 7 道直调 MCP
+npm run golden:dremio -- --dry-run    # 仅 schema 校验
+```
+
+题目文件：`test/golden/dremio/DRM-001.yaml ~ DRM-020.yaml`。
+评分细则、加新题方法、常见失败修法：[test/golden/dremio/README.md](../test/golden/dremio/README.md)。
+
+---
+
 ## 下一步可选
 
 - **加业务数据**：UI → Add Source → NAS（local file）/ Postgres / S3 等，让 LLM 跑真实业务 SQL

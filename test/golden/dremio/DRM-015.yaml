@@ -1,0 +1,16 @@
+id: DRM-015
+version: 1
+layer: L2
+description: NL 数 INFORMATION_SCHEMA.COLUMNS 字段数
+prompt: |
+  用 dremio 工具查 INFORMATION_SCHEMA.COLUMNS 这张表本身有几个字段（也就是 schema）。
+expected:
+  must_mention:
+    - COLUMN_NAME 或 column_name
+    - DATA_TYPE 或 data_type
+  tool_calls:
+    must_invoke:
+      - GetSchemaOfTable 或 RunSqlQuery
+  rubric: |
+    INFORMATION_SCHEMA.COLUMNS 是 SQL 标准元表，含 ~20 字段（COLUMN_NAME/DATA_TYPE/IS_NULLABLE 等）。
+    answer 至少含 2 个核心字段名。
