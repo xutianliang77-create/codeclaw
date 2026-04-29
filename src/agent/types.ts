@@ -51,6 +51,9 @@ export interface EngineMessage {
   /** role: "assistant" 时可填：reasoning 模型的思考过程（OpenAI delta.reasoning_content / reasoning）；
    *  与 text（最终答案）分离存储，避免在 provider replay / autoCompact / token budget 中污染 */
   reasoning?: string;
+  /** v0.8.5：codeclaw 内部注入的 LLM-only reminder（如 reasoning-only turn 重试提示），
+   *  UI 不应显示但 provider replay 必须包含。设 true 时 App.tsx 过滤掉不渲染。 */
+  hiddenFromUi?: boolean;
 }
 
 export interface PendingApprovalView {
@@ -213,6 +216,8 @@ export interface QueryEngine {
   interrupt(): void;
   subscribe(listener: () => void): () => void;
   getMessages(): EngineMessage[];
+  /** v0.8.5：UI 渲染用，过滤 hiddenFromUi 标记的内部 reminder（reasoning-only 重试等） */
+  getVisibleMessages(): EngineMessage[];
   getPendingApproval(): PendingApprovalView | null;
   getChannelSnapshot(): ChannelSessionSnapshot;
   getSessionId(): string;

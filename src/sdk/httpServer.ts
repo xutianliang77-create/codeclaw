@@ -126,7 +126,7 @@ export function createGatewayRequestHandler(options: {
         sessionId: finalEnvelope?.sessionId ?? options.queryEngine.getSessionId(),
         traceId: finalEnvelope?.traceId ?? null,
         channel: "http",
-        messages: options.queryEngine.getMessages(),
+        messages: options.queryEngine.getVisibleMessages(),
         pendingApproval: options.queryEngine.getPendingApproval()
       });
       return;

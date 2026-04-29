@@ -145,7 +145,7 @@ export function App({
   const [input, setInput] = useState("");
   const [banner, setBanner] = useState<string | null>(bootInfo.providerReason);
   const [runtimeState, setRuntimeState] = useState(initialRuntimeState);
-  const [messages, setMessages] = useState<EngineMessage[]>(queryEngine.getMessages());
+  const [messages, setMessages] = useState<EngineMessage[]>(queryEngine.getVisibleMessages());
   const [isRunning, setIsRunning] = useState(false);
   // P4.1（v0.7.0）：Mac+ink 5 单次 Enter 触发多个 useInput callback 同 React tick 内执行；
   // useState 守卫是异步 schedule，所有 callback 看到 isRunning=false 全通过 → 双发。
@@ -177,7 +177,7 @@ export function App({
   useEffect(() => {
     return queryEngine.subscribe(() => {
       setRuntimeState(queryEngine.getRuntimeState());
-      setMessages(queryEngine.getMessages());
+      setMessages(queryEngine.getVisibleMessages());
       setPendingApproval(queryEngine.getPendingApproval());
     });
   }, [queryEngine]);
@@ -256,7 +256,7 @@ export function App({
         workspace: bootInfo.workspace
       })
     );
-    setMessages(queryEngine.getMessages());
+    setMessages(queryEngine.getVisibleMessages());
     let turnErrorMessage: string | null = null;
 
     try {
@@ -418,7 +418,7 @@ export function App({
           : toolStatus
       );
       setRuntimeState(queryEngine.getRuntimeState());
-      const nextMessages = queryEngine.getMessages();
+      const nextMessages = queryEngine.getVisibleMessages();
       setMessages(
         turnErrorMessage
           ? [

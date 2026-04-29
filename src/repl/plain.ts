@@ -50,7 +50,7 @@ export async function runPlainRepl(options: {
 
   printBoot(bootInfo, queryEngine.getSessionId());
 
-  for (const message of queryEngine.getMessages()) {
+  for (const message of queryEngine.getVisibleMessages()) {
     printedMessageIds.add(message.id);
     printBlock(message.role, message.text);
   }
@@ -60,7 +60,7 @@ export async function runPlainRepl(options: {
       return;
     }
 
-    for (const message of queryEngine.getMessages()) {
+    for (const message of queryEngine.getVisibleMessages()) {
       if (printedMessageIds.has(message.id)) {
         continue;
       }
@@ -153,7 +153,7 @@ export async function runPlainRepl(options: {
         printBlock("assistant", assistantText);
       }
 
-      for (const message of queryEngine.getMessages()) {
+      for (const message of queryEngine.getVisibleMessages()) {
         printedMessageIds.add(message.id);
       }
     }

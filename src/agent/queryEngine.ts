@@ -1778,6 +1778,8 @@ class LocalQueryEngine implements QueryEngine {
                 "直接给出答案，不要再思考。",
               // 必须 "user" source，否则 getProviderMessages filter 把它丢掉，LLM 收不到 reminder
               source: "user",
+              // v0.8.5：UI 不显示这条系统注入的提示（是给 LLM 看的，不是用户输入）
+              hiddenFromUi: true,
             });
             this.notifyListeners();
             this.audit({
@@ -1831,6 +1833,8 @@ class LocalQueryEngine implements QueryEngine {
               `停止调用工具，直接根据已有信息给出最终答案。`,
             // 必须 "user" source，否则 getProviderMessages filter 把它丢掉，LLM 收不到 reminder
             source: "user",
+            // v0.8.5：UI 不显示这条系统注入的提示
+            hiddenFromUi: true,
           });
           this.notifyListeners();
           this.audit({
@@ -3723,6 +3727,13 @@ class LocalQueryEngine implements QueryEngine {
     return [...this.messages];
   }
 
+  // v0.8.5：UI 渲染用的 messages，过滤掉 hiddenFromUi（reasoning-only 重试 / max-tool-turns 等内部 reminder）。
+  // 这些 reminder 是给 LLM 看的（必须留在 this.messages 让 getProviderMessages 能拿到），
+  // 但不该出现在用户视图。CLI / Web 等 UI 端用此方法替代 getMessages。
+  getVisibleMessages(): EngineMessage[] {
+    return this.messages.filter((m) => !m.hiddenFromUi);
+  }
+
   getPendingApproval(): PendingApprovalView | null {
     const activeApproval = this.pendingApprovals[0];
 
@@ -3755,7 +3766,7 @@ class LocalQueryEngine implements QueryEngine {
 
     return {
       sessionId: this.sessionId,
-      messages: this.getMessages(),
+      messages: this.getVisibleMessages(),
       pendingApproval,
       pendingOrchestrationApproval,
       runtime: this.getRuntimeState()
