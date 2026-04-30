@@ -1187,3 +1187,37 @@ export async function handleCronInstallTemplate(
     });
   }
 }
+
+// GET /v1/web/charts/<sessionId>/<chartId>.svg
+// chart_render 工具产出的 SVG 由本路由从 ~/.codeclaw/charts/ 服务给前端 <img>。
+// 路径白名单：sessionId / chartId 只允许 [A-Za-z0-9_-]，文件名 .svg 后缀；防 path traversal。
+export async function handleChartGet(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  sessionId: string,
+  chartFile: string
+): Promise<void> {
+  if (!authenticate(req, res, deps)) return;
+  if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
+    return jsonResponse(res, 400, errorBody("bad-session", "invalid sessionId"));
+  }
+  if (!/^[a-zA-Z0-9_-]+\.svg$/.test(chartFile)) {
+    return jsonResponse(res, 400, errorBody("bad-chart-file", "invalid chart filename"));
+  }
+  const { defaultChartsRoot } = await import("../../agent/tools/chartTool");
+  const root = path.resolve(defaultChartsRoot());
+  const target = path.resolve(path.join(root, sessionId, chartFile));
+  if (target !== root && !target.startsWith(root + path.sep)) {
+    return jsonResponse(res, 400, errorBody("traversal", "path outside charts root"));
+  }
+  const { existsSync, readFileSync } = await import("node:fs");
+  if (!existsSync(target)) {
+    return jsonResponse(res, 404, errorBody("not-found", "chart not found"));
+  }
+  const svg = readFileSync(target, "utf8");
+  res.statusCode = 200;
+  res.setHeader("content-type", "image/svg+xml; charset=utf-8");
+  res.setHeader("cache-control", "private, max-age=300");
+  res.end(svg);
+}

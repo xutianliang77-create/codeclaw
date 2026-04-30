@@ -58,6 +58,7 @@ import {
   handleCronRuns,
   handleCronTemplates,
   handleCronInstallTemplate,
+  handleChartGet,
   type HandlerDeps,
 } from "./handlers";
 import { SessionStore } from "./sessionStore";
@@ -313,6 +314,18 @@ async function dispatch(
   const cronTaskMatch = /^\/v1\/web\/cron\/tasks\/([^/]+)$/.exec(url.pathname);
   if (cronTaskMatch && method === "DELETE") {
     return handleCronRemove(req, res, deps, decodeURIComponent(cronTaskMatch[1]));
+  }
+
+  // GET /v1/web/charts/<sessionId>/<chartId>.svg
+  const chartMatch = /^\/v1\/web\/charts\/([^/]+)\/([^/]+)$/.exec(url.pathname);
+  if (chartMatch && method === "GET") {
+    return handleChartGet(
+      req,
+      res,
+      deps,
+      decodeURIComponent(chartMatch[1]),
+      decodeURIComponent(chartMatch[2])
+    );
   }
 
   // P3.2（v0.7.0 起）：根路径 / 和 /next/ 都服务新 React 版（dist/public-react）；

@@ -33,6 +33,7 @@
   "dependencies": {
     "@noble/hashes": "^2.2.0",
     "better-sqlite3": "^11.10.0",
+    "echarts": "^6.0.0",
     "gpt-tokenizer": "^2.9.0",
     "ink": "^5.2.1",
     "ink-select-input": "^6.2.0",

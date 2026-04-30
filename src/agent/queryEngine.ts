@@ -81,6 +81,7 @@ import { SubagentRegistry } from "./subagents/registry";
 import type { SubagentRunRecord } from "./subagents/registry";
 import { registerRagSearchTool } from "./tools/ragTool";
 import { registerGraphQueryTool } from "./tools/graphTool";
+import { registerChartTool } from "./tools/chartTool";
 import { runIndex, runSearch, runStatus, runClear, runEmbed, runHybridSearch, formatStatus } from "../rag/api";
 import {
   runBuild as runGraphBuild,
@@ -833,6 +834,12 @@ class LocalQueryEngine implements QueryEngine {
       // #76 M4 CodebaseGraph：注册 graph_query 让 LLM 查 callers / imports 等。
       if (process.env.CODECLAW_GRAPH !== "false") {
         registerGraphQueryTool(this.toolRegistry, { workspace: options.workspace });
+      }
+      // chart_render：把 dremio / 任何查询工具的行数据出图。env CODECLAW_CHART=false 关。
+      if (process.env.CODECLAW_CHART !== "false") {
+        registerChartTool(this.toolRegistry, {
+          sessionId: this.sessionId,
+        });
       }
     }
     // M3-04：lifecycle hooks 配置；缺省视为无 hook
